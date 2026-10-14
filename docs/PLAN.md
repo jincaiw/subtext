@@ -197,7 +197,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.0 | 大纲改 `Tree` | 阶段 7.7 顺延；`Tree` / `TreeState` 已提供 | ⏳ |
 | 8.1 | 分屏编辑器 | 菜单里 3 项，`h_resizable`/`v_resizable` 已提供 | ⏳ |
 | 8.2 | 文件夹查找 | 侧栏面板已在，缺查找逻辑 | ⏳ |
-| 8.3 | 多重替换 | 需要一张可编辑的规则表 | ⏳ |
+| 8.3 | 多重替换 | 需要一张可编辑的规则表 | ✅ |
 | 8.4 | 颜色代码编辑 | `ColorPicker` 组件已提供 | ✅ |
 | 8.5 | 按模式排序 | 纯逻辑，`subtext-core` 可测 | ✅ |
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
@@ -288,11 +288,62 @@ SubText 用对话框，因此面板打开期间无法改动插入点。面板内
 `KeyPathComparator(\.contents, comparator: .localized)`，依赖 ICU 的 locale 感知排序；
 Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明原因，不假装生效。
 
-## 阶段 9 — 验证与发布 v0.2.0 ⏳
+### 8.3 多重替换 ✅
 
+上游 *Find ▸ Multiple Replace ▸ Manage Multiple Replace…* 打开一个浮动面板：
+左边是命名规则集的侧栏，右边是一张规则表（启用勾选、查找、替换为、`RE`、`IC`、
+描述六列），表下是 *Highlight All* / *Replace All* / *In Selection* / 结果行 /
+高级选项按钮。
+
+本轮把**规则表本身**完整移植，分两层：
+
+1. **模型**（`subtext-core/src/multireplace.rs`，移植自 `MultipleReplace.swift`
+   与 `MultipleReplace+TSV.swift`）：
+   - `Replacement` 六字段与上游逐一对应，默认值一致（`is_enabled` 默认 `true`，
+     `description` 是 `Option<String>` 而不是空串——上游用 `nil` 区分「没有描述」
+     与「空描述」，这个区别决定一条规则算不算「有内容」）；
+   - `Settings` 保留上游 *Advanced Find Options* 的全部八个开关。其中四个生效
+     （`matchesFullWord` / `isSingleLine` / `isMultiline` / `unescapesReplacementString`），
+     四个是**引擎已经做出的决定**（严格比较、忽略变音符号、忽略宽度、Unicode 词边界），
+     在面板里渲染为 **disabled + 原因**，不假装可切换；
+   - `replace()` 按顺序跑启用规则，每条看到上一条的输出；`find()` 则**每条都搜原文**
+     再拼接——这个不对称是上游的，也是两个方法并存的原因；
+   - 非法规则（查找串为空、正则不编译）**静默跳过**，`validate()` 是另一个问题，
+     它连禁用的规则一起检查；
+   - `unescaped_template` 覆盖 Swift 字面量的七种转义。**一处表示不同**：`\\` 在
+     这里收敛成单个反斜杠，因为 `regex` 的模板引擎不像 ICU 那样消费反斜杠，
+     照抄上游的中间表示会输出两个；
+   - TSV 导入：每行取前两个 tab 字段、首字段为空或字段不足即丢弃。
+2. **面板**（`crates/subtext-app/src/multiple_replace_sheet.rs`）：
+   六列表格（表头 `Find` / `Replace With` / `RE` / `IC` / `Description`，启用列
+   留空，与 storyboard 一致）、`+` / `−` 增删、`Advanced` 高级选项、
+   *Highlight All* / *Replace All* / *In Selection*、结果行（`N matches` /
+   `N replaced`）。每行是独立 entity，行的字段**就是**它的 `InputState`，
+   所以输入时只有这一行重绘（警示图标随打随变），整表不动。
+
+**接线**：`"ShowMultipleReplace"` → `Workspace::multiple_replace_dialog()`；
+`apply_multiple_replace()` 走 `window.defer` 落文本（保留编辑器自己的撤销历史），
+`highlight_multiple_replace()` 把命中范围交给查找栏的同一通道，之后
+*Find Next* 可以继续在其中步进。
+
+**已知偏差（记账）**：
+
+1. 上游的侧栏（命名规则集、导入导出、重命名）属于 `ReplacementManager` 的职责，
+   本轮不做；因此规则不落盘，只活在面板打开期间。
+2. 高级选项在面板内**内联展开**（`Collapsible`）而非 popover：popover 锚在面板内的
+   控件上，而面板本身是模态对话框，遮罩会吃掉打开它的那一次点击。
+3. 非法规则的说明文字放在表下（红色），上游放在警示图标的 tooltip 里——
+   gpui-kit 的 `.tooltip()` 只挂在组件上，普通 `div` 没有。
+4. 上游的面板是窗口，靠标题栏关闭；SubText 用对话框，因此补了一个 `Done` 页脚按钮。
+5. 面板打开时带一条空规则。上游可以为空（侧栏已经建好了一个定义），SubText 没有
+   侧栏，空表读起来像坏了。删掉最后一条会补回一条空规则——这是上游自己的行为。
+6. *Highlight All* 只报告命中数并把范围交给查找栏，不绘制高亮——与 SubText 的
+   *Find All* 现状一致（编辑器目前没有搜索高亮的绘制通道）。
+
+## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（175 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（208 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |

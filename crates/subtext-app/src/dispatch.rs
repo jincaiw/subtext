@@ -328,7 +328,7 @@ impl Workspace {
             "CenterSelectionInVisibleArea" => self.notice("Jumped to the selection", cx),
             "ReplaceAndFindNext" => self.replace_and_find_next(window, cx),
             "ReplaceAll" => self.replace_all(window, cx),
-            "ShowMultipleReplace" => self.notice("Multiple Replace is not implemented yet", cx),
+            "ShowMultipleReplace" => self.multiple_replace_dialog(window, cx),
             "HighlightAll" => self.highlight_all(cx),
             "RemoveHighlights" => self.clear_highlights(cx),
             "OpenOutlineMenu" => self.show_inspector(InspectorPane::Outline, cx),

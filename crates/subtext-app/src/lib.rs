@@ -36,6 +36,7 @@ pub mod dispatch;
 pub mod highlighter;
 pub mod keymap;
 pub mod menu;
+pub mod multiple_replace_sheet;
 pub mod outline;
 pub mod resources;
 pub mod settings;

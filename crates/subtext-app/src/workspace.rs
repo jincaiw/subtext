@@ -30,6 +30,7 @@ use gpui_kit::AnyWindowHandle;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
+    dialog::{DialogClose, DialogFooter},
     h_flex,
     input::{Editor, Input, InputState},
     tab::{Tab, TabBar},
@@ -42,13 +43,17 @@ use gpui_kit::{
     Styled as _, Subscription, WeakEntity, Window, WindowOptions, div, px,
 };
 
-use subtext_core::{Document, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder, textops};
+use subtext_core::{
+    Document, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder, multireplace,
+    textops,
+};
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
 use crate::dialogs::AboutView;
 use crate::highlighter;
+use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::settings::{InspectorPane, Settings, SidebarPane};
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
@@ -734,6 +739,105 @@ impl Workspace {
             }
         });
         self.set_status(format!("Inserted {code}"), cx);
+    }
+
+    // ---- multiple replace -------------------------------------------------
+
+    /// The *Multiple Replace* sheet.
+    ///
+    /// CotEditor's panel is a window with a sidebar of named rule sets; SubText
+    /// opens the rule table alone, as a dialog, because there is no set to name
+    /// and no file to keep it in yet.
+    pub fn multiple_replace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = Workspace::weak(cx);
+        let sheet = cx.new(|cx| MultipleReplaceSheet::new(workspace, window, cx));
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .title("Multiple Replace")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 34.)
+                .child(sheet.clone())
+                // The panel upstream is a window, and its way out is the window's
+                // close button. A dialog needs the same affordance spelled out,
+                // and `DialogClose` is the component that owns dismissing one.
+                .footer(
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Done"))),
+                )
+                // Enter reaches the dialog's confirm action, and there is
+                // nothing here for it to confirm: *Replace All* is the button
+                // that does the work, and it says so on its own.
+                .on_ok(|_, _, _| false)
+        });
+    }
+
+    /// Run the *Multiple Replace* rules over the active document.
+    ///
+    /// Returns how many matches were replaced, or `None` when there is no
+    /// document to run them over. The sheet shows the number; the status bar
+    /// gets it too, so the outcome is not lost if the sheet is behind.
+    pub fn apply_multiple_replace(
+        &mut self,
+        definition: &multireplace::MultipleReplace,
+        in_selection: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        let text = self.active_text(cx)?;
+        let selection = self.active_selection(cx);
+        let line_ending = self.active_document().map(|document| document.document.line_ending());
+
+        let multireplace::Outcome { string, selected_range, count } =
+            definition.replace(&text, selection, in_selection, line_ending);
+        if count == 0 {
+            self.set_status("No matches", cx);
+            return Some(0);
+        }
+
+        let editor = self.documents.get(self.active)?.editor.clone();
+        // Deferred for the same reason every other text change is: `replace_all`
+        // emits `Change`, and the subscription that follows the buffer back into
+        // the document model must not run inside this update.
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |state, cx| {
+                state.replace_all(string, window, cx);
+                // Only a batch confined to a selection reports one; upstream
+                // leaves the caret alone when the rules ran over the whole
+                // document.
+                if let Some(range) = selected_range {
+                    state.set_selected_range(range, cx);
+                }
+            });
+        });
+        self.set_status(format!("Replaced {count} occurrence(s)"), cx);
+        Some(count)
+    }
+
+    /// Paint every match the *Multiple Replace* rules describe.
+    ///
+    /// Returns how many matches were found, or `None` when there is no
+    /// document. The ranges go into the same channel the find bar uses, so
+    /// *Find Next* steps through them afterwards — SubText's find bar does not
+    /// paint its own matches either, and painting them here would be the first
+    /// highlight in the application that nothing can turn off.
+    pub fn highlight_multiple_replace(
+        &mut self,
+        definition: &multireplace::MultipleReplace,
+        in_selection: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        let text = self.active_text(cx)?;
+        let selection = self.active_selection(cx);
+        let mut ranges = definition.find(&text, selection, in_selection);
+        // `find` hands back the hits in rule order, which is the order upstream
+        // returns them in; the caller that paints them sorts them first.
+        ranges.sort_by_key(|range| range.start);
+        let count = ranges.len();
+        self.find.matches = ranges;
+        self.find.current = None;
+        cx.notify();
+        Some(count)
     }
 
     /// Select the word under the caret, as ⌘D does.

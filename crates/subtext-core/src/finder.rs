@@ -1,5 +1,8 @@
-//! Find and replace, including the regex flavour behind CotEditor's
-//! **Find** menu and its Multiple Replace sheet.
+//! Find and replace for the find bar: one query, one replacement, in the
+//! flavour CotEditor's **Find** menu uses.
+//!
+//! The *Multiple Replace* sheet runs a whole table of rules instead, and its
+//! model lives in [`crate::multireplace`].
 
 use std::ops::Range;
 
@@ -250,37 +253,6 @@ pub fn replace_one(
     (out, caret)
 }
 
-/// One rule of the Multiple Replace sheet.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ReplaceRule {
-    pub name: String,
-    pub find: String,
-    pub replacement: String,
-    pub regex: bool,
-    pub case_sensitive: bool,
-    #[serde(default)]
-    pub enabled: bool,
-}
-
-/// Apply an ordered list of rules, each seeing the previous rule's output.
-pub fn apply_rules(text: &str, rules: &[ReplaceRule]) -> Result<(String, usize), regex::Error> {
-    let mut current = text.to_string();
-    let mut total = 0;
-    for rule in rules.iter().filter(|r| r.enabled) {
-        let options = FindOptions {
-            regex: rule.regex,
-            case_sensitive: rule.case_sensitive,
-            ..Default::default()
-        };
-        let searcher = Searcher::new(&rule.find, &options)?;
-        let scope = 0..current.len();
-        let (next, count) = replace_all(&current, &searcher, &rule.replacement, ReplacementSyntax::Regex, &scope);
-        current = next;
-        total += count;
-    }
-    Ok((current, total))
-}
-
 /// Whether `delimiters` can be used to comment out a document.
 pub fn supports_comments(delimiters: &CommentDelimiters) -> bool {
     delimiters.inline.is_some() || delimiters.block.is_some()
@@ -364,46 +336,6 @@ mod tests {
         let (replaced, _) =
             replace_all("x", &searcher, "$1", ReplacementSyntax::Literal, &(0..1));
         assert_eq!(replaced, "$1");
-    }
-
-    #[test]
-    fn multiple_replace_rules_chain() {
-        let rules = vec![
-            ReplaceRule {
-                name: "trim".into(),
-                find: r"\s+$".into(),
-                replacement: "".into(),
-                regex: true,
-                case_sensitive: true,
-                enabled: true,
-            },
-            ReplaceRule {
-                name: "tabs".into(),
-                find: r"\t".into(),
-                replacement: "  ".into(),
-                regex: true,
-                case_sensitive: true,
-                enabled: true,
-            },
-        ];
-        let (result, count) = apply_rules("a\tb  \nc", &rules).unwrap();
-        assert_eq!(result, "a  b\nc");
-        assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn disabled_rules_are_skipped() {
-        let rules = vec![ReplaceRule {
-            name: "off".into(),
-            find: "a".into(),
-            replacement: "b".into(),
-            regex: false,
-            case_sensitive: false,
-            enabled: false,
-        }];
-        let (result, count) = apply_rules("aaa", &rules).unwrap();
-        assert_eq!(result, "aaa");
-        assert_eq!(count, 0);
     }
 
     #[test]

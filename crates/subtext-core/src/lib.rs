@@ -13,16 +13,16 @@ pub mod document;
 pub mod encoding;
 pub mod finder;
 pub mod line_ending;
+pub mod multireplace;
 pub mod textops;
 
 pub use charinfo::{CharacterCount, CharacterInfo};
 pub use colorcode::{Color, ColorCodeType};
 pub use document::{Document, DocumentError, FileStatus};
 pub use encoding::{Bom, DecodedFile, Detection, TextEncoding};
-pub use finder::{
-    FindOptions, ReplaceRule, ReplacementSyntax, Searcher, apply_rules, replace_all, replace_one,
-};
+pub use finder::{FindOptions, ReplacementSyntax, Searcher, replace_all, replace_one};
 pub use line_ending::LineEnding;
+pub use multireplace::{MultipleReplace, Outcome, PatternError, Replacement, Settings};
 pub use textops::{
     CaseTransform, CommentDelimiters, Edit, LogicalLine, Normalization, SortKey, SortKeyError,
     SortOptions, SymbolPair, WidthTransform,
