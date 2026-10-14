@@ -2606,6 +2606,9 @@ impl Workspace {
         // workspace's, so it reaches the workspace through a weak handle rather
         // than through `cx.listener`.
         let workspace = cx.entity().downgrade();
+        // The saved *Wrap Lines* preference, which the menu shows but cannot
+        // act on — see the item's comment below.
+        let wraps = self.settings.outline_wraps_lines;
 
         h_flex()
             .w_full()
@@ -2630,11 +2633,16 @@ impl Workspace {
                         let smaller = workspace.clone();
                         let reset = workspace.clone();
                         menu
-                            // Upstream's *Wrap Lines* toggle. It is shown, so the
-                            // menu reads the same, but it cannot be honoured: the
-                            // rows of a virtualized list are all one height. See
-                            // the Outline section of `docs/PLAN.md`.
-                            .item(PopupMenuItem::new("Wrap Lines").disabled(true))
+                            // Upstream's *Wrap Lines* toggle, shown with the
+                            // saved preference and disabled: the rows of a
+                            // virtualized list are all one height, so a wrapped
+                            // row cannot be laid out. See the Outline section of
+                            // `docs/PLAN.md`.
+                            .item(
+                                PopupMenuItem::new("Wrap Lines")
+                                    .checked(wraps)
+                                    .disabled(true),
+                            )
                             .separator()
                             .label("Text Size")
                             .item(PopupMenuItem::new("Bigger").on_click(
