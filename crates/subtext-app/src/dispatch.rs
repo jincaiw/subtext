@@ -157,7 +157,7 @@ impl Workspace {
             "RunToolbarCustomizationPalette" => {
                 self.notice("The toolbar is not user-customisable yet", cx)
             }
-            "ShowQuickActions" => self.notice("Quick Actions are not implemented yet", cx),
+            "ShowQuickActions" => self.show_quick_actions(window, cx),
             "ShowFileBrowser" => self.show_sidebar(SidebarPane::FileBrowser, cx),
             "ShowFolderFinder" => self.show_sidebar(SidebarPane::FolderFind, cx),
             "ToggleSidebar" => {

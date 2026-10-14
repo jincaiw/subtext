@@ -31,6 +31,7 @@
 pub mod actions;
 pub mod bridge;
 pub mod color_sheet;
+pub mod command_bar;
 pub mod dialogs;
 pub mod dispatch;
 pub mod folder_find;
@@ -129,7 +130,7 @@ fn open_main_window(
         let workspace = cx.new(|cx| {
             Workspace::new(syntaxes, themes, settings, window, cx)
         });
-        bridge::register(workspace.downgrade(), cx);
+        bridge::register(workspace.downgrade(), window.window_handle(), cx);
         workspace
     });
 

@@ -51,7 +51,7 @@ use gpui_kit::{
     Anchor, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
-    WindowOptions, div, hsla, px,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px,
 };
 
 use subtext_core::{
@@ -62,6 +62,7 @@ use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
+use crate::command_bar::{self, CommandBar};
 use crate::dialogs::AboutView;
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
@@ -235,6 +236,9 @@ pub struct Workspace {
     loading: bool,
     settings_window: Option<AnyWindowHandle>,
     about_window: Option<AnyWindowHandle>,
+    /// The Quick Actions bar, while it is up. It is a panel over this window
+    /// rather than part of it, so it is tracked the way the settings window is.
+    quick_actions_window: Option<AnyWindowHandle>,
     /// The colour the *Edit Color Code* panel opens on when the caret is not on
     /// a colour code.
     ///
@@ -367,6 +371,7 @@ impl Workspace {
             loading: false,
             settings_window: None,
             about_window: None,
+            quick_actions_window: None,
             last_color_code_color: colorcode::Color::BLACK,
             outline_tree,
             outline_filter,
@@ -2284,6 +2289,68 @@ impl Workspace {
             Ok(handle) => self.about_window = Some(handle.into()),
             Err(error) => self.set_status(error.to_string(), cx),
         }
+    }
+
+    /// The Quick Actions bar — CotEditor's ⌘K.
+    ///
+    /// A floating panel over this window, sized to its content and centred, as
+    /// upstream's `NSPanel` is. It is opened the way the settings window is,
+    /// and for the same reason: `open_window` builds and draws the new root
+    /// view before it returns, and this is reached from inside
+    /// `Workspace::update`, which has the workspace leased and therefore
+    /// unreadable. Deferring the whole thing to the end of the effect cycle is
+    /// what makes the new view's read of the workspace legal.
+    pub fn show_quick_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(handle) = self.quick_actions_window {
+            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+                return;
+            }
+            self.quick_actions_window = None;
+        }
+
+        let workspace = cx.entity();
+        let weak = workspace.downgrade();
+        // The panel runs its commands against *this* window, whichever window
+        // happens to be key when a command is confirmed.
+        let document_window = window.window_handle();
+        // The panel is as tall as its content, so it opens at the height of an
+        // empty bar and grows as the query brings results in. The metrics come
+        // from this window because the two share a theme.
+        let bounds = WindowBounds::centered(
+            gpui_kit::size(
+                window.rem_size() * command_bar::WIDTH,
+                command_bar::window_height(0, window),
+            ),
+            cx,
+        );
+        let options = WindowOptions {
+            window_bounds: Some(bounds),
+            // Upstream's panel hides all three window buttons, hides its
+            // title, and lets the whole surface drag the panel. `titlebar:
+            // None` is the one style mask that leaves the buttons off.
+            titlebar: None,
+            kind: WindowKind::Floating,
+            // The panel draws its own rounded surface, so the window behind it
+            // has to be see-through at the corners.
+            window_background: WindowBackgroundAppearance::Transparent,
+            is_resizable: false,
+            ..Default::default()
+        };
+
+        cx.defer(move |cx| {
+            // Nothing to attach the panel to if the workspace has gone.
+            if weak.upgrade().is_none() {
+                return;
+            }
+            let root = weak.clone();
+            let opened = cx.open_window(options, move |window, cx| {
+                cx.new(|cx| CommandBar::new(root, document_window, window, cx))
+            });
+            workspace.update(cx, |workspace, cx| match opened {
+                Ok(handle) => workspace.quick_actions_window = Some(handle.into()),
+                Err(error) => workspace.set_status(error.to_string(), cx),
+            });
+        });
     }
 
     // ---- rendering -------------------------------------------------------

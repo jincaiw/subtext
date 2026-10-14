@@ -12,7 +12,7 @@
 //! no registration would show up as a dead menu entry rather than as a
 //! command that reports its own absence.
 
-use gpui_kit::{App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
+use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
 use crate::actions;
 use crate::workspace::Workspace;
@@ -29,24 +29,34 @@ macro_rules! bind_actions {
     };
 }
 
-/// Every workspace this process has opened, newest last.
+/// Every workspace this process has opened, newest last, each with the window
+/// it lives in.
 ///
 /// A `Global` rather than a field on some view, because a menu command is
 /// dispatched to the application, not to a window: the handler has to be able
 /// to find the views from the `App` alone.
+///
+/// The window is recorded here rather than looked up with `App::active_window`
+/// because a command has to be answered by the window the user is editing in,
+/// and the key window is not always that one: the settings window and the
+/// Quick Actions panel are both separate windows that take the keyboard, and a
+/// command run from either of them still belongs to the document behind it.
 #[derive(Default)]
-struct Workspaces(Vec<WeakEntity<Workspace>>);
+struct Workspaces(Vec<(WeakEntity<Workspace>, AnyWindowHandle)>);
 
 impl Global for Workspaces {}
 
-/// Record a workspace so the global handlers can reach it.
-pub fn register(workspace: WeakEntity<Workspace>, cx: &mut App) {
+/// Record a workspace, and the window it lives in, so the global handlers can
+/// reach it.
+pub fn register(workspace: WeakEntity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
     if !cx.has_global::<Workspaces>() {
         cx.set_global(Workspaces::default());
     }
     cx.update_global::<Workspaces, _>(|registry, _| {
-        registry.0.retain(|existing| existing.entity_id() != workspace.entity_id());
-        registry.0.push(workspace);
+        registry
+            .0
+            .retain(|(existing, _)| existing.entity_id() != workspace.entity_id());
+        registry.0.push((workspace, window));
     });
 }
 
@@ -75,19 +85,19 @@ pub fn insert_snippet(id: u64, cx: &mut App) {
 /// oldest one that can handle the command wins — which for every command here
 /// means the only window there is. A workspace that returns `false` says the
 /// command is not its business, and the search goes on.
+///
+/// Each command runs against its own workspace's window, never the key window:
+/// see [`Workspaces`].
 fn run(
     cx: &mut App,
     command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) -> bool,
 ) {
-    let Some(window) = cx.active_window() else {
-        return;
-    };
-    let workspaces: Vec<WeakEntity<Workspace>> = cx
+    let workspaces: Vec<(WeakEntity<Workspace>, AnyWindowHandle)> = cx
         .try_global::<Workspaces>()
         .map(|registry| registry.0.clone())
         .unwrap_or_default();
 
-    for workspace in workspaces {
+    for (workspace, window) in workspaces {
         let handled = window.update(cx, |_, window, cx| {
             workspace
                 .update(cx, |workspace, cx| command(workspace, window, cx))

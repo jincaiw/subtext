@@ -422,6 +422,286 @@ pub fn app_menus() -> Vec<Menu> {
     ]
 }
 
+/// A command in the menu bar, as the Quick Actions bar sees it.
+///
+/// CotEditor builds that list by walking the live `NSMenu`, which is also
+/// where the items it fills in at runtime come from. GPUI can set a menu
+/// but not read one back — `App::get_menus` returns `None` on every real
+/// platform — so the bar reads this table instead. It is generated from
+/// the same source as the menu bar itself, so the two cannot disagree
+/// about what the menu holds.
+pub struct Command {
+    /// Where the command sits, e.g. `Format > Syntax`.
+    ///
+    /// Spelled the way [`crate::keymap::SHORTCUTS`] spells it, which is
+    /// what lets a command be joined to its shortcut.
+    pub path: &'static str,
+    /// The last segment of the action's path, which is the vocabulary
+    /// `Workspace::dispatch` speaks.
+    pub action: &'static str,
+}
+
+/// The name the application menu is shown under.
+///
+/// A command's path is spelled with the source application's name so that
+/// it matches [`crate::keymap::SHORTCUTS`]; this is what a display has to
+/// substitute for it.
+pub const APP_MENU_TITLE: &str = "SubText";
+
+/// Every command in the menu bar, in menu order.
+///
+/// The greyed placeholders are not here: CotEditor fills those in from the
+/// system or at runtime, and its Quick Actions bar lists only the items
+/// that are enabled.
+pub const COMMANDS: &[Command] = &[
+    Command { path: "CotEditor > About CotEditor", action: "ShowAboutPanel" },
+    Command { path: "CotEditor > Donate to CotEditor…", action: "ShowDonationWindow" },
+    Command { path: "CotEditor > Settings…", action: "ShowSettingsWindow" },
+    Command { path: "CotEditor > Hide CotEditor", action: "Hide" },
+    Command { path: "CotEditor > Hide Others", action: "HideOtherApplications" },
+    Command { path: "CotEditor > Show All", action: "UnhideAllApplications" },
+    Command { path: "CotEditor > Quit CotEditor", action: "Terminate" },
+    Command { path: "File > New", action: "NewDocument" },
+    Command { path: "File > New Window", action: "NewDocumentAsWindow" },
+    Command { path: "File > New Tab", action: "NewDocumentAsTab" },
+    Command { path: "File > Open…", action: "OpenDocument" },
+    Command { path: "File > Open Recent > Clear Menu", action: "ClearRecentDocuments" },
+    Command { path: "File > Close", action: "PerformClose" },
+    Command { path: "File > Save", action: "SaveDocument" },
+    Command { path: "File > Save As…", action: "SaveDocumentAs" },
+    Command { path: "File > Revert to Saved", action: "RevertDocumentToSaved" },
+    Command { path: "File > Show in Finder", action: "ShowInFinder" },
+    Command { path: "File > Copy File Path", action: "CopyPath" },
+    Command { path: "File > Share…", action: "ShareDocument" },
+    Command { path: "File > Page Setup…", action: "RunPageLayout" },
+    Command { path: "File > Print…", action: "PrintDocument" },
+    Command { path: "Edit > Undo", action: "Undo" },
+    Command { path: "Edit > Redo", action: "Redo" },
+    Command { path: "Edit > Cut", action: "Cut" },
+    Command { path: "Edit > Copy", action: "Copy" },
+    Command { path: "Edit > Copy as Rich Text", action: "CopyWithStyle" },
+    Command { path: "Edit > Paste", action: "Paste" },
+    Command { path: "Edit > Paste Exactly", action: "PasteAsIs" },
+    Command { path: "Edit > Delete", action: "Delete" },
+    Command { path: "Edit > Select > Select All", action: "SelectAll" },
+    Command { path: "Edit > Select > Select Line", action: "SelectParagraph" },
+    Command { path: "Edit > Select > Select Word", action: "SelectWord" },
+    Command { path: "Edit > Select > Select Enclosing Symbols", action: "SelectEnclosingSymbols" },
+    Command { path: "Edit > Select > Select Column Up", action: "SelectColumnUp" },
+    Command { path: "Edit > Select > Select Column Down", action: "SelectColumnDown" },
+    Command { path: "Edit > Select > Split Selection by Lines", action: "SplitSelectionByLines" },
+    Command { path: "Edit > Complete", action: "Complete" },
+    Command { path: "Edit > Insert Backslash", action: "InputBackSlash" },
+    Command { path: "Edit > Insert Yen Mark", action: "InputYenMark" },
+    Command { path: "Edit > Insert by Unicode Code Point…", action: "ShowUnicodeInputPanel" },
+    Command {
+        path: "Edit > Spelling and Grammar > Show Spelling and Grammar",
+        action: "ShowGuessPanel",
+    },
+    Command { path: "Edit > Spelling and Grammar > Check Document Now", action: "CheckSpelling" },
+    Command {
+        path: "Edit > Spelling and Grammar > Check Spelling While Typing",
+        action: "ToggleContinuousSpellChecking",
+    },
+    Command {
+        path: "Edit > Spelling and Grammar > Check Grammar With Spelling",
+        action: "ToggleGrammarChecking",
+    },
+    Command {
+        path: "Edit > Spelling and Grammar > Correct Spelling Automatically",
+        action: "ToggleAutomaticSpellingCorrection",
+    },
+    Command { path: "Edit > Substitutions > Replace Quotes", action: "ReplaceQuotesInSelection" },
+    Command {
+        path: "Edit > Substitutions > Straighten Quotes",
+        action: "StraightenQuotesInSelection",
+    },
+    Command { path: "Edit > Substitutions > Replace Dashes", action: "ReplaceDashesInSelection" },
+    Command { path: "Edit > Substitutions > Replace Text", action: "ReplaceTextInSelection" },
+    Command {
+        path: "Edit > Substitutions > Show Substitutions",
+        action: "OrderFrontSubstitutionsPanel",
+    },
+    Command { path: "Edit > Substitutions > Smart Copy/Paste", action: "ToggleSmartInsertDelete" },
+    Command {
+        path: "Edit > Substitutions > Smart Quotes",
+        action: "ToggleAutomaticQuoteSubstitution",
+    },
+    Command {
+        path: "Edit > Substitutions > Smart Dashes",
+        action: "ToggleAutomaticDashSubstitution",
+    },
+    Command {
+        path: "Edit > Substitutions > Text Replacement",
+        action: "ToggleAutomaticTextReplacement",
+    },
+    Command { path: "Edit > Speech > Start Speaking", action: "StartSpeaking" },
+    Command { path: "Edit > Speech > Stop Speaking", action: "StopSpeaking" },
+    Command { path: "Format > Reset Syntax Analysis", action: "RecolorAll" },
+    Command { path: "Format > Font > Show Fonts", action: "OrderFrontFontPanel" },
+    Command { path: "Format > Font > Standard", action: "MakeFontStandard" },
+    Command { path: "Format > Font > Monospaced", action: "MakeFontMonospaced" },
+    Command { path: "Format > Font > Bigger", action: "BiggerFont" },
+    Command { path: "Format > Font > Smaller", action: "SmallerFont" },
+    Command { path: "Format > Font > Reset to Default", action: "ResetFont" },
+    Command { path: "Format > Font > Antialias", action: "ToggleAntialias" },
+    Command { path: "Format > Font > Ligatures", action: "ToggleLigatures" },
+    Command { path: "Format > Tab Width > 2", action: "ChangeTabWidth" },
+    Command { path: "Format > Tab Width > 4", action: "ChangeTabWidth" },
+    Command { path: "Format > Tab Width > 8", action: "ChangeTabWidth" },
+    Command { path: "Format > Tab Width > Custom…", action: "CustomizeTabWidth" },
+    Command {
+        path: "Format > Tab Width > Use Spaces for Indentation",
+        action: "ToggleAutoTabExpand",
+    },
+    Command { path: "Format > Show Invisibles", action: "ToggleInvisibleChars" },
+    Command { path: "Format > Show Indent Guides", action: "ToggleIndentGuides" },
+    Command { path: "Format > Show Page Guide", action: "TogglePageGuide" },
+    Command {
+        path: "Format > Writing Direction > Horizontal",
+        action: "MakeLayoutOrientationHorizontal",
+    },
+    Command {
+        path: "Format > Writing Direction > Vertical",
+        action: "MakeLayoutOrientationVertical",
+    },
+    Command {
+        path: "Format > Writing Direction > Left to Right",
+        action: "MakeWritingDirectionLeftToRight",
+    },
+    Command {
+        path: "Format > Writing Direction > Right to Left",
+        action: "MakeWritingDirectionRightToLeft",
+    },
+    Command { path: "Format > Wrap Lines", action: "ToggleLineWrap" },
+    Command { path: "Format > Prevent Editing", action: "ToggleEditable" },
+    Command { path: "View > Show Tab Bar", action: "ToggleTabBar" },
+    Command { path: "View > Hide Toolbar", action: "ToggleToolbarShown" },
+    Command { path: "View > Customize Toolbar…", action: "RunToolbarCustomizationPalette" },
+    Command { path: "View > Show Quick Actions…", action: "ShowQuickActions" },
+    Command { path: "View > Sidebar > File Browser", action: "ShowFileBrowser" },
+    Command { path: "View > Sidebar > Folder Find", action: "ShowFolderFinder" },
+    Command { path: "View > Sidebar > Show Sidebar", action: "ToggleSidebar" },
+    Command { path: "View > Inspector > Document Inspector", action: "ShowDocumentInspector" },
+    Command { path: "View > Inspector > Outline", action: "ShowOutlineInspector" },
+    Command { path: "View > Inspector > Warnings", action: "ShowWarningsInspector" },
+    Command { path: "View > Inspector > Show Inspector", action: "ToggleInspector" },
+    Command { path: "View > Show Navigation Bar", action: "ToggleNavigationBar" },
+    Command { path: "View > Show Line Numbers", action: "ToggleLineNumber" },
+    Command { path: "View > Show Status Bar", action: "ToggleStatusBar" },
+    Command { path: "View > Move Focus to Next Editor", action: "FocusNextEditor" },
+    Command { path: "View > Move Focus to Previous Editor", action: "FocusPreviousEditor" },
+    Command { path: "View > Split Editor", action: "OpenSplitTextView" },
+    Command { path: "View > Close Split Editor", action: "CloseSplitTextView" },
+    Command { path: "View > Stack Editors Vertically", action: "ToggleSplitOrientation" },
+    Command { path: "View > Enter Full Screen", action: "ToggleFullScreen" },
+    Command { path: "Text > Insert Snippet > Edit Snippets…", action: "ShowSnippetEditor" },
+    Command { path: "Text > Comment > Toggle Comment", action: "ToggleComment" },
+    Command { path: "Text > Comment > Inline Comment", action: "InlineCommentOut" },
+    Command { path: "Text > Comment > Block Comment", action: "BlockCommentOut" },
+    Command { path: "Text > Comment > Uncomment", action: "Uncomment" },
+    Command { path: "Text > Indentation > Shift Right", action: "ShiftRight" },
+    Command { path: "Text > Indentation > Shift Left", action: "ShiftLeft" },
+    Command {
+        path: "Text > Indentation > Convert Indentation to Spaces",
+        action: "ConvertIndentationToSpaces",
+    },
+    Command {
+        path: "Text > Indentation > Convert Indentation to Tabs",
+        action: "ConvertIndentationToTabs",
+    },
+    Command {
+        path: "Text > Surround Selection With > Single Quotes",
+        action: "SurroundSelectionWithSingleQuotes",
+    },
+    Command {
+        path: "Text > Surround Selection With > Double Quotes",
+        action: "SurroundSelectionWithDoubleQuotes",
+    },
+    Command {
+        path: "Text > Surround Selection With > Parentheses",
+        action: "SurroundSelectionWithParentheses",
+    },
+    Command {
+        path: "Text > Surround Selection With > Braces",
+        action: "SurroundSelectionWithBraces",
+    },
+    Command {
+        path: "Text > Surround Selection With > Brackets",
+        action: "SurroundSelectionWithSquareBrackets",
+    },
+    Command { path: "Text > Surround Selection With > Custom…", action: "SurroundSelection" },
+    Command { path: "Text > Trim Trailing Whitespace", action: "TrimTrailingWhitespace" },
+    Command { path: "Text > Lines > Move Up", action: "MoveLineUp" },
+    Command { path: "Text > Lines > Move Down", action: "MoveLineDown" },
+    Command { path: "Text > Lines > Sort", action: "SortLinesAscending" },
+    Command { path: "Text > Lines > Sort by Pattern…", action: "PatternSort" },
+    Command { path: "Text > Lines > Reverse", action: "ReverseLines" },
+    Command { path: "Text > Lines > Shuffle", action: "ShuffleLines" },
+    Command { path: "Text > Lines > Delete Duplicates", action: "DeleteDuplicateLine" },
+    Command { path: "Text > Lines > Duplicate Line", action: "DuplicateLine" },
+    Command { path: "Text > Lines > Delete Line", action: "DeleteLine" },
+    Command { path: "Text > Lines > Join Lines", action: "JoinLines" },
+    Command { path: "Text > Transformations > Make Upper Case", action: "UppercaseWord" },
+    Command { path: "Text > Transformations > Make Lower Case", action: "LowercaseWord" },
+    Command { path: "Text > Transformations > Capitalize", action: "CapitalizeWord" },
+    Command { path: "Text > Transformations > Convert to Full Width", action: "ExchangeFullwidth" },
+    Command { path: "Text > Transformations > Convert to Half Width", action: "ExchangeHalfwidth" },
+    Command {
+        path: "Text > Transformations > Convert Alphanumeric Text to Full Width",
+        action: "ExchangeFullwidthRoman",
+    },
+    Command {
+        path: "Text > Transformations > Convert Alphanumeric Text to Half Width",
+        action: "ExchangeHalfwidthRoman",
+    },
+    Command { path: "Text > Transformations > URL Encode", action: "EncodeUrl" },
+    Command { path: "Text > Transformations > URL Decode", action: "DecodeUrl" },
+    Command { path: "Text > Inspect Character", action: "ShowSelectionInfo" },
+    Command { path: "Text > Advanced Character Count…", action: "ToggleAdvancedCounter" },
+    Command { path: "Text > Edit Color Code…", action: "EditColorCode" },
+    Command { path: "Find > Find…", action: "PerformTextFinderAction" },
+    Command { path: "Find > Find Next", action: "FindNext" },
+    Command { path: "Find > Find Previous", action: "FindPrevious" },
+    Command { path: "Find > Find All", action: "FindAll" },
+    Command { path: "Find > Select All Find Matches", action: "SelectAllFindMatches" },
+    Command { path: "Find > Use Selection for Find", action: "UseSelectionForFind" },
+    Command { path: "Find > Use Selection for Replace", action: "UseSelectionForReplace" },
+    Command { path: "Find > Jump to Selection", action: "CenterSelectionInVisibleArea" },
+    Command { path: "Find > Replace", action: "ShowReplaceInterface" },
+    Command { path: "Find > Replace and Find Next", action: "ReplaceAndFindNext" },
+    Command { path: "Find > Replace All", action: "ReplaceAll" },
+    Command {
+        path: "Find > Multiple Replace > Manage Multiple Replace…",
+        action: "ShowMultipleReplace",
+    },
+    Command { path: "Find > Highlight All", action: "HighlightAll" },
+    Command { path: "Find > Remove Highlights", action: "RemoveHighlights" },
+    Command { path: "Find > Open Outline Menu", action: "OpenOutlineMenu" },
+    Command { path: "Find > Select Previous Outline Item", action: "SelectPrevItemOfOutlineMenu" },
+    Command { path: "Find > Select Next Outline Item", action: "SelectNextItemOfOutlineMenu" },
+    Command { path: "Find > Go to Line…", action: "GotoLocation" },
+    Command { path: "Window > Minimize", action: "PerformMiniaturize" },
+    Command { path: "Window > Zoom", action: "PerformZoom" },
+    Command { path: "Window > Keep on Top", action: "ToggleKeepOnTop" },
+    Command { path: "Window > Bring All to Front", action: "ArrangeInFront" },
+    Command { path: "Window > Console", action: "ShowConsolePanel" },
+    Command { path: "Help > CotEditor Help", action: "ShowHelp" },
+    Command {
+        path: "Help > CotEditor Scripting Guide > About Scripting",
+        action: "OpenHelpAnchor",
+    },
+    Command {
+        path: "Help > CotEditor Scripting Guide > AppleScript Dictionary",
+        action: "OpenAppleScriptDictionary",
+    },
+    Command { path: "Help > What’s New in CotEditor", action: "ShowWhatsNew" },
+    Command { path: "Help > Release Notes", action: "OpenHelpAnchor" },
+    Command { path: "Help > Create Issue Report", action: "CreateBugReport" },
+    Command { path: "Help > Report Issue", action: "ReportBug" },
+    Command { path: "Help > CotEditor Web Site", action: "OpenWebSite" },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +749,38 @@ mod tests {
         }
         let total: usize = app_menus().iter().map(count).sum();
         assert_eq!(total, 178);
+    }
+
+    /// Every command the bar can offer is one the menu bar has.
+    ///
+    /// The two tables come from one source, so a command that went
+    /// missing from either would be a generator bug rather than a typo.
+    #[test]
+    fn the_command_table_is_the_whole_menu() {
+        assert_eq!(COMMANDS.len(), 168);
+        let mut paths: Vec<_> = COMMANDS.iter().map(|c| c.path).collect();
+        paths.sort_unstable();
+        paths.dedup();
+        assert_eq!(paths.len(), COMMANDS.len(), "a path names two commands");
+        for command in COMMANDS {
+            assert!(!command.path.is_empty());
+            assert!(!command.action.is_empty());
+        }
+    }
+
+    /// A shortcut belongs to a command, so its path has to be one of ours.
+    ///
+    /// This is the join the Quick Actions bar makes to draw a shortcut
+    /// beside a result: if the two tables spelled a path differently the
+    /// join would silently find nothing and the bar would show no key.
+    #[test]
+    fn every_shortcut_belongs_to_a_listed_command() {
+        for row in crate::keymap::SHORTCUTS {
+            assert!(
+                COMMANDS.iter().any(|command| command.path == row.0),
+                "{} has no command",
+                row.0
+            );
+        }
     }
 }

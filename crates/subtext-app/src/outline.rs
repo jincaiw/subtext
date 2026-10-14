@@ -536,44 +536,25 @@ fn gather_expandable(nodes: &[FilteredNode], ids: &mut HashSet<String>) {
 
 /// The ranges of the characters of `filter` found in `text`, in order.
 ///
-/// CotEditor's `abbreviatedMatchedRanges(with:)`: the filter matches as a
-/// *subsequence*, not a substring, so `gt` finds "Guten Tag". Each character
-/// is matched on its own and case-insensitively, and the search for the next
-/// one starts where the previous one ended. Returns `None` when the filter is
-/// empty — there is nothing to highlight — or when a character is missing.
+/// The search itself is [`subtext_core::matcher::abbreviated_matched_ranges`],
+/// shared with the Quick Actions bar. What this adds is the merging: upstream
+/// reports one range per matched character, and the outline draws a run of
+/// them as a single highlight, so adjacent ranges are joined here rather than
+/// in the renderer.
 ///
-/// Adjacent matches are merged, which upstream leaves to the renderer; a run
-/// of matched characters is one highlight either way.
+/// Returns `None` when the filter is empty — there is nothing to highlight —
+/// or when a character is missing.
 pub fn abbreviated_matched_ranges(text: &str, filter: &str) -> Option<Vec<Range<usize>>> {
-    if filter.is_empty() || text.is_empty() {
-        return None;
-    }
+    let ranges = subtext_core::matcher::abbreviated_matched_ranges(text, filter, false)?;
 
-    let mut ranges: Vec<Range<usize>> = Vec::new();
-    let mut from = 0;
-
-    for needle in filter.chars() {
-        let found = text[from..]
-            .char_indices()
-            .find(|(_, candidate)| eq_ignore_case(*candidate, needle))
-            .map(|(offset, candidate)| (from + offset, from + offset + candidate.len_utf8()));
-        let (start, end) = found?;
-        match ranges.last_mut() {
-            Some(last) if last.end == start => last.end = end,
-            _ => ranges.push(start..end),
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last) if last.end == range.start => last.end = range.end,
+            _ => merged.push(range),
         }
-        from = end;
     }
-
-    Some(ranges)
-}
-
-/// Compare two characters the way a case-insensitive search does.
-///
-/// `to_lowercase` rather than `eq_ignore_ascii_case`: labels are arbitrary
-/// text, and `Å` has to match `å`.
-fn eq_ignore_case(candidate: char, needle: char) -> bool {
-    candidate == needle || candidate.to_lowercase().eq(needle.to_lowercase())
+    Some(merged)
 }
 
 /// The entry the caret on `line` sits in.

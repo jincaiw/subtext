@@ -32,6 +32,9 @@ ACTIONS_RS = ROOT / "crates" / "subtext-app" / "src" / "actions.rs"
 MENU_RS = ROOT / "crates" / "subtext-app" / "src" / "menu.rs"
 KEYMAP_RS = ROOT / "crates" / "subtext-app" / "src" / "keymap.rs"
 
+# rustfmt's default, and the width the generated tables are wrapped to.
+MAX_WIDTH = 100
+
 # The application menu is the one place a menu bar shows the application's own
 # name rather than a command's, so it is the one title that is ours to choose.
 # Every other label is CotEditor's, verbatim.
@@ -303,6 +306,18 @@ class Renderer:
         commands = sum(1 for entry in self.entries if action_for(entry) is not None)
         placeholders = len(self.entries) - submenus - separators - commands
 
+        # The doc comment counts every entry with a selector; the Quick Actions
+        # table is the subset that is not a submenu. No submenu carries a
+        # selector in this table, so the two numbers are the same one — and if
+        # a future storyboard gives one a selector, the bar must not gain an
+        # item the menu bar cannot run.
+        command_rows = self.command_entries()
+        if len(command_rows) != commands:
+            fail(
+                f"{commands} commands in the menu but {len(command_rows)} for the "
+                "Quick Actions bar: a submenu now carries an action"
+            )
+
         lines = [
             "//! The application menu bar.",
             "//!",
@@ -337,6 +352,7 @@ class Renderer:
         lines.append("    ]")
         lines.append("}")
         lines.append("")
+        lines.extend(self.commands())
         lines.append("#[cfg(test)]")
         lines.append("mod tests {")
         lines.append("    use super::*;")
@@ -378,9 +394,111 @@ class Renderer:
         lines.append("        let total: usize = app_menus().iter().map(count).sum();")
         lines.append(f"        assert_eq!(total, {self.rendered_actions});")
         lines.append("    }")
+        lines.append("")
+        lines.append("    /// Every command the bar can offer is one the menu bar has.")
+        lines.append("    ///")
+        lines.append("    /// The two tables come from one source, so a command that went")
+        lines.append("    /// missing from either would be a generator bug rather than a typo.")
+        lines.append("    #[test]")
+        lines.append("    fn the_command_table_is_the_whole_menu() {")
+        lines.append(f"        assert_eq!(COMMANDS.len(), {len(command_rows)});")
+        lines.append("        let mut paths: Vec<_> = COMMANDS.iter().map(|c| c.path).collect();")
+        lines.append("        paths.sort_unstable();")
+        lines.append("        paths.dedup();")
+        lines.append("        assert_eq!(paths.len(), COMMANDS.len(), \"a path names two commands\");")
+        lines.append("        for command in COMMANDS {")
+        lines.append("            assert!(!command.path.is_empty());")
+        lines.append("            assert!(!command.action.is_empty());")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    /// A shortcut belongs to a command, so its path has to be one of ours.")
+        lines.append("    ///")
+        lines.append("    /// This is the join the Quick Actions bar makes to draw a shortcut")
+        lines.append("    /// beside a result: if the two tables spelled a path differently the")
+        lines.append("    /// join would silently find nothing and the bar would show no key.")
+        lines.append("    #[test]")
+        lines.append("    fn every_shortcut_belongs_to_a_listed_command() {")
+        lines.append("        for row in crate::keymap::SHORTCUTS {")
+        lines.append("            assert!(")
+        lines.append("                COMMANDS.iter().any(|command| command.path == row.0),")
+        lines.append("                \"{} has no command\",")
+        lines.append("                row.0")
+        lines.append("            );")
+        lines.append("        }")
+        lines.append("    }")
         lines.append("}")
         lines.append("")
         return "\n".join(lines)
+
+    def command_entries(self) -> list[dict]:
+        """The commands the Quick Actions bar can offer.
+
+        A submenu has no action of its own, and a placeholder has no action at
+        all; what is left is exactly the items a user can run.
+        """
+        return [
+            entry
+            for entry in self.entries
+            if not self.is_submenu(entry) and action_for(entry) is not None
+        ]
+
+    def commands(self) -> list[str]:
+        """The flat command table the Quick Actions bar reads."""
+        rows = self.command_entries()
+        if not rows:
+            fail("menu.json has no commands")
+
+        lines = [
+            "/// A command in the menu bar, as the Quick Actions bar sees it.",
+            "///",
+            "/// CotEditor builds that list by walking the live `NSMenu`, which is also",
+            "/// where the items it fills in at runtime come from. GPUI can set a menu",
+            "/// but not read one back — `App::get_menus` returns `None` on every real",
+            "/// platform — so the bar reads this table instead. It is generated from",
+            "/// the same source as the menu bar itself, so the two cannot disagree",
+            "/// about what the menu holds.",
+            "pub struct Command {",
+            "    /// Where the command sits, e.g. `Format > Syntax`.",
+            "    ///",
+            "    /// Spelled the way [`crate::keymap::SHORTCUTS`] spells it, which is",
+            "    /// what lets a command be joined to its shortcut.",
+            "    pub path: &'static str,",
+            "    /// The last segment of the action's path, which is the vocabulary",
+            "    /// `Workspace::dispatch` speaks.",
+            "    pub action: &'static str,",
+            "}",
+            "",
+            "/// The name the application menu is shown under.",
+            "///",
+            "/// A command's path is spelled with the source application's name so that",
+            "/// it matches [`crate::keymap::SHORTCUTS`]; this is what a display has to",
+            "/// substitute for it.",
+            f"pub const APP_MENU_TITLE: &str = {rust_string(APP_MENU_TITLE)};",
+            "",
+            "/// Every command in the menu bar, in menu order.",
+            "///",
+            "/// The greyed placeholders are not here: CotEditor fills those in from the",
+            "/// system or at runtime, and its Quick Actions bar lists only the items",
+            "/// that are enabled.",
+            "pub const COMMANDS: &[Command] = &[",
+        ]
+        for entry in rows:
+            path = rust_string(item_key(entry["path"], entry["title"]))
+            action = rust_string(action_for(entry))
+            one_line = f"    Command {{ path: {path}, action: {action} }},"
+            # Wrapped the way rustfmt would wrap it, so a regeneration does not
+            # leave the file with a handful of over-long lines in it.
+            if len(one_line) <= MAX_WIDTH:
+                lines.append(one_line)
+            else:
+                lines.append("    Command {")
+                lines.append(f"        path: {path},")
+                lines.append(f"        action: {action},")
+                lines.append("    },")
+        lines.append("];")
+        lines.append("")
+        return lines
 
     def keymap(self) -> str:
         rows = [entry for entry in self.entries if entry["key"]]

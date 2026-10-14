@@ -17,7 +17,7 @@
 | 动作类型 | 153 个 `@objc` selector | 182 个类型化动作 | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 26,224（Rust，不含生成器与生成文件） | — |
+| 代码行数 | 约 72,128（Swift） | 27,295（Rust，不含生成器与生成文件） | — |
 
 ---
 
@@ -124,7 +124,7 @@
 | 标签栏 | `update_window_options` | ✅ |
 | 工具栏 | `update_window_options` | ✅ |
 | 工具栏自定义 | — | ⏳ |
-| 快速操作 | — | ⏳ |
+| 快速操作 | `show_quick_actions` | ✅ 浮动面板 + 子序列匹配菜单路径；空查询不列结果 |
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
 | 文件夹查找 | `show_sidebar(FolderFind)` | ✅ |
 | 侧边栏 | `update_window_options` | ✅ |

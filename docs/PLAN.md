@@ -216,7 +216,8 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.5 | 按模式排序 | 纯逻辑，`subtext-core` 可测 | ✅ |
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
-| 8.8 | 快速操作 | 需要面板框架 | ⏳ |
+| 8.8 | 快速操作 | 需要面板框架 | ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ⏳ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
@@ -739,6 +740,96 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
    全部格式。未覆盖的格式令牌原样保留。
 5. 拖放只处理应用内的 `ExternalPaths`；macOS 的 `.textClipping` 没有对应物，不特判；
    拖进来的网址在 GPUI 里就是一个 `PathBuf`，按路径文本处理而非 URL。
+
+### 8.8 快速操作（Quick Actions / ⌘K）✅
+
+上游的 `Command Bar`（`Panels/Command Bar/`）是一个浮在文档窗口上的无边框面板：
+上面一个搜索框，下面列出查询命中的菜单命令，回车执行。SubText 保留**面板**与
+**行的内容**，列表本身交给 gpui-kit 的命令面板组件——设计指南要求 command palette
+自带选择 / 焦点 / 键盘 / 关闭 / 布局契约，手搓一个盒子等于把这些重做一遍。
+
+分四块落地：
+
+**8.8a 匹配算法进 `subtext-core`**（`subtext-core/src/matcher.rs`）
+上游 `String+Match.swift` 的 `abbreviatedMatchedRanges` 是**子序列**匹配（逐字符、大小写
+不敏感、只向前推进），不是子串匹配——所以 `tw` 能找到 `Tab Width`。它与大纲过滤用的
+是同一套算法，阶段 8.0 已经把这套逻辑写进了 `outline.rs`，本轮把它下沉到 core 共用：
+- `abbreviated_match` 同时返回命中区间、**未消费的查询余量**与分数
+  （上游 `remaining` / `score` 的对应物）；
+- 区间**逐字符不合并**，因为 `remaining` 的算法依赖区间条数
+  （`searchString.suffix(count - ranges.count)`），合并了就错；
+- 顺手把「只向前推进」写进 doctest：`"Guten Tag"` 查 `gt` 命中的是 `Guten` 里的 `t`，
+  不是串里第一个 `t` 之后的那个——这不是 bug，是上游的语义。
+
+**8.8b 生成器产出命令表**（`tools/generate_menu.py` → `menu.rs::COMMANDS`）
+上游的命令列表是**运行时遍历 `NSApp.mainMenu`** 得到的，SubText 的菜单表在编译期就
+生成了，所以直接把 `COMMANDS`（168 项，`path` + `action`）作为命令来源，与 `SHORTCUTS`
+同源同拼写。筛选规则复刻 `ActionCommand.match(command:)`：
+- 从路径的**第二段**起匹配（第一段是菜单栏自己的标题，丢掉），加上命令自身标题；
+- 第一段必须命中，否则整条跳过；之后每段先吃掉前导空白再匹配，全部匹配完
+  **余量必须只剩空白**，否则不算命中；
+- 每段分数累加，最后按分数稳定排序（同分保留菜单顺序）。
+
+**8.8c 命令面板视图**（`crates/subtext-app/src/command_bar.rs`）
+- 面板是 `WindowKind::Floating` + `titlebar: None` + 透明背景的居中窗口，宽 500pt
+  （31.25rem），高度按结果条数算——GPUI 窗口没有内容自适应，而上游的 SwiftUI 面板是
+  撑开内容，所以这里用 `window.resize` 自己跟着结果走，上限 300pt（18.75rem）；
+- 查询用组件自己的输入框，但**过滤关掉**（`filterable(false)`）：组件的本地过滤是
+  单标签的大小写不敏感子串，表达不了「跨菜单路径的子序列」；
+- 行内容按上游 `ActionCommandView` 画：类型图标 + 命中路径（命中字符加粗、段间
+  chevron）+ 面包屑（未命中的路径段）+ 右侧快捷键提示；
+- **空查询不匹配任何东西**——上游就是这样，面板打开时只有搜索框，没有列表；
+- Esc 用 `capture_key_down` 在捕获阶段接管（组件的 Cancel 是「先清空非空查询、
+  第二次才关闭」，而上游的 Esc 一次就关）；回车与点行都先关窗再执行
+  （上游注释：so the action is delivered to the correct (first) responder）。
+
+**8.8d 接线**（`workspace.rs` / `dispatch.rs` / `bridge.rs`）
+- `Workspace::show_quick_actions` 开窗，已开则激活而不是再开一个；
+- **`bridge` 改为按 workspace 记录它所属的文档窗口**。此前命令一律投给
+  `cx.active_window()`，而设置窗口和这个面板都会拿到键盘焦点，那样 ⌘S 会投给面板。
+  现在每条命令都由「用户正在编辑的那个窗口」应答。
+
+**两处 GPUI 生命周期上的坑（都有注释盯着，别再踩）**：
+
+1. **开窗必须 defer**。`App::open_window` 在返回前就同步跑一遍根视图的 layout 与 draw，
+   而打开本面板的命令来自 `Workspace::update` 内部——此时 workspace 已被移出实体表，
+   任何 `read_with` 都会 panic（`cannot read Workspace while it is already being updated`）。
+   与设置窗口同一个修法：整段开窗动作包进 `cx.defer`。
+2. **行的内容构建器在面板渲染过程中运行，绝不能碰面板实体**。组件的
+   `CommandItem::child` 会被测量和绘制各调用一次，而两次都在 `CommandState` 的
+   `Render` 之内（`measure_rows` → `render_item_with_binding`）；在实体自己的渲染里读它
+   就是双重租借，直接 panic（`cannot read CommandState while it is already being
+   updated`）。所以「哪一行被选中」是**以普通 `bool` 传进构建器**的，而不是回头去读面板。
+   面板的选中态由 `refresh` 这个 observer 维护成一份副本——observer 跑在面板更新**之后**，
+   读它是安全的。
+
+**已知偏差（记账）**：
+
+1. **Script 菜单还是运行时占位项**，所以表里每一条都是菜单命令。上游的第二类
+   （脚本）要等 `Script` 菜单填起来才有行可画（见阶段 8.9）。
+2. **面板不会在失去焦点时关闭**。上游挂在窗口失焦上；GPUI 没有窗口激活事件，
+   所以这里只在 Esc、回车、点行时关闭，点面板后面的文档不会关掉它。
+3. 行的**外框**（搜索框字号、行内边距与圆角、列表内缩）用组件族的几何，
+   行**内容**按上游逐项对齐到加粗的命中字符。
+
+### 8.9 运行时填充的菜单子菜单 ⏳
+
+阶段 8.8 把 `COMMANDS` 当成了完整的命令表，于是暴露出一个更早的缺口：
+`menu.json` 里有 **11 个扁平占位项**，它们在上游是**运行时**填出来的子菜单，
+SubText 目前只渲染成一个置灰的死项：
+
+`Format ▸ Line Endings` / `Text Encoding` / `Syntax` / `Theme`、
+`Format ▸ Font ▸ Font Type`、`Format ▸ Writing Direction ▸ Orientation` / `Direction`、
+`Text ▸ Unicode Normalizations`、`CotEditor ▸ Services`、
+`Edit ▸ Insert from iPhone or iPad`、顶层 `Script`。
+
+后果不只是「菜单里少几项」：`set_syntax` / `set_theme` / `set_encoding` /
+`set_line_ending` 这些**动作已经实现**，却因为菜单里没有可点的条目而**没有入口**——
+只能靠快捷键（如果那条命令有）或设置窗口间接达到。
+
+8.9 要把这 11 处按上游的填充逻辑补上（每个子菜单的内容来源、勾选态、排序都不同），
+并让 `COMMANDS` 在构建时把这些运行时条目也算进去，这样 Quick Actions 才能搜到
+`Syntax ▸ Swift`、`Theme ▸ Solarized Dark` 这类条目——上游正是这么做的。
 
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |

@@ -16,6 +16,7 @@ pub mod finder;
 pub mod folderfind;
 pub mod imagesize;
 pub mod line_ending;
+pub mod matcher;
 pub mod multireplace;
 pub mod snippets;
 pub mod textops;
@@ -31,6 +32,7 @@ pub use folderfind::{
     Options as FolderFindOptions, Progress, Query, Search, SearchError, Summary, Target,
 };
 pub use line_ending::LineEnding;
+pub use matcher::{AbbreviatedMatch, abbreviated_match, abbreviated_matched_ranges};
 pub use multireplace::{MultipleReplace, Outcome, PatternError, Replacement, Settings};
 pub use snippets::{
     CURSOR_TOKEN, Insertion, Rejection, SELECTION_TOKEN, Sections, Shortcut, Snippet, TOKENS,
