@@ -854,6 +854,10 @@ impl Workspace {
     pub fn clear_recent(&mut self, cx: &mut Context<Self>) {
         self.settings.recent_documents.clear();
         let _ = self.settings.save();
+        // The list is what File ▸ Open Recent is built from, so the bar has to
+        // hear about it. `refresh_menus` compares the signature and rebuilds, so
+        // this is one rebuild rather than one per row.
+        self.refresh_menus(cx);
         self.set_status("Cleared the recent documents", cx);
     }
 
@@ -1383,6 +1387,7 @@ impl Workspace {
             self.menu_document(),
             self.theme.name.clone(),
             scripts.clone(),
+            self.settings.recent_documents.clone(),
         );
         if self.menus_built_for.as_ref() == Some(&signature) {
             return;
@@ -1412,6 +1417,7 @@ impl Workspace {
             themes: self.theme_names(),
             snippets: self.settings.snippets.clone(),
             scripts: self.scripts.clone(),
+            recent_documents: self.settings.recent_documents.clone(),
         }
     }
 

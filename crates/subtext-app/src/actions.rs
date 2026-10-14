@@ -1,10 +1,18 @@
 //! Every command the application can perform.
 //!
 //! CotEditor drives its menu from `@objc` selectors on `NSResponder`. GPUI
-//! has no responder chain, so each of those 153 selectors becomes a typed
-//! action here and the menu, the key bindings and the toolbar all dispatch
+//! has no responder chain, so each of those selectors — 155 of them, counted
+//! out of the storyboard's 170 `<action>` elements — becomes a typed action
+//! here and the menu, the key bindings and the toolbar all dispatch
 //! through the same vocabulary. Grouping by namespace keeps the intent
 //! readable: `text::ToggleComment`, `view::ToggleLineNumber`.
+//!
+//! A selector is not the same thing as an action, and this module is where the
+//! two part company: one selector can stand for several actions when the item
+//! carries a value upstream reads out of a tag, and an action can be one no
+//! selector reaches at all — the menu bar builds it at runtime. What must never
+//! happen is the third case: an action nothing can fire. The audit that removed
+//! `file::OpenRecent` and `help::ReleaseNotes` is in `docs/PLAN.md` §8.9g.
 
 use gpui_kit::actions;
 
@@ -30,7 +38,6 @@ pub mod file {
         NewDocumentAsWindow,
         NewDocumentAsTab,
         OpenDocument,
-        OpenRecent,
         ClearRecentDocuments,
         PerformClose,
         SaveDocument,
@@ -42,6 +49,28 @@ pub mod file {
         RunPageLayout,
         PrintDocument,
     ]);
+
+    /// Open the document at this path.
+    ///
+    /// Upstream has no such selector. Its *Open Recent* submenu is marked
+    /// `systemMenu="recentDocuments"` in the storyboard, which is AppKit's own
+    /// hook: `NSDocumentController` inserts one item per recent document above
+    /// `Clear Menu`, and each one fires `openDocument:` with the URL as its
+    /// represented object. GPUI's menu items carry an action rather than a
+    /// target and a tag, so the path travels in the action instead.
+    ///
+    /// The path rather than the row's position, for the reason
+    /// [`script::RunScript`] gives: the list is reordered every time a document
+    /// is opened, and an item run by position would open the wrong file.
+    ///
+    /// `no_json` because the action is built from the menu, never from a
+    /// configuration file — the settings file names a recent document by its
+    /// path, not by this action's JSON.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct OpenRecentDocument {
+        pub path: String,
+    }
 }
 
 pub mod edit {
@@ -299,7 +328,6 @@ pub mod help {
         OpenWebSite,
         ReportBug,
         CreateBugReport,
-        ReleaseNotes,
     ]);
 }
 

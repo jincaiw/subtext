@@ -133,6 +133,10 @@ pub fn run() {
                 // The user's scripts, read before the first window exists so
                 // that the Script menu is theirs from the first frame.
                 scripts: scripts::scan(),
+                // And the documents they have opened before, for the same
+                // reason: File ▸ Open Recent is a list the bar has to carry from
+                // the first frame, not one it grows into.
+                recent_documents: settings.recent_documents.clone(),
             };
             menus::install(cx, &menu_state);
 

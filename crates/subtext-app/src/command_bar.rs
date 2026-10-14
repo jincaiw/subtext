@@ -614,6 +614,7 @@ mod tests {
             themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
             snippets: Vec::new(),
             scripts: Vec::new(),
+            recent_documents: Vec::new(),
         }
     }
 

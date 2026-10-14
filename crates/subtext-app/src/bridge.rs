@@ -12,7 +12,7 @@
 //! no registration would show up as a dead menu entry rather than as a
 //! command that reports its own absence.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     Action, AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window,
@@ -154,6 +154,13 @@ pub fn perform(
         }
         return true;
     }
+    // A recent document's action carries its path, and the path is what the
+    // item stands for: the list is reordered every time a document is opened,
+    // so an item run by position would open the wrong file.
+    if let Some(action) = any.downcast_ref::<actions::file::OpenRecentDocument>() {
+        workspace.open_path(PathBuf::from(&action.path), window, cx);
+        return true;
+    }
     // A script's action carries its path, which is the script's identity: the
     // folder can be rearranged between the item being built and being chosen,
     // and two folders may hold a script of the same name.
@@ -215,8 +222,8 @@ pub fn install(cx: &mut App) {
     // The items the menu bar builds at runtime carry a value rather than a name,
     // so none of them fits `bind_actions!`: a snippet carries its id, the three
     // Format popups carry the setting they stand for, a normalization carries
-    // its form, and a script carries its path. Each is turned back into the
-    // thing it names by `perform`.
+    // its form, a recent document and a script each carry a path. Each is turned
+    // back into the thing it names by `perform`.
     bind_runtime_actions! { cx,
         actions::snippet::InsertSnippet,
         actions::format::ChangeLineEnding,
@@ -224,6 +231,7 @@ pub fn install(cx: &mut App) {
         actions::format::ChangeTheme,
         actions::format::ChangeEncoding,
         actions::text::NormalizeUnicode,
+        actions::file::OpenRecentDocument,
         actions::script::RunScript,
     };
     bind_actions! { cx,
@@ -240,7 +248,6 @@ pub fn install(cx: &mut App) {
         actions::file::NewDocumentAsWindow => "NewDocumentAsWindow",
         actions::file::NewDocumentAsTab => "NewDocumentAsTab",
         actions::file::OpenDocument => "OpenDocument",
-        actions::file::OpenRecent => "OpenRecent",
         actions::file::ClearRecentDocuments => "ClearRecentDocuments",
         actions::file::PerformClose => "PerformClose",
         actions::file::SaveDocument => "SaveDocument",
@@ -395,7 +402,6 @@ pub fn install(cx: &mut App) {
         actions::help::OpenWebSite => "OpenWebSite",
         actions::help::ReportBug => "ReportBug",
         actions::help::CreateBugReport => "CreateBugReport",
-        actions::help::ReleaseNotes => "ReleaseNotes",
         actions::script::OpenScriptsFolder => "OpenScriptsFolder",
     };
 }

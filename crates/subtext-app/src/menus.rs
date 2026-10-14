@@ -1,17 +1,22 @@
 //! The menu bar, and the one place it is rebuilt from.
 //!
 //! [`menu::app_menus`] is a compile-time table: every item CotEditor names in
-//! its `Main.storyboard`, and the action each one runs. Seven of them cannot be
+//! its `Main.storyboard`, and the action each one runs. Eight of them cannot be
 //! written down at compile time, though. Five are empty `<menu>` elements in the
 //! storyboard itself — CotEditor fills those in from the document in front and
 //! from the settings, and a table cannot name a syntax or a theme the user has
 //! not installed yet. The sixth is *Insert Snippet*, whose items are the user's
 //! own data. The seventh is *Script*, which is an empty *top-level* menu whose
-//! items are the user's own files.
+//! items are the user's own files. The eighth is *Open Recent*, whose items are
+//! the documents the user has opened — and upstream does not write those down
+//! either: it marks the submenu `systemMenu="recentDocuments"` and lets
+//! `NSDocumentController` fill it.
 //!
-//! So the generator leaves the six empty and disabled, and this module fills
-//! them in — and rebuilds the snippet submenu, which has one storyboard item
-//! that [`snippets`] re-creates as part of the list. [`install`] is the only place the bar is set: it clears the keymap,
+//! So the generator leaves the five empty and disabled, and this module fills
+//! them in — and rebuilds the other three. Two of those three have a storyboard
+//! item that this module re-creates as part of its list — *Insert Snippet*'s
+//! *Edit Snippets…*, *Open Recent*'s *Clear Menu* — and *Script* has none.
+//! [`install`] is the only place the bar is set: it clears the keymap,
 //! lays the built-in bindings back down, adds the snippets' own, and sets the
 //! menu bar with every submenu filled in.
 //!
@@ -32,6 +37,13 @@
 //! to wait for. Reading the folder is one `read_dir`, which is cheap enough to
 //! do on every refresh, and the comparison is what keeps a folder that has not
 //! changed from rebuilding the bar.
+//!
+//! The recent documents are in it for the same reason, one step further out: the
+//! list is reordered by opening a document, which is a thing that happens in
+//! another part of the application entirely, and clearing it is a menu command
+//! of its own. Both callers reach the bar through
+//! [`Workspace::refresh_menus`](crate::workspace::Workspace::refresh_menus), and
+//! the comparison is what makes that free when neither happened.
 //!
 //! # Naming an item the runtime does not know
 //!
@@ -75,7 +87,7 @@
 //! no modifier state, so there is no second and third behaviour to reach. See
 //! [`crate::scripts`].
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{Action, App, Menu, MenuItem};
 
@@ -114,8 +126,28 @@ const THEME_MENU: &str = "Theme";
 const UNICODE_NORMALIZATIONS_MENU: &str = "Unicode Normalizations";
 const INSERT_SNIPPET_MENU: &str = "Insert Snippet";
 
+/// The submenu AppKit would have filled in.
+///
+/// Upstream marks this one `systemMenu="recentDocuments"`, and `NSDocumentController`
+/// inserts an item per recent document above the `Clear Menu` the storyboard
+/// writes down. GPUI has no such hook, so the list is built here instead.
+const OPEN_RECENT_MENU: &str = "Open Recent";
+
+/// How many recent documents the menu lists.
+///
+/// `NSDocumentController.maximumRecentDocumentCount`, measured: AppKit's default
+/// is 10, and CotEditor never overrides it. The settings file keeps more than
+/// this — see [`crate::settings::Settings::note_recent`] — because the sidebar's
+/// file browser is a list the user scrolls rather than a menu they read, but the
+/// menu is the one upstream bounds and it is bounded to the same number here.
+const RECENT_DOCUMENT_LIMIT: usize = 10;
+
 /// The one runtime menu that is a menu of its own rather than a submenu.
 const SCRIPT_MENU: &str = "Script";
+
+/// The last item of File ▸ Open Recent, and the only one the storyboard writes
+/// down. The documents above it are the user's history.
+const CLEAR_RECENT: &str = "Clear Menu";
 
 /// The last item of Format ▸ Text Encoding.
 ///
@@ -157,6 +189,12 @@ pub struct MenuState {
     pub snippets: Vec<Snippet>,
     /// The user's scripts, as the folder they live in holds them.
     pub scripts: Vec<ScriptItem>,
+    /// The documents the user has opened, newest first.
+    ///
+    /// The whole list, not the [`RECENT_DOCUMENT_LIMIT`] the menu shows: the
+    /// sidebar's file browser scrolls through all of it, and the two are built
+    /// from the same state.
+    pub recent_documents: Vec<PathBuf>,
 }
 
 /// The part of a [`MenuState`] that changes without the settings changing.
@@ -170,25 +208,33 @@ pub struct MenuState {
 /// every refresh and compared, which is what notices a script that has appeared
 /// or gone. The list is a few paths, so the comparison is cheaper than the
 /// `read_dir` that produced it.
+///
+/// The recent documents are here for the same reason, and they are the one entry
+/// the user changes from *outside* the menu: opening a document reorders them.
+/// The list is bounded, so comparing it is a walk over at most
+/// [`crate::settings::Settings::note_recent`]'s cap of paths.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MenuSignature {
     document: Option<DocumentState>,
     theme: String,
     scripts: Vec<ScriptItem>,
+    recent_documents: Vec<PathBuf>,
 }
 
 impl MenuSignature {
     /// The signature of a bar showing `document` under `theme`, with `scripts`
-    /// in the Script menu.
+    /// in the Script menu and `recent_documents` under File ▸ Open Recent.
     pub fn of(
         document: Option<DocumentState>,
         theme: impl Into<String>,
         scripts: Vec<ScriptItem>,
+        recent_documents: Vec<PathBuf>,
     ) -> Self {
         Self {
             document,
             theme: theme.into(),
             scripts,
+            recent_documents,
         }
     }
 }
@@ -200,6 +246,7 @@ impl MenuState {
             self.document.clone(),
             self.theme.clone(),
             self.scripts.clone(),
+            self.recent_documents.clone(),
         )
     }
 }
@@ -259,6 +306,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         normalizations(),
     );
     replace(&mut menus, SCRIPT_MENU, scripts::items(&state.scripts));
+    replace(&mut menus, OPEN_RECENT_MENU, recent_documents(state));
 
     menus
 }
@@ -526,6 +574,68 @@ fn line_endings(state: &MenuState) -> Vec<MenuItem> {
         .collect()
 }
 
+/// File ▸ Open Recent.
+///
+/// The documents the user has opened, newest first, then a separator, then the
+/// `Clear Menu` item the storyboard writes down. Upstream's version of this list
+/// is AppKit's: the submenu is marked `systemMenu="recentDocuments"` and
+/// `NSDocumentController` inserts one item per document above the storyboard's
+/// own. Nothing here can call that hook, so the list is built from
+/// [`crate::settings::Settings::recent_documents`], which is the same list the
+/// sidebar's file browser shows.
+///
+/// Two details are upstream's rather than this build's choice, and both were
+/// measured against AppKit:
+///
+/// * *At most [`RECENT_DOCUMENT_LIMIT`].* `NSDocumentController` caps the menu at
+///   `maximumRecentDocumentCount`, which is 10 and which CotEditor never raises.
+/// * *`Clear Menu` is disabled with nothing to clear.*
+///   `-[NSDocumentController validateUserInterfaceItem:]` answers `NO` for
+///   `clearRecentDocuments:` while `recentDocumentURLs` is empty. A disabled item
+///   is also what keeps the entry out of the Quick Actions bar, which upstream
+///   fills by walking the live menu and skipping disabled leaves.
+///
+/// The titles are the files' names, which is what the sidebar already puts on a
+/// recent document's row. What AppKit writes there instead is its own rendering
+/// and this build cannot read it; the file's name is the honest reading of
+/// "the recent document", and a path would be a second line the menu cannot show.
+fn recent_documents(state: &MenuState) -> Vec<MenuItem> {
+    let shown = state.recent_documents.len().min(RECENT_DOCUMENT_LIMIT);
+    let mut items = Vec::with_capacity(shown + 2);
+
+    items.extend(state.recent_documents.iter().take(shown).map(|path| {
+        MenuItem::action(
+            recent_document_name(path),
+            actions::file::OpenRecentDocument {
+                path: path.display().to_string(),
+            },
+        )
+    }));
+
+    // The separator only separates when there is something above it. Upstream
+    // has the same shape: with an empty history the submenu is `Clear Menu`
+    // alone, with no rule over it.
+    if shown > 0 {
+        items.push(MenuItem::separator());
+    }
+    items.push(
+        MenuItem::action(CLEAR_RECENT, actions::file::ClearRecentDocuments)
+            .disabled(state.recent_documents.is_empty()),
+    );
+    items
+}
+
+/// The name a recent document is listed under.
+///
+/// A path with no file name — `/` — is listed as itself rather than dropped:
+/// `file_name` answers `None` for it, and the row it belongs to is still a
+/// document the user opened.
+fn recent_document_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
 /// Format ▸ Syntax.
 ///
 /// *None* first, then a separator, then every syntax the user has — upstream's
@@ -712,6 +822,7 @@ mod tests {
             themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
             snippets: Vec::new(),
             scripts: Vec::new(),
+            recent_documents: Vec::new(),
         }
     }
 
@@ -1284,7 +1395,111 @@ mod tests {
         );
     }
 
+    // ---- the recent documents --------------------------------------------
+
+    /// The history, newest first, then the rule, then the item the storyboard
+    /// writes down. Upstream's `Clear Menu` sits under the same separator.
+    #[test]
+    fn the_recent_menu_is_the_history_then_the_way_to_clear_it() {
+        let mut state = state();
+        state.recent_documents = vec![
+            PathBuf::from("/notes/todo.txt"),
+            PathBuf::from("/notes/design.md"),
+        ];
+
+        assert_eq!(
+            labels(&build(&state), OPEN_RECENT_MENU),
+            ["todo.txt", "design.md", "―", "Clear Menu"]
+        );
+    }
+
+    /// The titles are the files' names, which is what the sidebar puts on a
+    /// recent document's row. A path with no file name is listed as itself
+    /// rather than dropped: the row is still a document the user opened.
+    #[test]
+    fn a_recent_document_is_listed_under_its_file_name() {
+        let mut state = state();
+        state.recent_documents = vec![PathBuf::from("/")];
+
+        assert_eq!(
+            labels(&build(&state), OPEN_RECENT_MENU),
+            ["/", "―", "Clear Menu"]
+        );
+    }
+
+    /// With nothing to clear the item is greyed, which is what
+    /// `-[NSDocumentController validateUserInterfaceItem:]` answers for
+    /// `clearRecentDocuments:` while `recentDocumentURLs` is empty — and what
+    /// keeps it out of the Quick Actions bar, whose walk skips disabled leaves.
+    #[test]
+    fn an_empty_history_leaves_just_the_clear_item_and_greys_it_out() {
+        assert_eq!(labels(&build(&state()), OPEN_RECENT_MENU), ["[Clear Menu]"]);
+        assert!(!paths(&state()).contains(&"File > Open Recent > Clear Menu".to_string()));
+
+        let mut state = state();
+        state.recent_documents = vec![PathBuf::from("/notes/todo.txt")];
+        assert!(paths(&state).contains(&"File > Open Recent > Clear Menu".to_string()));
+    }
+
+    /// `NSDocumentController.maximumRecentDocumentCount` is 10 and CotEditor
+    /// never raises it, so the menu stops there however long the history is —
+    /// while the settings keep more, because the sidebar scrolls.
+    #[test]
+    fn the_recent_menu_stops_at_upstream_s_ten() {
+        let mut state = state();
+        state.recent_documents = (0..14)
+            .map(|index| PathBuf::from(format!("/notes/file-{index}.txt")))
+            .collect();
+
+        let listed = labels(&build(&state), OPEN_RECENT_MENU);
+        assert_eq!(listed.len(), RECENT_DOCUMENT_LIMIT + 2);
+        assert_eq!(listed[0], "file-0.txt");
+        assert_eq!(listed[RECENT_DOCUMENT_LIMIT - 1], "file-9.txt");
+        assert_eq!(listed[RECENT_DOCUMENT_LIMIT], "―");
+        assert_eq!(listed[RECENT_DOCUMENT_LIMIT + 1], "Clear Menu");
+    }
+
+    /// Each item carries its own path, not its position: opening a document
+    /// reorders the list, and an item run by position would open the wrong file.
+    #[test]
+    fn every_recent_item_names_the_path_it_stands_for() {
+        let mut state = state();
+        state.recent_documents = vec![
+            PathBuf::from("/notes/todo.txt"),
+            PathBuf::from("/notes/design.md"),
+        ];
+
+        let carried: Vec<String> = named(&build(&state), OPEN_RECENT_MENU)
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { action, .. } => action
+                    .as_any()
+                    .downcast_ref::<actions::file::OpenRecentDocument>()
+                    .map(|action| action.path.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(carried, ["/notes/todo.txt", "/notes/design.md"]);
+    }
+
     // ---- the signature ---------------------------------------------------
+
+    /// The recent documents are part of it, because they are the one entry the
+    /// user changes from outside the menu: opening a document reorders them, and
+    /// clearing them is a command of its own.
+    #[test]
+    fn the_signature_follows_the_recent_documents() {
+        let mut state = state();
+        state.recent_documents = vec![PathBuf::from("/notes/todo.txt")];
+        let before = state.signature();
+
+        state.recent_documents.insert(0, PathBuf::from("/notes/design.md"));
+        assert_ne!(before, state.signature());
+
+        state.recent_documents.clear();
+        assert_ne!(before, state.signature());
+    }
 
     /// The signature has to cover everything a rebuild is needed for, or a tab
     /// switch would leave the checks on the wrong document.
@@ -1492,9 +1707,19 @@ mod tests {
     /// For everything the table names, the bar agrees with it: same path, same
     /// action. The two are joined here so that a command one has and the other
     /// does not fails a test rather than disappearing from ⌘K.
+    ///
+    /// The state is given a recent document so that *Clear Menu* is live. It is
+    /// the one entry whose presence in the bar is a state rather than a
+    /// structure: the storyboard writes it down unconditionally, and upstream
+    /// greys it while there is nothing to clear — which this build does too, and
+    /// which `an_empty_history_leaves_just_the_clear_item_and_greys_it_out`
+    /// covers from the other side.
     #[test]
     fn the_live_bar_agrees_with_the_generated_table() {
-        let live: Vec<(String, &'static str)> = commands(&state())
+        let mut state = state();
+        state.recent_documents = vec![PathBuf::from("/notes/todo.txt")];
+
+        let live: Vec<(String, &'static str)> = commands(&state)
             .into_iter()
             .map(|command| (command.path, crate::bridge::name_of(command.action.as_ref())))
             .collect();

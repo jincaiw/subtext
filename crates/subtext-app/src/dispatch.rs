@@ -65,7 +65,6 @@ impl Workspace {
             "NewDocument" | "NewDocumentAsTab" => self.new_tab(window, cx),
             "NewDocumentAsWindow" => self.notice("SubText opens documents as tabs", cx),
             "OpenDocument" => self.open_dialog(window, cx),
-            "OpenRecent" => self.show_sidebar(SidebarPane::FileBrowser, cx),
             "ClearRecentDocuments" => self.clear_recent(cx),
             "PerformClose" => self.close_active(window, cx),
             "SaveDocument" => self.save(false, window, cx),
@@ -362,7 +361,6 @@ impl Workspace {
             "ReportBug" | "CreateBugReport" => {
                 self.notice("Please report issues in the SubText repository", cx)
             }
-            "ReleaseNotes" => self.notice("See CHANGELOG.md in the source tree", cx),
 
             other => {
                 self.notice(format!("{other} is not implemented yet"), cx);

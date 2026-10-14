@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9f |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9g |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -833,6 +833,9 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 | `Font ▸ Font Type`、`Writing Direction ▸ Orientation` / `Direction` | 上游是 `NSMenuItem.sectionHeader`，本表里已是置灰 `NoOp` 叶 | ✅（即上游形态） |
 | `Edit ▸ Insert from iPhone or iPad` | 系统（Handoff） | ✅（即上游形态） |
 
+8.9g 又查出**第 12 个**运行时填充点：`File ▸ Open Recent`。它不在上表里，因为它的占位形态
+**不是空的**——storyboard 已经给了它一个 `Clear Menu` 子项，看着像做完了，见 §8.9g。
+
 后果不只是「菜单里少几项」：`set_syntax` / `set_theme` / `set_encoding` /
 `set_line_ending` 这些**动作已经实现**，却因为菜单里没有可点的条目而**没有入口**——
 只能靠快捷键（如果那条命令有）或设置窗口间接达到。
@@ -1170,10 +1173,70 @@ ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift
 GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点）。
 都是「解码不会漏、只会多接受几个字节序列」的方向，名字与实现不一致这点在缺口表里。
 
+**8.9g File ▸ Open Recent 的最近文档列表**（`menus.rs` / `bridge.rs` / `workspace.rs` / `actions.rs`）
+
+上面那张表里没有这一条，因为它不属于「空子菜单」：`menu.json` 里 `File ▸ Open Recent`
+**有**一个子项——storyboard 写下的 `Clear Menu`。它看着是完整的，所以这轮做「死菜单命令」
+审计时才发现真相：上游的 `Open Recent` 子菜单在 storyboard 里标着
+`systemMenu="recentDocuments"`，那是 AppKit 的钩子，`NSDocumentController` 会在
+`Clear Menu` **之上**逐条插入最近文档。SubText 既没有这个钩子、也没有任何运行时填充，
+于是这个子菜单永远只有一项。
+
+审计的产物还有两个**死动作**：`actions::file::OpenRecent` 与 `actions::help::ReleaseNotes`
+——声明了动作类型、写了 bridge 映射、写了 dispatch 臂，**却没有任何菜单项、快捷键或命令表
+条目能触发它们**。查上游：`openRecent:` / `releaseNotes:` 这两个 selector **不存在**
+（Help ▸ Release Notes 用的是 `openHelpAnchor:`，File ▸ Open Recent 是个容器），
+所以它们不是「上游有、SubText 缺」，而是凭空声明的。已删除。
+
+顺带把 FEATURE-MATRIX 里两个手抄的数字换成实测的：上游 storyboard 有 **170 个
+`<action>` 元素、去重后 155 个 selector**（原记 153），`actions.rs` 里 **176 个类型化动作**
+（168 个单元动作 + 8 个带载荷的动作；原记 182）。`actions.rs` 的模块注释也一并改了口径，
+并写明「一个 selector 可以对应多个动作、也可以有一个动作不被任何 selector 触及，
+但不能有一个动作没人能触发」——这正是这轮审计的判据。
+
+实现：
+
+- 新动作 `file::OpenRecentDocument { path }`，与 `RunScript` / `ChangeLineEnding` 同形：
+  GPUI 的菜单项带的是动作而不是 target + tag，所以路径随动作走。用**路径**而不是位置——
+  打开一个文档就会重排整个列表，按位置跑会开错文件。
+- `menus.rs` 新增 `OPEN_RECENT_MENU` 与 `recent_documents(state)`：最近文档（最多
+  `RECENT_DOCUMENT_LIMIT` 条）+ 分隔符 + `Clear Menu`。分隔符只在上面有内容时才加，
+  与上游同形（空历史时子菜单就是 `Clear Menu` 一项，没有横线压在上面）。
+- `MenuState` / `MenuSignature` 都带上这份列表，于是「打开文档」
+  （`open_path` → `note_recent` → `push_document` → `refresh_menus`）与
+  「Clear Menu」（`clear_recent` 现在也调 `refresh_menus`）都会重建菜单栏，
+  而其余时刻被签名比较挡掉。
+- `bridge::perform` 增一条分支（按路径 `open_path`），`bind_runtime_actions!` 增该动作。
+
+两处细节是上游的行为，都是**实测**得来的，不是从源码推的：
+
+| 行为 | 实测方式 | 结果 |
+| --- | --- | --- |
+| 菜单最多列 10 条 | `clang -framework Cocoa` 探针读 `NSDocumentController.maximumRecentDocumentCount` | `10`；CotEditor 不覆盖它。设置文件仍存 20 条（侧栏是可滚动的列表，菜单不是） |
+| 没有最近文档时 `Clear Menu` 置灰 | 同一探针调 `validateUserInterfaceItem:`，自造一个实现 `NSValidatedUserInterfaceItem` 的对象当菜单项 | 空列表时 `clearRecentDocuments:` 返回 `NO`，有文档时返回 `YES` |
+
+置灰这件事有第二个后果，也是上游的：Quick Actions 的列表来自**实时菜单栏**的遍历，
+而遍历跳过禁用项——所以空历史时 `File > Open Recent > Clear Menu` 不在 ⌘K 里。
+SubText 的 `menus::commands` 里 `walk` 跳过 `disabled` 正是同一条规则。
+`the_live_bar_agrees_with_the_generated_table` 因此要给状态一个最近文档才成立
+（storyboard 无条件写下 `Clear Menu`，而它在实时菜单里出现与否是个**状态**），
+空历史那一侧由 `an_empty_history_leaves_just_the_clear_item_and_greys_it_out` 从反面盯着。
+
+**条目标题用的是文件名**，侧栏的最近文件行用的也是 `file_name()`。AppKit 在那里写什么是
+它自己的渲染，这个构建读不到；「最近文档」的名字就是文件名，而路径是菜单放不下的第二行。
+这点如实记在缺口表里，没有假装与 AppKit 一致。
+
+验收：6 条新测试（历史在前 + 分隔符 + `Clear Menu` 收尾；空历史只剩置灰的 `Clear Menu`
+且不在 ⌘K 里；14 条只列 10 条；每条携带自己的路径；无文件名的路径按路径列出；
+签名跟着列表走）。全工作区 **504** 项测试全绿（498 → 504），clippy 零自有警告，
+生成器幂等（`menu.rs` `d72a9524` / `keymap.rs` `75c5c9e0`，与 8.9f 时一致），
+冒烟：开两个文档存活 5 秒、stderr 0 字节、`Settings.json` 里 `recent_documents` 按最新优先
+记录了这两条。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（498 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（504 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
@@ -1192,6 +1255,7 @@ GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
+| 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
