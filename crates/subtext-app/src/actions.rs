@@ -322,3 +322,26 @@ pub mod snippet {
         pub id: u64,
     }
 }
+
+pub mod script {
+    use super::*;
+    actions!(subtext, [
+        OpenScriptsFolder,
+    ]);
+
+    /// Run the script at this path over the document in front.
+    ///
+    /// Scripts are the user's files, so — like a snippet — the menu item cannot
+    /// name its action at compile time. The payload is the script's *path*
+    /// rather than its position in the menu: the folder can be rearranged
+    /// between the item being built and being chosen, and a script run by
+    /// position would then be the wrong one.
+    ///
+    /// A path rather than a name, because two folders may hold a script of the
+    /// same name and they are different scripts.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct RunScript {
+        pub path: String,
+    }
+}

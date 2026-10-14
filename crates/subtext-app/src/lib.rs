@@ -42,6 +42,7 @@ pub mod menus;
 pub mod multiple_replace_sheet;
 pub mod outline;
 pub mod resources;
+pub mod scripts;
 pub mod settings;
 pub mod settings_window;
 pub mod snippet_pane;
@@ -129,6 +130,9 @@ pub fn run() {
                     .map(|theme| theme.name.clone())
                     .collect(),
                 snippets: settings.snippets.clone(),
+                // The user's scripts, read before the first window exists so
+                // that the Script menu is theirs from the first frame.
+                scripts: scripts::scan(),
             };
             menus::install(cx, &menu_state);
 

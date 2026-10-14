@@ -45,7 +45,11 @@ pub(crate) fn bindings(keymap: &gpui_kit::Keymap, sections: &Sections) -> Vec<Ke
 /// application down at launch. `Keystroke::parse` is not strict enough on its
 /// own: `""` and `"secondary-"` both come back with no key at all, and a
 /// binding on one of those would never match anything.
-fn free(keymap: &gpui_kit::Keymap, keystroke: &str) -> bool {
+///
+/// Shared with [`crate::scripts`], which has to ask the same question about the
+/// keys a user's script files name: a script must not take ⌘S any more than a
+/// snippet may.
+pub(crate) fn free(keymap: &gpui_kit::Keymap, keystroke: &str) -> bool {
     Keystroke::parse(keystroke).is_ok_and(|keystroke| {
         !keystroke.key.is_empty() && keymap.all_bindings_for_input(&[keystroke]).is_empty()
     })

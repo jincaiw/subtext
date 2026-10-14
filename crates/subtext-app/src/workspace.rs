@@ -54,6 +54,7 @@ use gpui_kit::{
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px,
 };
 
+use subtext_core::scripts::{InputType, Invocation, Item as ScriptItem, OutputType};
 use subtext_core::{
     Document, DroppedFile, FileEncoding, LineEnding, Normalization, TextEncoding, charinfo,
     colorcode, finder, imagesize, line_ending, multireplace, textops,
@@ -69,6 +70,8 @@ use crate::highlighter;
 use crate::menus;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
+use crate::resources;
+use crate::scripts;
 use crate::settings::{DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SettingsPane, SidebarPane};
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
@@ -81,6 +84,16 @@ const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
 /// CotEditor's `DocumentViewController.maximumNumberOfSplitEditors`. Past it
 /// upstream beeps; SubText has no beep and says so in the status bar instead.
 const MAXIMUM_SPLIT_EDITORS: usize = 4;
+
+/// How often the script folder is looked at again.
+///
+/// The Script menu is built from a folder the user can add to at any time, and
+/// upstream is *told* about a change by `NSFilePresenter`. GPUI has no file
+/// watcher, so the folder is re-read on a timer instead. It is a handful of
+/// entries, and the comparison in [`Workspace::refresh_menus`] throws the answer
+/// away when nothing moved, so the cost is one `read_dir` every couple of
+/// seconds.
+const SCRIPT_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Stable identity for an open document.
 ///
@@ -290,6 +303,13 @@ pub struct Workspace {
     /// `SnippetManager` watches `currentSyntaxName` for the same reason; this is
     /// what tells the workspace the watch has something to do.
     menus_built_for: Option<menus::MenuSignature>,
+    /// The user's scripts, as the last menu rebuild read them.
+    ///
+    /// Held rather than read on demand because a command names a script by its
+    /// path, and the path has to be resolved against the same list the item was
+    /// built from — a script deleted between the two should report that it is
+    /// gone rather than run a neighbour that happens to sort next to it.
+    scripts: Vec<ScriptItem>,
 }
 
 impl Workspace {
@@ -388,7 +408,23 @@ impl Workspace {
             _outline_selection: outline_selection,
             _outline_filter_changes: outline_filter_changes,
             menus_built_for: None,
+            scripts: Vec::new(),
         };
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(SCRIPT_POLL).await;
+                // Once the window is gone the entity is gone with it, and there
+                // is nothing left to keep in step.
+                if this
+                    .update(cx, |workspace, cx| workspace.refresh_menus(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
         this.new_document(window, cx);
         this
     }
@@ -1337,10 +1373,23 @@ impl Workspace {
     /// of the comparison. They change only when the settings do, which is
     /// [`rebuild_menus`](Self::rebuild_menus).
     pub fn refresh_menus(&mut self, cx: &mut Context<Self>) {
-        if self.menus_built_for.as_ref() == Some(&self.menu_signature()) {
+        // Read before comparing. The Script menu is built from a folder the user
+        // can add to at any time and there is no event to wait for, so one
+        // `read_dir` per refresh is what notices a script that appeared or went;
+        // the comparison is what keeps a folder that has not changed from
+        // rebuilding the bar.
+        let scripts = scripts::scan();
+        let signature = menus::MenuSignature::of(
+            self.menu_document(),
+            self.theme.name.clone(),
+            scripts.clone(),
+        );
+        if self.menus_built_for.as_ref() == Some(&signature) {
             return;
         }
-        self.rebuild_menus(cx);
+        self.scripts = scripts;
+        self.menus_built_for = Some(signature);
+        crate::menus::install(cx, &self.menu_state());
     }
 
     /// Rebuild the menu bar and the key bindings unconditionally.
@@ -1348,6 +1397,7 @@ impl Workspace {
     /// The settings pane calls this after the snippet list is edited, where the
     /// document in front has not moved but the items under it have.
     pub fn rebuild_menus(&mut self, cx: &mut Context<Self>) {
+        self.scripts = scripts::scan();
         let state = self.menu_state();
         self.menus_built_for = Some(state.signature());
         crate::menus::install(cx, &state);
@@ -1361,12 +1411,8 @@ impl Workspace {
             syntaxes: self.syntax_names(),
             themes: self.theme_names(),
             snippets: self.settings.snippets.clone(),
+            scripts: self.scripts.clone(),
         }
-    }
-
-    /// The part of that which changes without the settings changing.
-    fn menu_signature(&self) -> menus::MenuSignature {
-        menus::MenuSignature::of(self.menu_document(), self.theme.name.clone())
     }
 
     /// The frontmost document, as the menu bar needs to see it.
@@ -2036,6 +2082,177 @@ impl Workspace {
             }
             Err(error) => self.set_status(error.to_string(), cx),
         }
+    }
+
+    // ---- scripts ----------------------------------------------------------
+
+    /// Run the script at `path` over the document in front.
+    ///
+    /// CotEditor's `ScriptManager.launchScript`, minus the modifier keys: a GPUI
+    /// menu item carries no modifier state, so a click always runs the script
+    /// rather than opening it in an editor or showing it in the Finder.
+    ///
+    /// The script's own source decides what it is given and where its answer
+    /// goes — the two `%%%{CotEditorX…}%%%` tokens — so the source is read here,
+    /// on this thread, because both answers come from the document. The process
+    /// itself runs on the background executor: it is the user's own program, and
+    /// there is no telling how long it will take.
+    pub fn run_script(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(script) = self.scripts.iter().find_map(|item| item.find(path)).cloned() else {
+            self.notice(format!("There is no script at {}", path.display()), cx);
+            return;
+        };
+
+        let invocation = match std::fs::read_to_string(&script.path) {
+            Ok(source) => Invocation::scan(&source),
+            Err(error) => {
+                self.notice(
+                    format!("The script “{}” could not be read: {error}", script.name),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        let input = invocation.input.and_then(|kind| self.script_input(kind, cx));
+        let document = self
+            .documents
+            .get(self.active)
+            .and_then(|document| document.document.path())
+            .map(Path::to_path_buf);
+        let output = invocation.output;
+        let name = script.name.clone();
+
+        let executor = cx.background_executor().clone();
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| {
+            let outcome = executor
+                .spawn(async move {
+                    scripts::execute(&script, input.as_deref(), document.as_deref())
+                })
+                .await;
+            let _ = handle.update(cx, |_, window, cx| {
+                this.update(cx, |workspace, cx| {
+                    workspace.finish_script(&name, outcome, output, window, cx);
+                })
+                .ok();
+            });
+        })
+        .detach();
+    }
+
+    /// Say how a script ended, and put its output where it asked for it.
+    fn finish_script(
+        &mut self,
+        name: &str,
+        outcome: scripts::Outcome,
+        output: Option<OutputType>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(failure) = outcome.failure {
+            self.notice(failure, cx);
+            return;
+        }
+        match output {
+            Some(kind) => self.apply_script_output(kind, outcome.output, window, cx),
+            // Upstream says nothing at all when a script declares no output,
+            // which leaves one that did its work indistinguishable from one
+            // that did nothing.
+            None => self.set_status(format!("Ran {name}"), cx),
+        }
+    }
+
+    /// Put a script's output where its `%%%{CotEditorXOutput=…}%%%` token said.
+    fn apply_script_output(
+        &mut self,
+        kind: OutputType,
+        output: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match kind {
+            OutputType::Pasteboard => {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(output));
+                self.set_status("Script output copied to the clipboard", cx);
+            }
+            OutputType::NewDocument => {
+                // Upstream makes the document only when there is something to
+                // put in it, so a script that produced nothing does not leave an
+                // empty tab behind.
+                if output.is_empty() {
+                    self.set_status("The script produced no output", cx);
+                    return;
+                }
+                let mut document =
+                    Document::untitled(self.settings.encoding(), self.settings.default_line_ending);
+                document.set_text(output, true);
+                let syntax = self
+                    .settings
+                    .default_syntax
+                    .clone()
+                    .unwrap_or_else(|| self.syntaxes.plain_text().name.clone());
+                self.push_document(document, syntax, window, cx);
+                self.set_status("Script output opened in a new document", cx);
+            }
+            _ => {
+                let Some(document) = self.documents.get(self.active) else {
+                    self.notice("There is no document to put the script's output into", cx);
+                    return;
+                };
+                let editor = document.editor().clone();
+                let range = {
+                    let state = editor.read(cx);
+                    kind.range(state.value().as_ref(), &state.selected_range())
+                };
+                let Some(range) = range else {
+                    return;
+                };
+                let caret = range.start + output.len();
+                // Deferred for the same reason a snippet is: `replace` emits
+                // `Change`, and the subscription that follows the buffer back
+                // into the document model must not run inside this update.
+                window.defer(cx, move |window, cx| {
+                    editor.update(cx, |state, cx| {
+                        state.set_selected_range(range.clone(), cx);
+                        state.replace(output, window, cx);
+                        state.set_selected_range(caret..caret, cx);
+                    });
+                });
+            }
+        }
+    }
+
+    /// The document text a script asked for.
+    fn script_input(&self, kind: InputType, cx: &App) -> Option<String> {
+        let document = self.documents.get(self.active)?;
+        let editor = document.editor().read(cx);
+        let text = editor.value().to_string();
+        let selection = editor.selected_range();
+
+        match kind {
+            InputType::Selection => text.get(selection).map(str::to_string),
+            InputType::CurrentLine => {
+                subtext_core::scripts::line_range(&text, selection).map(|range| text[range].to_string())
+            }
+            InputType::AllText => Some(text),
+        }
+    }
+
+    /// Open the folder the Script menu is built from.
+    ///
+    /// Upstream only reveals it: a sandboxed application cannot create its own
+    /// scripts folder, so the system has already made one. SubText is not
+    /// sandboxed, and on the two platforms that have no such folder it would
+    /// otherwise never exist at all — so the folder is made first. It is also
+    /// the only way to get a script into a menu that is built from it.
+    pub fn open_scripts_folder(&mut self, cx: &mut Context<Self>) {
+        let directory = resources::script_directory();
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            self.notice(format!("Could not make {}: {error}", directory.display()), cx);
+            return;
+        }
+        cx.reveal_path(&directory);
     }
 
     pub fn set_syntax(&mut self, name: &str, _window: &mut Window, cx: &mut Context<Self>) {

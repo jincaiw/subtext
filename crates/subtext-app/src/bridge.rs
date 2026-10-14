@@ -12,6 +12,8 @@
 //! no registration would show up as a dead menu entry rather than as a
 //! command that reports its own absence.
 
+use std::path::PathBuf;
+
 use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
 use subtext_core::{FileEncoding, LineEnding, Normalization};
@@ -171,6 +173,15 @@ pub fn install(cx: &mut App) {
                 workspace.normalize_unicode(form, window, cx)
             });
         }
+    });
+    // A script's action carries its path, which is the script's identity: the
+    // folder can be rearranged between the item being built and being chosen,
+    // and two folders may hold a script of the same name.
+    cx.on_action(|action: &actions::script::RunScript, cx: &mut App| {
+        let path = PathBuf::from(&action.path);
+        tell(cx, move |workspace, window, cx| {
+            workspace.run_script(&path, window, cx)
+        });
     });
     bind_actions! { cx,
         actions::app::ShowAboutPanel => "ShowAboutPanel",
@@ -342,6 +353,7 @@ pub fn install(cx: &mut App) {
         actions::help::ReportBug => "ReportBug",
         actions::help::CreateBugReport => "CreateBugReport",
         actions::help::ReleaseNotes => "ReleaseNotes",
+        actions::script::OpenScriptsFolder => "OpenScriptsFolder",
     };
 }
 

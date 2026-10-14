@@ -217,10 +217,13 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ 8.9d ✅ |
 
-**非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
-理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
+**非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
+即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
+理由：前三者需要平台能力或框架不支持，第四者收益低于成本。Script 菜单里的 `.scpt`
+文件**会**列出来并在 macOS 上交给 `osascript` 运行，但脚本里对 CotEditor 自身的
+`tell` 无处可去——那是这里说的那个 dictionary。
 
 ### 8.0 大纲改用 `Tree` 组件 ✅
 
@@ -826,7 +829,7 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 | `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ✅ 8.9c |
 | `Text ▸ Unicode Normalizations` | `UnicodeNormalizationForm.standardForms + [nil] + modifiedForms` | ✅ 8.9b |
 | `CotEditor ▸ Services` | 系统（`SystemMenuType::Services`） | ✅ 8.9a |
-| `Script`（顶层） | `ScriptManager`，`~/Library/Application Scripts` | ⏳ 8.9d |
+| `Script`（顶层） | `ScriptManager`，`~/Library/Application Scripts` | ✅ 8.9d |
 | `Font ▸ Font Type`、`Writing Direction ▸ Orientation` / `Direction` | 上游是 `NSMenuItem.sectionHeader`，本表里已是置灰 `NoOp` 叶 | ✅（即上游形态） |
 | `Edit ▸ Insert from iPhone or iPad` | 系统（Handoff） | ✅（即上游形态） |
 
@@ -934,8 +937,54 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 实际以 windows-1252 解、"Turkish (ISO Latin 5)" 实际以 windows-1254 解。两者都是超集，
 名字与实现却是两回事；注册表对齐见下方「已知缺口」。
 
-**8.9d `Script` 菜单**：上游从 `~/Library/Application Scripts/<bundle id>` 读脚本。
-平台相关，排在最后。
+**8.9d `Script` 菜单**（`subtext-core/src/scripts.rs`、`subtext-app/src/scripts.rs`）
+
+- **目录落点**。上游问 `URL(for: .applicationScriptsDirectory, in: .userDomainMask)`，
+  即 `~/Library/Application Scripts/<bundle id>`。这个目录由系统为**沙箱应用**建好，
+  而 SubText 不是沙箱应用，macOS 之外的平台更没有这个目录，所以 `resources::script_directory()`
+  在 macOS 上照抄上游路径（`BUNDLE_ID = "com.subtext.SubText"`，它只用来把一家应用的脚本
+  与另一家的分开），其余平台退回 `config_directory()/Scripts`。
+- **能力接缝是 `ScriptKind::is_available()`，不是扩展名。** AppleScript 要 Apple event 运行时，
+  非 macOS 上为 `false`，`scan` 因此**不把 `.applescript`/`.scpt`/`.scptd` 列进菜单**——
+  列出来再点失败，是把平台差异甩给用户。Windows 上还有第二处：它不读 shebang，所以
+  `Script::launch()` 按扩展名给解释器（`sh`/`pl`/`php`/`rb`/`py`/`js`/`awk`/`swift`），
+  其余平台一律 `Launch::File`，由内核按 shebang 执行。
+- **跨平台照搬的部分**：目录扫描规则（跳过 `.` 与 `_` 前缀、按文件名排序、`^\d+\)` 前缀只去前缀
+  不去空格、名为 `-` 的文件变分隔符、子目录变子菜单、`.scptd` 先问是不是脚本再问是不是目录）、
+  末尾恒为 `[分隔符, "Open Scripts Folder"]`、脚本扩展名里的快捷键（`Clean.@s.sh` → ⌘S）、
+  `%%%{CotEditorXInput=…}%%%` / `%%%{CotEditorXOutput=…}%%%` 协议与七种输出目标、
+  以及 `applyShortcuts()` 的**语法优先**。
+- **`applyShortcuts()` 的优先顺序复刻时踩到过。** 上游先给「与当前文档语法同名的子菜单」里的
+  脚本派键，再给其余；但**没有**这个同名子菜单时用的是 `recursively: false`，只先派顶层那批，
+  子菜单里的脚本并不因此获得优先。第一版实现写成了「各子菜单各自保留同一键」，
+  被 `the_folder_named_after_the_syntax_gets_the_keys_first` 揪出来。
+- **`NSFilePresenter` 换成轮询。** 上游盯目录变化重算菜单，GPUI 没有对应的文件观察者。
+  `Workspace` 每 2 秒（`SCRIPT_POLL`）`scripts::scan()` 一次，与 `MenuSignature` 比对，
+  不同才重建——用户往文件夹里丢一个脚本，菜单两秒内自己长出来。探针实测
+  `step 0: 1 scripts` → `step 1: 2 scripts`。
+- **脚本在主线程起、进程在后台跑、结果回来再落。** `run_script` 先查脚本列表（命令按路径找脚本，
+  路径必须对着同一份列表解析）、读源码、解 token、取输入（选区 / 当前行 / 全文）与文档路径，
+  再把进程交给后台执行器——`execute` 会阻塞到子进程退出，界面线程不能等——回来后由
+  `finish_script` 落结果。`OutputType::range` 给出七种目标各自的区间：`Pasteboard` 走剪贴板、
+  `NewDocument` 建新文档（**空输出不建**，否则一个什么也没干的脚本会留下一个空标签页），
+  其余在 `window.defer` 里 `set_selected_range` + `replace` + 把光标停在插入文本之后——
+  与代码片段同一条理由，`replace` 会发 `Change`。
+- **偏差：没有修饰键行为。** 上游普通点击运行脚本、Option 点击在编辑器里打开、Option+Shift
+  在 Finder 里显示。GPUI 的菜单项不带修饰键状态，所以点击**恒为运行**。脚本文件夹本身与
+  *Open Scripts Folder* 两条入口不受影响。
+- **偏差：没有 tooltip。** 上游给每个脚本项挂 `"Option-click to open script in editor."`，
+  GPUI 的菜单项没有 tooltip，与 8.9b、8.9c 同样无处可放。
+- **偏差：`tell application "CotEditor"` 无处可去。** AppleScript 在 macOS 上交给 `osascript`
+  跑，但上游的示例脚本里有靠 CotEditor 自己的 scripting dictionary 驱动的，那需要 SubText
+  反过来暴露一个 dictionary，不在本阶段范围内。
+- **未实现：事件脚本。** 上游的 `CotEditorHandlers`（`documentOpened` / `documentSaved`）
+  让脚本在文档打开或保存时自动跑。GPUI 侧没有对应钩子，本阶段不做。
+- **比上游多说一句**：脚本非零退出但 stderr 为空时，上游看着像成功了（它只看 stderr），
+  SubText 在状态栏说明失败。**另有一条实测得来的约束**：两个 token 必须写在脚本的**注释**里
+  ——裸写一行 `%%%{CotEditorXInput=AllText}%%%` 会被 `/bin/sh` 当命令执行并报
+  `fg: no job control`。上游的示例脚本本来就是注释形式，但文档里没写这件事。
+- `Open Scripts Folder` 会先 `create_dir_all`：上游是沙箱应用，系统已把目录建好；SubText 不是，
+  非 macOS 上这个目录根本不存在，而它又是唯一能把脚本放进菜单的入口。
 
 **8.9e 让 `COMMANDS` 包含运行时条目**：`Syntax ▸ Swift`、`Theme ▸ Solarized Dark`
 这类条目上游在 Quick Actions 里也能搜到，本表目前搜不到——`COMMANDS` 只由
@@ -958,6 +1007,7 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
 | Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
 | 编码注册表与上游默认列表尚未逐条对齐 | `encoding_rs` 实现的是 WHATWG Encoding Standard（一个以 Windows 为中心的**子集**），不是 Apple 的 codec 集合。上游 `DefaultSettings+Encodings.swift` 的默认菜单列表有 60 条，SubText 只能提供其中约 40 条：Mac OS 系列（MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic）、Big5-E、EUC-TW、DOS 系列（DOSJapanese、DOSChineseTrad、DOSLatinUS、DOSRussian）、NextStep Latin、ASCII 都没有对应 codec；反过来 SubText 多出四条上游默认列表里没有的（KOI8-R、KOI8-U、Vietnamese Windows、Baltic Windows）。注册表里还有几对**共用 codec 的条目**（GBK / GB 2312、Big5 / Big5-HKSCS、Windows Latin 2 / Central European (Windows)、Turkish 两条、Baltic 两条、Shift JIS / Shift JIS X0213），名字与标识符都不同、各自可解析，但选任意一条效果相同。**本轮（8.9c）只修了会被菜单直接暴露的错**：ISO Latin 5–10 此前映射到完全不同的字母表（Latin 5 → ISO-8859-5 西里尔、6 → ISO-8859-6 阿拉伯、7 → ISO-8859-7 希腊、8 → ISO-8859-8 希伯来、9 → ISO-8859-10、10 → ISO-8859-13），现在按上游的名字与 Apple `CFStringEncodings` 的对应关系改成 windows-1254 / ISO-8859-10 / ISO-8859-13 / ISO-8859-14 / ISO-8859-15 / ISO-8859-16，Latin 2 与 4 的名字也对齐成上游的 "Central European (ISO Latin 2/4)"。剩下的一次性对齐见任务 #37。 |
+| `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |

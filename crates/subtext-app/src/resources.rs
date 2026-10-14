@@ -95,6 +95,31 @@ pub fn user_theme_directory() -> PathBuf {
     config_directory().join("Themes")
 }
 
+/// Where the user's scripts live.
+///
+/// macOS has a directory for exactly this — the application scripts folder,
+/// which is where CotEditor reads from — and it is used there, so a folder of
+/// scripts written for CotEditor keeps working once it is copied across. The
+/// other two platforms have no such directory, so the scripts live beside the
+/// settings, which is the contract the syntax and theme folders already offer.
+pub fn script_directory() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        /// CotEditor's folder is keyed by its bundle identifier, which is what
+        /// keeps one application's scripts out of another's. SubText is a plain
+        /// executable rather than a bundle, so it names itself.
+        const BUNDLE_ID: &str = "com.subtext.SubText";
+
+        if let Some(home) = dirs::home_dir() {
+            return home
+                .join("Library")
+                .join("Application Scripts")
+                .join(BUNDLE_ID);
+        }
+    }
+    config_directory().join("Scripts")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -112,6 +112,7 @@ impl Workspace {
                     cx,
                 );
             }
+            "OpenScriptsFolder" => self.open_scripts_folder(cx),
             "MakeFontStandard" => self.set_font(None, cx),
             "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),
             "BiggerFont" => self.bump_font(1.0, cx),

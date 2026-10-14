@@ -1,14 +1,15 @@
 //! The menu bar, and the one place it is rebuilt from.
 //!
 //! [`menu::app_menus`] is a compile-time table: every item CotEditor names in
-//! its `Main.storyboard`, and the action each one runs. Six of its submenus
-//! cannot be written down at compile time, though. Five are empty `<menu>`
-//! elements in the storyboard itself — CotEditor fills those in from the
-//! document in front and from the settings, and a table cannot name a syntax or
-//! a theme the user has not installed yet. The sixth is *Insert Snippet*, whose
-//! items are the user's own data.
+//! its `Main.storyboard`, and the action each one runs. Seven of them cannot be
+//! written down at compile time, though. Five are empty `<menu>` elements in the
+//! storyboard itself — CotEditor fills those in from the document in front and
+//! from the settings, and a table cannot name a syntax or a theme the user has
+//! not installed yet. The sixth is *Insert Snippet*, whose items are the user's
+//! own data. The seventh is *Script*, which is an empty *top-level* menu whose
+//! items are the user's own files.
 //!
-//! So the generator leaves the five empty and disabled, and this module fills
+//! So the generator leaves the six empty and disabled, and this module fills
 //! them in — and rebuilds the snippet submenu, which has one storyboard item
 //! that [`snippets`] re-creates as part of the list. [`install`] is the only place the bar is set: it clears the keymap,
 //! lays the built-in bindings back down, adds the snippets' own, and sets the
@@ -26,14 +27,20 @@
 //! for the other case — the settings themselves changed, so there is nothing
 //! worth comparing.
 //!
+//! The Script menu is in the signature for a different reason: its items are
+//! the files in a folder the user can add to at any time, and there is no event
+//! to wait for. Reading the folder is one `read_dir`, which is cheap enough to
+//! do on every refresh, and the comparison is what keeps a folder that has not
+//! changed from rebuilding the bar.
+//!
 //! # Naming an item the runtime does not know
 //!
 //! An item in one of these submenus cannot name its action at compile time, so
 //! each one carries the value it stands for: a line ending's abbreviation, a
-//! syntax's name, a theme's name. Those actions live in [`crate::actions`], and
-//! [`crate::bridge`] turns each value back into the thing it names. Naming one
-//! by its *position* would make an item run the wrong command the moment the
-//! list above it changed.
+//! syntax's name, a theme's name, a script's path. Those actions live in
+//! [`crate::actions`], and [`crate::bridge`] turns each value back into the
+//! thing it names. Naming one by its *position* would make an item run the
+//! wrong command the moment the list above it changed.
 //!
 //! # The keymap
 //!
@@ -43,7 +50,8 @@
 //! and refuses it in the settings pane, where the user can be told which command
 //! it was — but a settings file edited by hand can still hold one, so [`install`]
 //! drops it here as well: a snippet must never take a key that ⌘S or ⌘F already
-//! answers to.
+//! answers to. A script's key, which comes out of its file name, is held to the
+//! same rule for the same reason.
 //!
 //! # Where this differs from CotEditor
 //!
@@ -53,16 +61,23 @@
 //! long as the menu is open. GPUI's menu API has no hidden items and no
 //! modifier tracking, so the six are always listed. Every choice upstream offers
 //! is offered here; three of them take fewer keystrokes.
+//!
+//! *A script runs on a plain click.* Upstream opens a script in an editor on
+//! Option and shows it in the Finder on Option-Shift; a GPUI menu item carries
+//! no modifier state, so there is no second and third behaviour to reach. See
+//! [`crate::scripts`].
 
 use gpui_kit::{App, Menu, MenuItem};
 
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
+use subtext_core::scripts::Item as ScriptItem;
 use subtext_core::snippets::Snippet;
 use subtext_core::{FileEncoding, LineEnding, Normalization, Sections};
 
 use crate::actions;
 use crate::keymap;
 use crate::menu;
+use crate::scripts;
 use crate::snippets;
 
 /// The submenu names the runtime fills in, as `resources/menu.json` spells them.
@@ -76,6 +91,9 @@ const SYNTAX_MENU: &str = "Syntax";
 const THEME_MENU: &str = "Theme";
 const UNICODE_NORMALIZATIONS_MENU: &str = "Unicode Normalizations";
 const INSERT_SNIPPET_MENU: &str = "Insert Snippet";
+
+/// The one runtime menu that is a menu of its own rather than a submenu.
+const SCRIPT_MENU: &str = "Script";
 
 /// The last item of Format ▸ Text Encoding.
 ///
@@ -115,6 +133,8 @@ pub struct MenuState {
     pub themes: Vec<String>,
     /// The user's snippets.
     pub snippets: Vec<Snippet>,
+    /// The user's scripts, as the folder they live in holds them.
+    pub scripts: Vec<ScriptItem>,
 }
 
 /// The part of a [`MenuState`] that changes without the settings changing.
@@ -122,18 +142,31 @@ pub struct MenuState {
 /// Kept apart from the state itself so that the comparison which decides whether
 /// a rebuild is needed does not have to clone the syntax list, the theme list
 /// and every snippet on each tab switch.
+///
+/// The scripts are here because the folder they come from is one the user can
+/// add to at any time, and there is no event to wait for: the list is read on
+/// every refresh and compared, which is what notices a script that has appeared
+/// or gone. The list is a few paths, so the comparison is cheaper than the
+/// `read_dir` that produced it.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MenuSignature {
     document: Option<DocumentState>,
     theme: String,
+    scripts: Vec<ScriptItem>,
 }
 
 impl MenuSignature {
-    /// The signature of a bar showing `document` under `theme`.
-    pub fn of(document: Option<DocumentState>, theme: impl Into<String>) -> Self {
+    /// The signature of a bar showing `document` under `theme`, with `scripts`
+    /// in the Script menu.
+    pub fn of(
+        document: Option<DocumentState>,
+        theme: impl Into<String>,
+        scripts: Vec<ScriptItem>,
+    ) -> Self {
         Self {
             document,
             theme: theme.into(),
+            scripts,
         }
     }
 }
@@ -141,7 +174,11 @@ impl MenuSignature {
 impl MenuState {
     /// The part of this state that [`MenuSignature`] covers.
     pub fn signature(&self) -> MenuSignature {
-        MenuSignature::of(self.document.clone(), self.theme.clone())
+        MenuSignature::of(
+            self.document.clone(),
+            self.theme.clone(),
+            self.scripts.clone(),
+        )
     }
 }
 
@@ -159,7 +196,12 @@ pub fn install(cx: &mut App, state: &MenuState) {
     let added = {
         let keymap = cx.key_bindings();
         let keymap = keymap.borrow();
-        snippets::bindings(&keymap, &Sections::of(&state.snippets, scope(state)))
+        let mut added = snippets::bindings(&keymap, &Sections::of(&state.snippets, scope(state)));
+        // After the snippets, so that of the two a snippet keeps a key they
+        // both want: it is the older of the two features, and its list is the
+        // one the user can see and edit.
+        added.extend(scripts::bindings(&keymap, &state.scripts, scope(state)));
+        added
     };
 
     cx.bind_keys(added);
@@ -194,6 +236,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         UNICODE_NORMALIZATIONS_MENU,
         normalizations(),
     );
+    replace(&mut menus, SCRIPT_MENU, scripts::items(&state.scripts));
 
     menus
 }
@@ -204,11 +247,25 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
 /// being handed the path it is on: the table is generated, so a path written
 /// here would be a second copy of the storyboard's structure to keep in step.
 ///
+/// A top-level menu counts as well as a submenu, because one of the runtime
+/// menus — `Script` — is a menu of its own rather than a submenu of another.
+///
 /// Returns whether it found one. A miss would leave the submenu empty and
 /// disabled, so the tests check every name against the generated table.
 fn replace(menus: &mut [Menu], name: &str, items: Vec<MenuItem>) -> bool {
     let mut items = items;
-    menus.iter_mut().any(|menu| splice(menu, name, &mut items))
+    menus.iter_mut().any(|menu| {
+        if &*menu.name == name {
+            menu.items = std::mem::take(&mut items);
+            // The generator leaves the placeholder disabled, which is what keeps
+            // an empty menu from reading as a broken one before the first
+            // document is open. It is no longer empty, so it is no longer
+            // disabled.
+            menu.disabled = false;
+            return true;
+        }
+        splice(menu, name, &mut items)
+    })
 }
 
 /// The recursive half of [`replace`], which walks into submenus.
@@ -219,10 +276,6 @@ fn splice(menu: &mut Menu, name: &str, items: &mut Vec<MenuItem>) -> bool {
         };
         if &*submenu.name == name {
             submenu.items = std::mem::take(items);
-            // The generator leaves the placeholder disabled, which is what keeps
-            // an empty submenu from reading as a broken one before the first
-            // document is open. It is no longer empty, so it is no longer
-            // disabled.
             submenu.disabled = false;
             return true;
         }
@@ -431,8 +484,10 @@ fn normalization(form: Normalization) -> MenuItem {
 mod tests {
     use super::*;
 
+    use std::path::PathBuf;
+
     use subtext_core::snippets::Shortcut;
-    use subtext_core::TextEncoding;
+    use subtext_core::{Script, ScriptKind, TextEncoding};
 
     fn document() -> DocumentState {
         DocumentState {
@@ -449,6 +504,7 @@ mod tests {
             syntaxes: vec!["HTML".into(), "Markdown".into(), "Ruby".into()],
             themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
             snippets: Vec::new(),
+            scripts: Vec::new(),
         }
     }
 
@@ -462,8 +518,11 @@ mod tests {
         }
     }
 
-    /// The submenu called `name`, wherever it is.
-    fn submenu<'a>(menus: &'a [Menu], name: &str) -> &'a Menu {
+    /// The menu or submenu called `name`, wherever it is.
+    ///
+    /// A top-level menu counts, because `Script` is one: it is the only runtime
+    /// menu that is not a submenu of another.
+    fn named<'a>(menus: &'a [Menu], name: &str) -> &'a Menu {
         fn find<'a>(menu: &'a Menu, name: &str) -> Option<&'a Menu> {
             menu.items.iter().find_map(|item| match item {
                 MenuItem::Submenu(submenu) if &*submenu.name == name => Some(submenu),
@@ -473,8 +532,9 @@ mod tests {
         }
         menus
             .iter()
-            .find_map(|menu| find(menu, name))
-            .unwrap_or_else(|| panic!("no {name} submenu"))
+            .find(|menu| &*menu.name == name)
+            .or_else(|| menus.iter().find_map(|menu| find(menu, name)))
+            .unwrap_or_else(|| panic!("no {name} menu"))
     }
 
     /// The labels of some items, with separators marked and disabled items in
@@ -499,7 +559,7 @@ mod tests {
 
     /// The labels of a submenu.
     fn labels(menus: &[Menu], name: &str) -> Vec<String> {
-        item_labels(&submenu(menus, name).items)
+        item_labels(&named(menus, name).items)
     }
 
     /// Labels cut back into groups at each separator, the trailing one dropped.
@@ -524,7 +584,7 @@ mod tests {
 
     /// The checked label of a submenu, if it has one.
     fn checked(menus: &[Menu], name: &str) -> Option<String> {
-        checked_label(&submenu(menus, name).items)
+        checked_label(&named(menus, name).items)
     }
 
     /// Every placeholder the generator leaves behind is one this module fills
@@ -539,13 +599,11 @@ mod tests {
             THEME_MENU,
             UNICODE_NORMALIZATIONS_MENU,
             INSERT_SNIPPET_MENU,
+            SCRIPT_MENU,
         ] {
             let menus = build(&state());
-            assert!(!submenu(&menus, name).items.is_empty(), "{name} is empty");
-            assert!(
-                !submenu(&menus, name).disabled,
-                "{name} is still disabled"
-            );
+            assert!(!named(&menus, name).items.is_empty(), "{name} is empty");
+            assert!(!named(&menus, name).disabled, "{name} is still disabled");
         }
     }
 
@@ -583,8 +641,8 @@ mod tests {
         state.document = None;
         let menus = build(&state);
 
-        assert!(submenu(&menus, LINE_ENDINGS_MENU).items.iter().all(MenuItem::is_disabled));
-        assert!(submenu(&menus, SYNTAX_MENU).items.iter().all(|item| {
+        assert!(named(&menus, LINE_ENDINGS_MENU).items.iter().all(MenuItem::is_disabled));
+        assert!(named(&menus, SYNTAX_MENU).items.iter().all(|item| {
             // The separator is the one item with no disabled flag to set.
             matches!(item, MenuItem::Separator) || item.is_disabled()
         }));
@@ -604,7 +662,7 @@ mod tests {
             checked(&menus, THEME_MENU).as_deref(),
             Some("Solarized Dark")
         );
-        assert!(submenu(&menus, THEME_MENU).items.iter().all(|item| !item.is_disabled()));
+        assert!(named(&menus, THEME_MENU).items.iter().all(|item| !item.is_disabled()));
     }
 
     /// `None` first, behind a separator, then every syntax — and the document's
@@ -632,7 +690,7 @@ mod tests {
     #[test]
     fn every_line_ending_item_names_the_ending_it_stands_for() {
         let menus = build(&state());
-        let named: Vec<String> = submenu(&menus, LINE_ENDINGS_MENU)
+        let carried: Vec<String> = named(&menus, LINE_ENDINGS_MENU)
             .items
             .iter()
             .map(|item| {
@@ -647,13 +705,13 @@ mod tests {
                     .clone()
             })
             .collect();
-        assert_eq!(named, ["LF", "CR", "CRLF", "NEL", "LS", "PS"]);
+        assert_eq!(carried, ["LF", "CR", "CRLF", "NEL", "LS", "PS"]);
     }
 
     #[test]
     fn every_syntax_item_names_the_syntax_it_stands_for() {
         let menus = build(&state());
-        let named: Vec<String> = submenu(&menus, SYNTAX_MENU)
+        let carried: Vec<String> = named(&menus, SYNTAX_MENU)
             .items
             .iter()
             .filter_map(|item| match item {
@@ -668,7 +726,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(named, ["None", "HTML", "Markdown", "Ruby"]);
+        assert_eq!(carried, ["None", "HTML", "Markdown", "Ruby"]);
     }
 
     // ---- the encoding submenu --------------------------------------------
@@ -800,7 +858,7 @@ mod tests {
 
     /// The identifiers the encoding submenu's items carry, in order.
     fn encoding_identifiers(menus: &[Menu]) -> Vec<String> {
-        submenu(menus, TEXT_ENCODING_MENU)
+        named(menus, TEXT_ENCODING_MENU)
             .items
             .iter()
             .filter_map(|item| match item {
@@ -841,7 +899,7 @@ mod tests {
     #[test]
     fn the_normalization_menu_has_no_checks_and_no_dead_items() {
         let menus = build(&state());
-        let items = &submenu(&menus, UNICODE_NORMALIZATIONS_MENU).items;
+        let items = &named(&menus, UNICODE_NORMALIZATIONS_MENU).items;
         assert!(!items.iter().any(MenuItem::is_checked));
         assert!(!items.iter().any(MenuItem::is_disabled));
     }
@@ -851,7 +909,7 @@ mod tests {
     #[test]
     fn every_normalization_item_names_the_form_it_stands_for() {
         let menus = build(&state());
-        let named: Vec<&str> = submenu(&menus, UNICODE_NORMALIZATIONS_MENU)
+        let carried: Vec<&str> = named(&menus, UNICODE_NORMALIZATIONS_MENU)
             .items
             .iter()
             .filter_map(|item| match item {
@@ -871,7 +929,7 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            named,
+            carried,
             ["NFD", "NFC", "NFKD", "NFKC", "NFKC Case-Fold", "Modified NFD", "Modified NFC"]
         );
     }
@@ -920,7 +978,7 @@ mod tests {
         state.snippets = vec![snippet(7, "Header", None, None)];
         let menus = build(&state);
 
-        let found = submenu(&menus, INSERT_SNIPPET_MENU)
+        let found = named(&menus, INSERT_SNIPPET_MENU)
             .items
             .iter()
             .find_map(|item| match item {
@@ -931,6 +989,92 @@ mod tests {
                 _ => None,
             });
         assert_eq!(found, Some(7));
+    }
+
+    // ---- the script menu -------------------------------------------------
+
+    /// One script, as the folder scan would have found it.
+    fn script(name: &str, path: &str, spec: Option<&str>) -> Script {
+        Script {
+            path: PathBuf::from(path),
+            name: name.to_string(),
+            kind: ScriptKind::Unix,
+            shortcut: spec.and_then(Shortcut::parse),
+        }
+    }
+
+    /// A state whose Script menu holds two scripts, one behind a folder.
+    fn scripted() -> MenuState {
+        let mut state = state();
+        state.scripts = vec![
+            ScriptItem::Script(script("Save", "/scripts/Save.@s.sh", Some("@s"))),
+            ScriptItem::Separator,
+            ScriptItem::Folder {
+                name: "Python".into(),
+                items: vec![ScriptItem::Script(script(
+                    "Clean",
+                    "/scripts/Python/Clean.py",
+                    None,
+                ))],
+            },
+        ];
+        state
+    }
+
+    /// The folder's own entries first, then the way to the folder — upstream's
+    /// shape, whatever the folder holds.
+    #[test]
+    fn the_script_menu_is_the_folder_then_the_way_to_it() {
+        assert_eq!(
+            labels(&build(&scripted()), SCRIPT_MENU),
+            ["Save", "―", "(Python)", "―", "Open Scripts Folder"]
+        );
+    }
+
+    /// The Script menu is a menu of its own, not a submenu of another, so it is
+    /// filled in where it sits at the top level.
+    #[test]
+    fn the_script_menu_is_a_top_level_menu() {
+        let menus = build(&state());
+        let script = menus
+            .iter()
+            .find(|menu| &*menu.name == SCRIPT_MENU)
+            .expect("the bar has a Script menu");
+        assert!(!script.disabled);
+        assert_eq!(labels(&menus, SCRIPT_MENU), ["Open Scripts Folder"]);
+    }
+
+    /// A script item carries the script's path, not its position: the folder can
+    /// be rearranged between the item being built and being chosen.
+    #[test]
+    fn every_script_item_names_the_script_it_stands_for() {
+        let menus = build(&scripted());
+        let carried: Vec<String> = named(&menus, SCRIPT_MENU)
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                // The way to the folder is the one item here that does not name
+                // a script.
+                MenuItem::Action { action, .. } => action
+                    .as_any()
+                    .downcast_ref::<actions::script::RunScript>()
+                    .map(|action| action.path.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(carried, ["/scripts/Save.@s.sh"]);
+    }
+
+    /// Scripts belong to the application rather than to a document, so the menu
+    /// is the same with nothing open.
+    #[test]
+    fn the_script_menu_does_not_follow_the_document() {
+        let mut state = scripted();
+        state.document = None;
+        assert_eq!(
+            labels(&build(&state), SCRIPT_MENU),
+            labels(&build(&scripted()), SCRIPT_MENU)
+        );
     }
 
     // ---- the signature ---------------------------------------------------
@@ -962,6 +1106,34 @@ mod tests {
         let mut closed = state();
         closed.document = None;
         assert_ne!(closed.signature(), before, "closing the document was missed");
+    }
+
+    /// The scripts are part of it, unlike the syntax and theme tables: the
+    /// folder they come from is one the user can add to at any time, so reading
+    /// it again and comparing is what notices a script that appeared or went.
+    #[test]
+    fn the_signature_follows_the_scripts() {
+        let before = state().signature();
+
+        let mut appeared = state();
+        appeared.scripts = vec![ScriptItem::Script(script("Save", "/scripts/Save.@s.sh", None))];
+        assert_ne!(
+            appeared.signature(),
+            before,
+            "a script that appeared was missed"
+        );
+
+        let mut shortcut_added = state();
+        shortcut_added.scripts = vec![ScriptItem::Script(script(
+            "Save",
+            "/scripts/Save.@s.sh",
+            Some("@s"),
+        ))];
+        assert_ne!(
+            shortcut_added.signature(),
+            appeared.signature(),
+            "a script that gained a shortcut was missed"
+        );
     }
 
     /// The tables are not part of it: they change only when the settings do, and

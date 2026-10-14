@@ -17,7 +17,7 @@
 | 动作类型 | 153 个 `@objc` selector | 182 个类型化动作 | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 29,147（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 30,923（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -203,6 +203,8 @@
 
 ## 9. 窗口与帮助菜单
 
+（`Script` 菜单排在 `Window` 与 `Help` 之间，内容是运行时的，单列于 §10。）
+
 | 功能 | SubText | 状态 |
 | --- | --- | --- |
 | 最小化 | `minimize_window` | ✅ |
@@ -215,7 +217,36 @@
 
 ---
 
-## 10. 快捷键对照（72 条）
+## 10. Script 菜单
+
+顶层菜单本身在 `menu.json` 里是**空的**（`{"path": "", "title": "Script", ...}`），
+和上游一样——它的内容来自用户的脚本文件夹，构建时才填。目录落点：
+macOS 为 `~/Library/Application Scripts/com.subtext.SubText`（上游 `ScriptManager` 的路径），
+Windows / Linux 为 `config_directory()/Scripts`。
+
+| 功能 | CotEditor 实现 | SubText | 状态 |
+| --- | --- | --- | --- |
+| 脚本列表 | `ScriptManager.updateMenu()` → `scriptMenuItems(at:)` | `scripts::scan()` → `scripts::items()` | ✅ |
+| 目录递归成子菜单 | `ScriptManager` | `Item::Folder` | ✅ |
+| `-` 文件变分隔符 | 同上 | `Item::Separator` | ✅ |
+| `^\d+\)` 前缀去除（排序用） | 同上 | `scripts::menu_name` | ✅ |
+| 跳过 `.` / `_` 前缀文件 | 同上 | `scan` | ✅ |
+| 末尾 `Open Scripts Folder` | `[.separator(), "Open Scripts Folder"]` | `scripts::OPEN_SCRIPTS_FOLDER` | ✅ |
+| 脚本扩展名快捷键 | `ScriptDescriptor` 解析扩展名 | `Shortcut::parse`（`Clean.@s.sh` → ⌘S） | ✅ |
+| 语法同名子菜单优先派键 | `applyShortcuts()` | `scripts::bindings(items, scope)` | ✅ |
+| `%%%{CotEditorXInput=…}%%%` | `UnixScript.run()` | `Invocation::scan` | ✅ |
+| `%%%{CotEditorXOutput=…}%%%`（七种目标） | 同上 | `OutputType::range` + `apply_script_output` | ✅ |
+| AppleScript（`.applescript` / `.scpt` / `.scptd`） | `ScriptingFileType`，经 Apple event | macOS 交给 `osascript`；其他平台不进菜单 | 🔁 |
+| shebang 脚本（`.sh` / `.py` 等） | 内核执行 | `Launch::File`；Windows 按扩展名给解释器 | 🔁 |
+| 目录变化自动重算菜单 | `NSFilePresenter` | 2 秒轮询（`SCRIPT_POLL`）+ `MenuSignature` | 🔁 |
+| Option 点击打开 / Option+Shift 显示 | `NSEvent.modifierFlags` | — | ⚠️ GPUI 菜单项无修饰键状态，点击恒为运行 |
+| 菜单项 tooltip | `"Option-click to open script in editor."` | — | ⚠️ GPUI 菜单项无 tooltip |
+| 事件脚本（`documentOpened` / `documentSaved`） | `ScriptInfo` + `CotEditorHandlers` | — | ⏳ 无对应钩子 |
+| `tell application "CotEditor"` | 自身 scripting dictionary | — | ⚠️ 不暴露 dictionary |
+
+---
+
+## 11. 快捷键对照（72 条）
 
 全部 72 条与 CotEditor 一致。修饰键语义：
 
@@ -252,15 +283,15 @@
 
 ---
 
-## 11. 统计
+## 12. 统计
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 113 | 62% |
-| 🔁 等价实现（委托或改写） | 约 22 | 12% |
-| ⚠️ 平台受限（菜单保留） | 约 16 | 9% |
-| ⏳ 未实现（菜单保留 + 提示） | 约 31 | 17% |
-| **合计** | **182** | **100%** |
+| ✅ 完整实现 | 约 123 | 62% |
+| 🔁 等价实现（委托或改写） | 约 25 | 13% |
+| ⚠️ 平台受限（菜单保留） | 约 19 | 9% |
+| ⏳ 未实现（菜单保留 + 提示） | 约 32 | 16% |
+| **合计** | **199** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。
 未实现的功能不是「从菜单里删掉」，而是「保留 + 说明」——
