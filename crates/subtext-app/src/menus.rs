@@ -1,13 +1,16 @@
 //! The menu bar, and the one place it is rebuilt from.
 //!
 //! [`menu::app_menus`] is a compile-time table: every item CotEditor names in
-//! its `Main.storyboard`, and the action each one runs. Five of its submenus are
-//! not in the storyboard at all, though. CotEditor fills those in from the
-//! document in front and from the settings, and a compile-time table cannot name
-//! a syntax or a theme the user has not installed yet.
+//! its `Main.storyboard`, and the action each one runs. Six of its submenus
+//! cannot be written down at compile time, though. Five are empty `<menu>`
+//! elements in the storyboard itself — CotEditor fills those in from the
+//! document in front and from the settings, and a table cannot name a syntax or
+//! a theme the user has not installed yet. The sixth is *Insert Snippet*, whose
+//! items are the user's own data.
 //!
-//! So the generator leaves those five empty and disabled, and this module fills
-//! them in. [`install`] is the only place the bar is set: it clears the keymap,
+//! So the generator leaves the five empty and disabled, and this module fills
+//! them in — and rebuilds the snippet submenu, which has one storyboard item
+//! that [`snippets`] re-creates as part of the list. [`install`] is the only place the bar is set: it clears the keymap,
 //! lays the built-in bindings back down, adds the snippets' own, and sets the
 //! menu bar with every submenu filled in.
 //!
@@ -55,7 +58,7 @@ use gpui_kit::{App, Menu, MenuItem};
 
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
 use subtext_core::snippets::Snippet;
-use subtext_core::{LineEnding, Normalization, Sections, TextEncoding};
+use subtext_core::{FileEncoding, LineEnding, Normalization, Sections};
 
 use crate::actions;
 use crate::keymap;
@@ -68,10 +71,17 @@ use crate::snippets;
 /// names are unique across the whole bar — which is what lets [`replace`] find
 /// one without being told the path it sits on.
 const LINE_ENDINGS_MENU: &str = "Line Endings";
+const TEXT_ENCODING_MENU: &str = "Text Encoding";
 const SYNTAX_MENU: &str = "Syntax";
 const THEME_MENU: &str = "Theme";
 const UNICODE_NORMALIZATIONS_MENU: &str = "Unicode Normalizations";
 const INSERT_SNIPPET_MENU: &str = "Insert Snippet";
+
+/// The last item of Format ▸ Text Encoding.
+///
+/// Upstream appends it after a separator, whatever the list holds, and it is
+/// the one item in that submenu that does not name an encoding.
+const CUSTOMIZE_ENCODINGS: &str = "Customize Encodings List…";
 
 /// The syntax name that means "no highlighting".
 ///
@@ -89,8 +99,8 @@ pub struct DocumentState {
     pub syntax: String,
     /// The line endings the document uses.
     pub line_ending: LineEnding,
-    /// The encoding the document will be written in.
-    pub encoding: TextEncoding,
+    /// The encoding the document will be written in, mark and all.
+    pub encoding: FileEncoding,
 }
 
 /// Everything the menu bar is built from.
@@ -176,6 +186,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         snippets::items(&Sections::of(&state.snippets, scope(state))),
     );
     replace(&mut menus, LINE_ENDINGS_MENU, line_endings(state));
+    replace(&mut menus, TEXT_ENCODING_MENU, encodings(state));
     replace(&mut menus, SYNTAX_MENU, syntaxes(state));
     replace(&mut menus, THEME_MENU, themes(state));
     replace(
@@ -312,6 +323,84 @@ fn themes(state: &MenuState) -> Vec<MenuItem> {
         .collect()
 }
 
+/// Format ▸ Text Encoding.
+///
+/// Upstream's `AppDelegate.updateEncodingMenu`, which builds the items out of
+/// `EncodingManager.fileEncodings` each time the menu opens:
+///
+/// * the document's own encoding goes to the *top*, followed by a separator,
+///   when the list below does not already hold it — the case a file was opened
+///   in an encoding the user had taken out of their list;
+/// * the list follows, groups separated by separators, with "Unicode (UTF-8)
+///   with BOM" sitting right after "Unicode (UTF-8)" because that is where
+///   `fileEncodings(from:)` splices it;
+/// * and the submenu ends with a separator and *Customize Encodings List…*,
+///   whatever the list holds.
+///
+/// The encoding in force is checked. The pair matters there: a UTF-8 document
+/// with a byte-order mark is checked on the *with BOM* item, not on the plain
+/// one, which is what upstream's `validateUserInterfaceItem` compares.
+///
+/// Every encoding item is disabled with no document open. Upstream leaves them
+/// enabled and lets the responder chain fail to find a target, which greys them
+/// the same way.
+fn encodings(state: &MenuState) -> Vec<MenuItem> {
+    encoding_items(
+        &FileEncoding::menu_groups(),
+        state.document.as_ref().map(|document| document.encoding),
+    )
+}
+
+/// The items of Format ▸ Text Encoding: `groups` with `current` checked.
+///
+/// The list is a parameter rather than read from the registry in here, because
+/// the one branch below only fires when the list *lacks* the encoding in force.
+/// Upstream's list is the user's and can lack anything; SubText's is the
+/// registry and cannot, so nothing the application does reaches that branch
+/// today. It is here anyway — it is upstream's behaviour, and the day the list
+/// becomes editable the branch has to already be right. The tests are what
+/// exercise it until then.
+fn encoding_items(groups: &[Vec<FileEncoding>], current: Option<FileEncoding>) -> Vec<MenuItem> {
+    let mut items = Vec::with_capacity(groups.iter().map(Vec::len).sum::<usize>() + groups.len() + 2);
+
+    if let Some(current) = current.filter(|encoding| !groups.iter().flatten().any(|e| e == encoding))
+    {
+        items.push(encoding_item(current, true, false));
+        items.push(MenuItem::separator());
+    }
+
+    for (index, group) in groups.iter().enumerate() {
+        if index > 0 {
+            items.push(MenuItem::separator());
+        }
+        items.extend(group.iter().map(|encoding| {
+            encoding_item(*encoding, current == Some(*encoding), current.is_none())
+        }));
+    }
+
+    // Upstream appends this whatever the list holds, and it is never disabled:
+    // it is the way to the list itself, not a way to change an encoding.
+    items.push(MenuItem::separator());
+    items.push(MenuItem::action(
+        CUSTOMIZE_ENCODINGS,
+        actions::format::CustomizeEncodings,
+    ));
+    items
+}
+
+/// One encoding item, titled as CotEditor titles it and carrying the file
+/// encoding it stands for.
+fn encoding_item(file_encoding: FileEncoding, checked: bool, disabled: bool) -> MenuItem {
+    MenuItem::action(
+        file_encoding.name(),
+        actions::format::ChangeEncoding {
+            identifier: file_encoding.identifier(),
+        },
+    )
+    .checked(checked)
+    .disabled(disabled)
+}
+
 /// Text ▸ Unicode Normalizations.
 ///
 /// Upstream's `standardForms + [nil] + modifiedForms`: five labels, a separator,
@@ -343,12 +432,13 @@ mod tests {
     use super::*;
 
     use subtext_core::snippets::Shortcut;
+    use subtext_core::TextEncoding;
 
     fn document() -> DocumentState {
         DocumentState {
             syntax: "Markdown".into(),
             line_ending: LineEnding::CRLF,
-            encoding: TextEncoding::UTF8,
+            encoding: FileEncoding::of(TextEncoding::UTF8),
         }
     }
 
@@ -387,11 +477,10 @@ mod tests {
             .unwrap_or_else(|| panic!("no {name} submenu"))
     }
 
-    /// The labels of a submenu, with separators marked and disabled items in
+    /// The labels of some items, with separators marked and disabled items in
     /// brackets so the shape of the list is visible.
-    fn labels(menus: &[Menu], name: &str) -> Vec<String> {
-        submenu(menus, name)
-            .items
+    fn item_labels(items: &[MenuItem]) -> Vec<String> {
+        items
             .iter()
             .map(|item| match item {
                 MenuItem::Separator => "―".to_string(),
@@ -408,10 +497,23 @@ mod tests {
             .collect()
     }
 
-    /// The checked label of a submenu, if it has one.
-    fn checked(menus: &[Menu], name: &str) -> Option<String> {
-        submenu(menus, name)
-            .items
+    /// The labels of a submenu.
+    fn labels(menus: &[Menu], name: &str) -> Vec<String> {
+        item_labels(&submenu(menus, name).items)
+    }
+
+    /// Labels cut back into groups at each separator, the trailing one dropped.
+    fn grouped(labels: &[String]) -> Vec<Vec<String>> {
+        labels
+            .split(|label| label == "―")
+            .map(<[String]>::to_vec)
+            .filter(|group| !group.is_empty())
+            .collect()
+    }
+
+    /// The checked label of some items, if any is checked.
+    fn checked_label(items: &[MenuItem]) -> Option<String> {
+        items
             .iter()
             .find(|item| item.is_checked())
             .map(|item| match item {
@@ -420,13 +522,19 @@ mod tests {
             })
     }
 
+    /// The checked label of a submenu, if it has one.
+    fn checked(menus: &[Menu], name: &str) -> Option<String> {
+        checked_label(&submenu(menus, name).items)
+    }
+
     /// Every placeholder the generator leaves behind is one this module fills
     /// in. A miss would leave a submenu permanently empty and disabled, which is
-    /// exactly the state these four exist to leave behind.
+    /// exactly the state these exist to leave behind.
     #[test]
     fn every_runtime_submenu_is_replaced() {
         for name in [
             LINE_ENDINGS_MENU,
+            TEXT_ENCODING_MENU,
             SYNTAX_MENU,
             THEME_MENU,
             UNICODE_NORMALIZATIONS_MENU,
@@ -561,6 +669,148 @@ mod tests {
             })
             .collect();
         assert_eq!(named, ["None", "HTML", "Markdown", "Ruby"]);
+    }
+
+    // ---- the encoding submenu --------------------------------------------
+
+    /// The list is the registry, cut where upstream cuts it, with the way to the
+    /// list editor behind a final separator.
+    ///
+    /// The document is UTF-8 without a mark, which the list already holds, so
+    /// nothing is lifted to the top and the groups come out one for one.
+    #[test]
+    fn the_encoding_menu_is_the_registry_in_upstream_s_groups() {
+        let menus = build(&state());
+        let groups = grouped(&labels(&menus, TEXT_ENCODING_MENU));
+        let registry = FileEncoding::menu_groups();
+
+        assert_eq!(groups.len(), registry.len() + 1, "one group per registry group, plus the tail");
+        for (group, registry) in groups.iter().zip(registry.iter()) {
+            assert_eq!(group, &registry.iter().map(|e| e.name()).collect::<Vec<_>>());
+        }
+        assert_eq!(groups.last().unwrap(), &[CUSTOMIZE_ENCODINGS]);
+    }
+
+    /// Upstream splices the mark item in right after UTF-8, and it is the first
+    /// thing in the submenu.
+    #[test]
+    fn the_utf8_pair_opens_the_list() {
+        let menus = build(&state());
+        let identifiers = encoding_identifiers(&menus);
+        assert_eq!(identifiers[..2], ["utf-8", "utf-8-bom"]);
+        assert_eq!(
+            labels(&menus, TEXT_ENCODING_MENU)[..3],
+            ["Unicode (UTF-8)", "Unicode (UTF-8) with BOM", "―"]
+        );
+    }
+
+    /// A UTF-8 document with a mark is in a different encoding from one without,
+    /// and upstream checks one item for each. Two items sharing an identifier
+    /// would both be checked — which is what the registry's unique identifiers
+    /// exist to prevent, and why the payload is the pair rather than the codec.
+    #[test]
+    fn the_encoding_the_document_is_in_is_the_checked_one() {
+        assert_eq!(
+            checked(&build(&state()), TEXT_ENCODING_MENU).as_deref(),
+            Some("Unicode (UTF-8)")
+        );
+
+        let mut with_bom = state();
+        with_bom.document.as_mut().unwrap().encoding = FileEncoding::utf8_with_bom();
+        assert_eq!(
+            checked(&build(&with_bom), TEXT_ENCODING_MENU).as_deref(),
+            Some("Unicode (UTF-8) with BOM")
+        );
+    }
+
+    /// Upstream lifts the document's encoding to the top, behind a separator,
+    /// when the list does not hold it. SubText's list is the whole registry, so
+    /// nothing the application does reaches this branch — the tests do.
+    #[test]
+    fn an_encoding_the_list_lacks_goes_to_the_top_behind_a_separator() {
+        let groups = vec![
+            vec![FileEncoding::of(TextEncoding::UTF8)],
+            vec![FileEncoding::of(TextEncoding::from_identifier("euc-jp").unwrap())],
+        ];
+
+        let missing = encoding_items(&groups, Some(FileEncoding::of(TextEncoding::UTF16_LE)));
+        assert_eq!(
+            item_labels(&missing),
+            [
+                "Unicode (UTF-16 Little-Endian)",
+                "―",
+                "Unicode (UTF-8)",
+                "―",
+                "Japanese (EUC-JP)",
+                "―",
+                CUSTOMIZE_ENCODINGS,
+            ]
+        );
+        assert_eq!(
+            checked_label(&missing).as_deref(),
+            Some("Unicode (UTF-16 Little-Endian)")
+        );
+
+        // The other half: when the list already holds it, it stays where it is.
+        let listed = encoding_items(&groups, Some(FileEncoding::of(TextEncoding::UTF8)));
+        assert_eq!(
+            item_labels(&listed),
+            ["Unicode (UTF-8)", "―", "Japanese (EUC-JP)", "―", CUSTOMIZE_ENCODINGS]
+        );
+    }
+
+    /// With nothing open there is nothing to convert, but the way to the list
+    /// editor is still there — it is not a way to change an encoding.
+    #[test]
+    fn a_document_less_bar_disables_the_encodings_and_leaves_the_list_editor() {
+        let mut state = state();
+        state.document = None;
+        let menus = build(&state);
+        let labels = labels(&menus, TEXT_ENCODING_MENU);
+
+        assert_eq!(labels.last().unwrap(), CUSTOMIZE_ENCODINGS);
+        for label in &labels[..labels.len() - 1] {
+            assert!(
+                label == "―" || label.starts_with('['),
+                "{label} is selectable with no document open"
+            );
+        }
+        assert_eq!(checked(&menus, TEXT_ENCODING_MENU), None);
+    }
+
+    /// Every item carries its own encoding, and an encoding the runtime cannot
+    /// resolve would leave the item greyed — so each one has to resolve.
+    #[test]
+    fn every_encoding_item_names_the_file_encoding_it_stands_for() {
+        let menus = build(&state());
+        let identifiers = encoding_identifiers(&menus);
+
+        let mut unique = identifiers.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), identifiers.len(), "two items name one encoding");
+
+        for identifier in &identifiers {
+            assert!(
+                FileEncoding::from_identifier(identifier).is_some(),
+                "{identifier} names nothing"
+            );
+        }
+    }
+
+    /// The identifiers the encoding submenu's items carry, in order.
+    fn encoding_identifiers(menus: &[Menu]) -> Vec<String> {
+        submenu(menus, TEXT_ENCODING_MENU)
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { action, .. } => action
+                    .as_any()
+                    .downcast_ref::<actions::format::ChangeEncoding>()
+                    .map(|action| action.identifier.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     // ---- the normalization submenu ----------------------------------------
@@ -700,7 +950,7 @@ mod tests {
         assert_ne!(reended.signature(), before, "a line ending change was missed");
 
         let mut reencoded = state();
-        reencoded.document.as_mut().unwrap().encoding = TextEncoding::UTF16_LE;
+        reencoded.document.as_mut().unwrap().encoding = FileEncoding::of(TextEncoding::UTF16_LE);
         assert_ne!(reencoded.signature(), before, "an encoding change was missed");
 
         let mut rethemed = state();

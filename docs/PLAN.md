@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
@@ -823,7 +823,7 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 | `Format ▸ Line Endings` | `AppDelegate.prepareMainMenu`，`LineEnding.allCases` | ✅ 8.9a |
 | `Format ▸ Syntax` | `AppDelegate.prepareMainMenu`，`SyntaxManager.settingNames` | ✅ 8.9a |
 | `Format ▸ Theme` | 同上，`ThemeManager.settingNames` | ✅ 8.9a |
-| `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ⏳ 8.9c |
+| `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ✅ 8.9c |
 | `Text ▸ Unicode Normalizations` | `UnicodeNormalizationForm.standardForms + [nil] + modifiedForms` | ✅ 8.9b |
 | `CotEditor ▸ Services` | 系统（`SystemMenuType::Services`） | ✅ 8.9a |
 | `Script`（顶层） | `ScriptManager`，`~/Library/Application Scripts` | ⏳ 8.9d |
@@ -891,10 +891,48 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 - 偏差：上游把每个形态的说明挂在菜单项的 `toolTip` 上（`localizedDescription`），
   GPUI 的菜单项没有 tooltip，所以那 7 段说明目前无处可放。
 
-**8.9c `Format ▸ Text Encoding` 子菜单**：`AppDelegate.updateEncodingMenu` 的形状
-（UTF-8 → 分组分隔符 → 各语系组 → 末尾分隔符 + `Customize Encodings List…`），
-当前编码勾选，当前编码不在列表里时插到最前；`SetEncoding` / `ReinterpretEncoding`
-两个占位动作一并改造。
+**8.9c `Format ▸ Text Encoding`**（`encoding.rs` / `menus.rs`）
+
+- **注册表每个条目一个显式标识符。** 此前标识符由 codec 派生（`e.name().to_lowercase()`），
+  而这个注册表里有多对条目**共用同一个 codec** —— `encoding_rs` 实现的是 WHATWG
+  Encoding Standard，不是 Apple 的 codec 集合：`BIG5` 同时是 "Chinese (Big5)" 与
+  "Chinese (Big5-HKSCS)"，`GBK` 同时是 "Chinese (GB 2312)" 与 "Chinese (GBK)"，
+  `WINDOWS_1252` 同时是 "Western (ISO Latin 1)" 与 "Western (Windows Latin 1)"……
+  派生出来的标识符重复，于是菜单项无法区分彼此：两项跑同一条命令，勾选同时落在两项上。
+  现在 id 由条目自带，`identifier()` 返回它；`from_identifier()` 先按 id 精确匹配，
+  再退回 WHATWG label —— 老设置文件里的拼写仍然解析到**同一个 codec**（不是同一条目，
+  重复的那些做不到，也没有必要）。
+- **`FileEncoding { encoding, with_utf8_bom }`**，上游的模型。BOM 是**文件**的属性而不是
+  UTF-8 的属性，所以它不能做成一条与 codec 并列的注册表条目 —— 那会让注册表声称有两种
+  编码而其实只有一种。原先那条 `"Unicode (UTF-8 with BOM)" => UTF_8` 是**死条目**
+  （标识符与 UTF-8 相同，`from_identifier` 永远解析不到它），已删除，改由
+  `FileEncoding::utf8_with_bom()` 表示。名字按上游的拼法：`"Unicode (UTF-8) with BOM"`
+  （上游是 `"\(localizedName) with BOM"`；此前写的是 `"Unicode (UTF-8 with BOM)"`）。
+- **`TextEncoding::bom()`**：四种宽 Unicode 形式**带 mark 写出**。此前 `change_encoding`
+  一律传 `Bom::None`，选 UTF-16LE 会写出一个字节序无法判定的文件。
+- **注册表按上游的分组切。** `MENU_GROUPS` 是表，`ALL` 由它展平（`LazyLock`），两者
+  不可能漂移。分组是用户可见的（组间有分隔符），所以照搬上游默认列表的 10 组顺序；
+  每组上方注明上游那一组有什么、`encoding_rs` 缺哪几条。
+- **子菜单按 `AppDelegate.updateEncodingMenu` 铺**：文档当前编码不在列表里时提到最前 +
+  一个分隔符；然后是列表（组间分隔符）；末尾恒为分隔符 + `Customize Encodings List…`。
+  "Unicode (UTF-8) with BOM" 紧跟在 UTF-8 之后，因为上游是在
+  `EncodingManager.fileEncodings(from:)` 里 `flatMap` 插进去的 —— 这两项永远成对。
+- **勾选态是「对」而不是 codec**：带 mark 的 UTF-8 文档勾在 *with BOM* 那一项上，
+  与上游 `Document.validateUserInterfaceItem` 比较 `FileEncoding` 一致。`DocumentState`
+  与 `MenuSignature` 随之携带 `FileEncoding`。
+- 动作 **`ChangeEncoding { identifier }`** 取代 `SetEncoding` / `ReinterpretEncoding`
+  两个死占位（storyboard 里没有这两项，它们没有任何入口）。新增 `CustomizeEncodings`
+  接上游的 `showEncodingsListEditor`：打开设置窗口的 Format 面板，并在状态栏说明列表是固定的。
+- 「当前编码不在列表里则提到最前」这条分支在 SubText **走不到**——列表就是注册表，
+  任何文档的编码都在里面。保留它是因为那是上游的行为，且列表一旦可编辑它就得在；
+  为此把条目构造拆成 `encoding_items(groups, current)` 纯函数，由测试驱动这条分支。
+- 偏差：上游把每个编码的 IANA charset 名等信息挂在菜单项的 `toolTip` 上，GPUI 的菜单项
+  没有 tooltip，与 8.9b 同样无处可放。
+
+**已知偏差（记账）**：ISO Latin 1–10 这一组仍是近似 —— `encoding_rs` 没有 ISO 8859-1、
+也没有 ISO 8859-9，编码标准把这两个 label 解析到 Windows 代码页，所以 "Western (ISO Latin 1)"
+实际以 windows-1252 解、"Turkish (ISO Latin 5)" 实际以 windows-1254 解。两者都是超集，
+名字与实现却是两回事；注册表对齐见下方「已知缺口」。
 
 **8.9d `Script` 菜单**：上游从 `~/Library/Application Scripts/<bundle id>` 读脚本。
 平台相关，排在最后。
@@ -919,6 +957,8 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 | --- | --- |
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
 | Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
+| 编码注册表与上游默认列表尚未逐条对齐 | `encoding_rs` 实现的是 WHATWG Encoding Standard（一个以 Windows 为中心的**子集**），不是 Apple 的 codec 集合。上游 `DefaultSettings+Encodings.swift` 的默认菜单列表有 60 条，SubText 只能提供其中约 40 条：Mac OS 系列（MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic）、Big5-E、EUC-TW、DOS 系列（DOSJapanese、DOSChineseTrad、DOSLatinUS、DOSRussian）、NextStep Latin、ASCII 都没有对应 codec；反过来 SubText 多出四条上游默认列表里没有的（KOI8-R、KOI8-U、Vietnamese Windows、Baltic Windows）。注册表里还有几对**共用 codec 的条目**（GBK / GB 2312、Big5 / Big5-HKSCS、Windows Latin 2 / Central European (Windows)、Turkish 两条、Baltic 两条、Shift JIS / Shift JIS X0213），名字与标识符都不同、各自可解析，但选任意一条效果相同。**本轮（8.9c）只修了会被菜单直接暴露的错**：ISO Latin 5–10 此前映射到完全不同的字母表（Latin 5 → ISO-8859-5 西里尔、6 → ISO-8859-6 阿拉伯、7 → ISO-8859-7 希腊、8 → ISO-8859-8 希伯来、9 → ISO-8859-10、10 → ISO-8859-13），现在按上游的名字与 Apple `CFStringEncodings` 的对应关系改成 windows-1254 / ISO-8859-10 / ISO-8859-13 / ISO-8859-14 / ISO-8859-15 / ISO-8859-16，Latin 2 与 4 的名字也对齐成上游的 "Central European (ISO Latin 2/4)"。剩下的一次性对齐见任务 #37。 |
+| 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

@@ -14,7 +14,7 @@
 
 use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
-use subtext_core::{LineEnding, Normalization};
+use subtext_core::{FileEncoding, LineEnding, Normalization};
 
 use crate::actions;
 use crate::workspace::Workspace;
@@ -158,6 +158,13 @@ pub fn install(cx: &mut App) {
             workspace.apply_theme_by_name(&name, cx)
         });
     });
+    cx.on_action(|action: &actions::format::ChangeEncoding, cx: &mut App| {
+        if let Some(encoding) = FileEncoding::from_identifier(&action.identifier) {
+            tell(cx, move |workspace, window, cx| {
+                workspace.change_encoding(encoding, window, cx)
+            });
+        }
+    });
     cx.on_action(|action: &actions::text::NormalizeUnicode, cx: &mut App| {
         if let Some(form) = Normalization::from_identifier(&action.form) {
             tell(cx, move |workspace, window, cx| {
@@ -226,8 +233,7 @@ pub fn install(cx: &mut App) {
         actions::spelling::StartSpeaking => "StartSpeaking",
         actions::spelling::StopSpeaking => "StopSpeaking",
         actions::format::RecolorAll => "RecolorAll",
-        actions::format::SetEncoding => "SetEncoding",
-        actions::format::ReinterpretEncoding => "ReinterpretEncoding",
+        actions::format::CustomizeEncodings => "CustomizeEncodings",
         actions::format::MakeFontStandard => "MakeFontStandard",
         actions::format::MakeFontMonospaced => "MakeFontMonospaced",
         actions::format::BiggerFont => "BiggerFont",

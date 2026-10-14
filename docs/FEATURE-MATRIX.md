@@ -17,7 +17,7 @@
 | 动作类型 | 153 个 `@objc` selector | 182 个类型化动作 | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 28,168（Rust，不含生成器与生成文件） | — |
+| 代码行数 | 约 72,128（Swift） | 29,147（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -97,7 +97,9 @@
 | 重新着色 | `rehighlight` | ✅ |
 | 换行符 LF / CR / CRLF | `set_line_ending` | ✅ 经 Format ▸ Line Endings 菜单，当前项打勾 |
 | 换行符 NEL / LS / PS | `set_line_ending` | ✅ **超出多数编辑器**；上游按住 Option 才显示这 3 项，这里恒列（GPUI 菜单没有隐藏项） |
-| 编码（设置 / 重新解释） | `change_encoding` / `reinterpret_encoding` | ⏳ 动作已实现，`Format ▸ Text Encoding` 子菜单待填（8.9b） |
+| 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：注册表按上游的 10 组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…` |
+| 编码（重新解释） | `reinterpret_encoding` | 🔁 能力在，但没有入口 —— 上游的菜单里也没有这一项 |
+| 编码列表编辑 | — | ⏳ 菜单项打开设置窗口的 Format 面板；列表本身固定（SubText 提供它认得的所有编码），上游可拖拽增删改序，并驱动检测优先级 |
 | 语法（设置） | `set_syntax` | ✅ 经 Format ▸ Syntax 菜单（None 在前 + 分隔符 + 全部语法，当前项打勾） |
 | 标准字体 | `set_font(None)` | ✅ |
 | 等宽字体 | `set_font(mono_font())` | ✅ |

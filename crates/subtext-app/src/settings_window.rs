@@ -1034,7 +1034,7 @@ impl SettingsWindow {
                 cx,
             ));
 
-        let encodings: &'static [TextEncoding] = encoding::ALL;
+        let encodings: &[TextEncoding] = &encoding::ALL;
         let current_encoding = settings.encoding().identifier();
         let encoding_index = encodings.iter().position(|e| e.identifier() == current_encoding);
         let encoding_items = encodings.iter().map(|e| SharedString::from(e.name)).collect::<Vec<_>>();
@@ -1044,7 +1044,7 @@ impl SettingsWindow {
             encoding_index,
             cx,
             cx.listener(move |this, index: &usize, _, cx| {
-                let identifier = encodings.get(*index).map(|e| e.identifier());
+                let identifier = encodings.get(*index).map(|e| e.identifier().to_string());
                 if let Some(identifier) = identifier {
                     this.edit(cx, move |settings| settings.default_encoding = identifier);
                 }

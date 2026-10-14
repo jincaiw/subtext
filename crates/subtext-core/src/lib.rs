@@ -24,7 +24,7 @@ pub mod textops;
 pub use charinfo::{CharacterCount, CharacterInfo};
 pub use colorcode::{Color, ColorCodeType};
 pub use document::{Document, DocumentError, FileStatus};
-pub use encoding::{Bom, DecodedFile, Detection, TextEncoding};
+pub use encoding::{Bom, DecodedFile, Detection, FileEncoding, TextEncoding};
 pub use filedrop::{DroppedFile, FileDropItem, Variable as FileDropVariable};
 pub use finder::{FindOptions, ReplacementSyntax, Searcher, replace_all, replace_one};
 pub use folderfind::{

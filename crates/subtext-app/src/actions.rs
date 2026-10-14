@@ -95,8 +95,7 @@ pub mod format {
     use super::*;
     actions!(subtext, [
         RecolorAll,
-        SetEncoding,
-        ReinterpretEncoding,
+        CustomizeEncodings,
         MakeFontStandard,
         MakeFontMonospaced,
         BiggerFont,
@@ -154,6 +153,23 @@ pub mod format {
     #[action(namespace = subtext, no_json)]
     pub struct ChangeTheme {
         pub name: String,
+    }
+
+    /// Convert the frontmost document to the encoding `identifier` names.
+    ///
+    /// The payload is a [`FileEncoding`](subtext_core::FileEncoding) identifier
+    /// — `"shift_jis"`, `"utf-8-bom"` — not an encoding's name and not its
+    /// position in the list. Upstream has one selector for this,
+    /// `changeEncoding(_:)`, which reads a `FileEncoding` out of the menu item;
+    /// GPUI's menu items carry only an action, so the encoding travels inside
+    /// it.
+    ///
+    /// The `-bom` suffix is the only thing that distinguishes the two UTF-8
+    /// items, which is why the payload is the pair rather than the codec.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct ChangeEncoding {
+        pub identifier: String,
     }
 }
 

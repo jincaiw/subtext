@@ -686,7 +686,7 @@ impl Default for Settings {
             tab_width: edit.tab_width,
             uses_spaces_for_indentation: edit.auto_expand_tab,
             auto_expand_tabs: edit.auto_expand_tab,
-            default_encoding: TextEncoding::UTF8.identifier(),
+            default_encoding: TextEncoding::UTF8.identifier().to_string(),
             default_line_ending: LineEnding::LF,
             default_syntax: None,
             refer_to_encoding_tag: true,

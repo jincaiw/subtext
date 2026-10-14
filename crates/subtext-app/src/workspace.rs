@@ -55,8 +55,8 @@ use gpui_kit::{
 };
 
 use subtext_core::{
-    Document, DroppedFile, LineEnding, Normalization, TextEncoding, charinfo, colorcode, encoding,
-    finder, imagesize, line_ending, multireplace, textops,
+    Document, DroppedFile, FileEncoding, LineEnding, Normalization, TextEncoding, charinfo,
+    colorcode, finder, imagesize, line_ending, multireplace, textops,
 };
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
@@ -1375,7 +1375,13 @@ impl Workspace {
         Some(menus::DocumentState {
             syntax: document.syntax.to_string(),
             line_ending: document.document.line_ending(),
-            encoding: document.document.encoding(),
+            // The pair, not the codec: a UTF-8 document with a byte-order mark
+            // is not in the same encoding as one without, and upstream checks
+            // one menu item for each.
+            encoding: FileEncoding::of_document(
+                document.document.encoding(),
+                document.document.bom(),
+            ),
         })
     }
 
@@ -1974,16 +1980,22 @@ impl Workspace {
         self.set_status(format!("Line endings: {}", ending.abbreviation()), cx);
     }
 
+    /// Convert the document to `encoding`.
+    ///
+    /// The byte-order mark comes from the file encoding rather than from the
+    /// caller: UTF-8 with a mark and UTF-8 without one are two entries in the
+    /// menu, and the four wide Unicode forms are written with one because their
+    /// bytes are ambiguous without it.
     pub fn change_encoding(
         &mut self,
-        encoding: TextEncoding,
+        encoding: FileEncoding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
-        document.document.convert_encoding(encoding, encoding::Bom::None);
+        document.document.convert_encoding(encoding.encoding, encoding.bom());
         let text = document.document.text().to_string();
         self.loading = true;
         for editor in document.editors() {
@@ -1991,8 +2003,11 @@ impl Workspace {
         }
         self.loading = false;
         let _ = window;
+        // The Format ▸ Text Encoding submenu checks the encoding in use, and
+        // moves the document's own to the top of the list when the list does
+        // not already hold it.
         self.refresh_menus(cx);
-        self.set_status(format!("Encoding: {}", encoding.name), cx);
+        self.set_status(format!("Encoding: {}", encoding.name()), cx);
     }
 
     /// Reinterpret the bytes on disk with another encoding, without converting.
@@ -2158,7 +2173,7 @@ impl Workspace {
     }
 
     pub fn encodings(&self) -> &'static [TextEncoding] {
-        subtext_core::encoding::ALL
+        &subtext_core::encoding::ALL
     }
 
     // ---- inspectors ------------------------------------------------------

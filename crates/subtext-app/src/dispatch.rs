@@ -101,11 +101,17 @@ impl Workspace {
                 self.rehighlight(cx);
                 self.notice("Syntax analysis reset", cx)
             }
-            "SetEncoding" => self.notice(
-                "Use the Format ▸ Encoding menu; the list comes from the same registry CotEditor uses",
-                cx,
-            ),
-            "ReinterpretEncoding" => self.notice("Use the Format ▸ Encoding menu", cx),
+            // Upstream's `showEncodingsListEditor`: the settings window's Format
+            // pane, where the encoding list is edited. The pane is the first
+            // half of what upstream does — it then asks the pane to open the
+            // list editor, which this build does not have.
+            "CustomizeEncodings" => {
+                self.show_settings_pane(SettingsPane::Format, cx);
+                self.notice(
+                    "The encoding list is fixed; SubText offers every encoding it can read",
+                    cx,
+                );
+            }
             "MakeFontStandard" => self.set_font(None, cx),
             "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),
             "BiggerFont" => self.bump_font(1.0, cx),
