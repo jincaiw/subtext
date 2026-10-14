@@ -30,6 +30,7 @@
 
 pub mod actions;
 pub mod bridge;
+pub mod color_sheet;
 pub mod dialogs;
 pub mod dispatch;
 pub mod highlighter;
@@ -39,6 +40,7 @@ pub mod outline;
 pub mod resources;
 pub mod settings;
 pub mod settings_window;
+pub mod sort_sheet;
 pub mod workspace;
 
 use std::path::PathBuf;

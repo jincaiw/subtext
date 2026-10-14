@@ -5,6 +5,7 @@
 //! the caller can push one undoable change. Offsets are byte offsets into the
 //! buffer and are always kept on `char` boundaries.
 
+use std::cmp::Ordering;
 use std::ops::Range;
 
 use unicode_normalization::UnicodeNormalization;
@@ -442,117 +443,409 @@ pub fn join_lines(text: &str, selection: &Range<usize>) -> Edit {
     Edit { text: out, selection: block_start..block_start + joined.len() }
 }
 
-/// Options for [`sort_lines`], mirroring CotEditor's sort sheet.
-#[derive(Debug, Clone, Default)]
+/// Options for [`sort_lines`], mirroring CotEditor's *Sort Lines by Pattern*
+/// sheet.
+///
+/// The defaults are CotEditor's, which is why they are not all `false`: the
+/// sheet opens with case folding and numeric interpretation already on.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SortOptions {
     pub descending: bool,
-    pub case_insensitive: bool,
+    pub ignores_case: bool,
     pub numeric: bool,
-    /// A regular expression; when set, the capture group `group` is the key.
-    pub pattern: Option<String>,
-    pub group: usize,
+    /// Hold the first line at the top and sort the rest — a header row.
+    pub keeps_first_line: bool,
 }
 
-/// Sort the selected lines.
-pub fn sort_lines(text: &str, selection: &Range<usize>, options: &SortOptions) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
-    let block_end = block_end_of(text, end);
-
-    let block = &text[block_start..block_end];
-    let trailing_newline = block.ends_with('\n');
-    let body = block.trim_end_matches('\n');
-    let mut lines: Vec<&str> = if body.is_empty() { Vec::new() } else { body.split('\n').collect() };
-
-    let key = |line: &str| -> String {
-        let mut value = line.to_string();
-        if let Some(pattern) = &options.pattern
-            && let Ok(re) = regex::Regex::new(pattern)
-                && let Some(captures) = re.captures(line) {
-                    value = captures.get(options.group).map_or(String::new(), |m| m.as_str().to_string());
-                }
-        if options.case_insensitive {
-            value = value.to_lowercase();
-        }
-        value
-    };
-
-    lines.sort_by(|a, b| {
-        let (ka, kb) = (key(a), key(b));
-        let ordering = if options.numeric {
-            let na = ka.trim().parse::<f64>().ok();
-            let nb = kb.trim().parse::<f64>().ok();
-            match (na, nb) {
-                (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => ka.cmp(&kb),
-            }
-        } else {
-            ka.cmp(&kb)
-        };
-        if options.descending { ordering.reverse() } else { ordering }
-    });
-
-    let mut joined = lines.join("\n");
-    if trailing_newline && !joined.is_empty() {
-        joined.push('\n');
+impl Default for SortOptions {
+    fn default() -> Self {
+        Self { descending: false, ignores_case: true, numeric: true, keeps_first_line: false }
     }
-    let mut out = String::with_capacity(text.len());
-    out.push_str(&text[..block_start]);
-    out.push_str(&joined);
-    out.push_str(&text[block_end..]);
-    Edit { text: out, selection: block_start..block_start + joined.len() }
+}
+
+impl SortOptions {
+    /// What plain *Sort Lines* uses: the whole line, compared as text.
+    ///
+    /// CotEditor sorts that command with a localized comparator and no numeric
+    /// reading, which is why `10` lands before `9` there. Locale collation is
+    /// the one part of this we cannot reproduce without an ICU dependency; the
+    /// rest of the shape is the same.
+    pub fn whole_line() -> Self {
+        Self { ignores_case: false, numeric: false, ..Self::default() }
+    }
+}
+
+/// Where a line's sort key comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortKey {
+    /// The whole line.
+    EntireLine,
+    /// One field of a delimited record, numbered from 1.
+    Column { delimiter: String, column: usize },
+    /// The text a regular expression matches, or one of its capture groups.
+    RegularExpression { pattern: String, ignore_case: bool, group: Option<usize> },
+}
+
+impl SortKey {
+    /// The part of `line` this key sorts on.
+    ///
+    /// `None` means the line has no such part — a record with too few fields,
+    /// or a line the pattern does not match — and such lines sort to the end,
+    /// which is how a header or a comment keeps out of the way.
+    pub fn key_for(&self, line: &str) -> Option<String> {
+        match self {
+            SortKey::EntireLine => Some(line.to_string()),
+            SortKey::Column { delimiter, column } => {
+                // The field is a literal, so `\t` means a tab — which is how a
+                // TSV file gets sorted by one of its columns.
+                let delimiter = if delimiter.is_empty() {
+                    ",".to_string()
+                } else {
+                    crate::finder::unescape(delimiter)
+                };
+                let index = column.saturating_sub(1);
+                let field = line.split(delimiter.as_str()).nth(index)?;
+                Some(field.trim().to_string())
+            }
+            SortKey::RegularExpression { pattern, ignore_case, group } => {
+                let pattern = if *ignore_case {
+                    format!("(?i){pattern}")
+                } else {
+                    pattern.clone()
+                };
+                let regex = regex::Regex::new(&pattern).ok()?;
+                let captures = regex.captures(line)?;
+                match group {
+                    Some(index) => captures.get(*index).map(|m| m.as_str().to_string()),
+                    None => captures.get(0).map(|m| m.as_str().to_string()),
+                }
+            }
+        }
+    }
+
+    /// Why the key cannot be used, or `None` when it can.
+    ///
+    /// The sheet calls this before enabling its Sort button, so an
+    /// unparseable pattern is reported while the user is still typing it
+    /// rather than after they commit to a sort that would do nothing.
+    pub fn validate(&self) -> Option<SortKeyError> {
+        match self {
+            SortKey::EntireLine => None,
+            SortKey::Column { column, .. } => (*column == 0).then_some(SortKeyError::EmptyColumn),
+            SortKey::RegularExpression { pattern, ignore_case, group } => {
+                if pattern.is_empty() {
+                    return Some(SortKeyError::EmptyPattern);
+                }
+                let pattern = if *ignore_case {
+                    format!("(?i){pattern}")
+                } else {
+                    pattern.clone()
+                };
+                let Ok(regex) = regex::Regex::new(&pattern) else {
+                    return Some(SortKeyError::InvalidPattern);
+                };
+                // Group 0 is the whole match, so the count of usable indices
+                // is the capture count plus one.
+                if let Some(index) = group
+                    && *index > regex.captures_len() - 1
+                {
+                    return Some(SortKeyError::InvalidPattern);
+                }
+                None
+            }
+        }
+    }
+
+    /// Where in `line` the key sits, for the sheet's sample-line preview.
+    ///
+    /// This is not quite [`Self::key_for`]'s range. A delimited field that is
+    /// nothing but spaces has the key `""` — it sorts as an empty string — but
+    /// no range to highlight, and upstream draws the same distinction.
+    pub fn span_for(&self, line: &str) -> Option<Range<usize>> {
+        match self {
+            SortKey::EntireLine => Some(0..line.len()),
+            SortKey::Column { delimiter, column } => {
+                let delimiter = if delimiter.is_empty() {
+                    ",".to_string()
+                } else {
+                    crate::finder::unescape(delimiter)
+                };
+                let mut start = 0;
+                for _ in 1..(*column).max(1) {
+                    let offset = line[start..].find(delimiter.as_str())?;
+                    start += offset + delimiter.len();
+                }
+                let end = line[start..]
+                    .find(delimiter.as_str())
+                    .map_or(line.len(), |offset| start + offset);
+                let field = &line[start..end];
+                let head = start + field.len() - field.trim_start().len();
+                let tail = end - (field.len() - field.trim_end().len());
+                (head < tail).then_some(head..tail)
+            }
+            SortKey::RegularExpression { pattern, ignore_case, group } => {
+                let pattern = if *ignore_case {
+                    format!("(?i){pattern}")
+                } else {
+                    pattern.clone()
+                };
+                let regex = regex::Regex::new(&pattern).ok()?;
+                let captures = regex.captures(line)?;
+                let matched = captures.get(group.unwrap_or(0))?;
+                Some(matched.start()..matched.end())
+            }
+        }
+    }
+}
+
+/// Why a [`SortKey`] cannot be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKeyError {
+    EmptyPattern,
+    InvalidPattern,
+    EmptyColumn,
+}
+
+impl SortKeyError {
+    /// The message CotEditor's sheet shows next to the field.
+    pub fn message(self) -> &'static str {
+        match self {
+            SortKeyError::EmptyPattern => "Empty pattern",
+            SortKeyError::InvalidPattern => "Invalid pattern",
+            SortKeyError::EmptyColumn => "The position starts at 1",
+        }
+    }
+}
+
+/// Sort the selected lines by `key`.
+pub fn sort_lines(
+    text: &str,
+    selection: &Range<usize>,
+    key: &SortKey,
+    options: &SortOptions,
+) -> Edit {
+    reorder_lines(text, selection, |lines| {
+        let first = options.keeps_first_line.then(|| lines.remove(0));
+
+        let mut keyed: Vec<(Option<String>, LogicalLine)> = lines
+            .drain(..)
+            .map(|line| (key.key_for(&line.contents), line))
+            .collect();
+        keyed.sort_by(|(a, _), (b, _)| compare_keys(a, b, options));
+
+        lines.extend(keyed.into_iter().map(|(_, line)| line));
+        if options.descending {
+            lines.reverse();
+        }
+        if let Some(first) = first {
+            lines.insert(0, first);
+        }
+    })
 }
 
 /// Reverse the order of the selected lines.
 pub fn reverse_lines(text: &str, selection: &Range<usize>) -> Edit {
-    let options = SortOptions::default();
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
-    let block_end = block_end_of(text, end);
-    let block = &text[block_start..block_end];
-    let trailing_newline = block.ends_with('\n');
-    let body = block.trim_end_matches('\n');
-    let mut lines: Vec<&str> = if body.is_empty() { Vec::new() } else { body.split('\n').collect() };
-    lines.reverse();
-    let mut joined = lines.join("\n");
-    if trailing_newline && !joined.is_empty() {
-        joined.push('\n');
-    }
-    let mut out = String::with_capacity(text.len());
-    out.push_str(&text[..block_start]);
-    out.push_str(&joined);
-    out.push_str(&text[block_end..]);
-    let _ = options;
-    Edit { text: out, selection: block_start..block_start + joined.len() }
+    reorder_lines(text, selection, |lines| lines.reverse())
 }
 
 /// Shuffle the selected lines with a caller-supplied random source.
-pub fn shuffle_lines(text: &str, selection: &Range<usize>, mut random: impl FnMut(usize) -> usize) -> Edit {
+pub fn shuffle_lines(
+    text: &str,
+    selection: &Range<usize>,
+    mut random: impl FnMut(usize) -> usize,
+) -> Edit {
+    reorder_lines(text, selection, |lines| {
+        // Fisher-Yates.
+        for i in (1..lines.len()).rev() {
+            let j = random(i + 1) % (i + 1);
+            lines.swap(i, j);
+        }
+    })
+}
+
+/// One logical line: its text, and the terminator that followed it.
+///
+/// The terminator is carried rather than normalised because a document can mix
+/// them — a file assembled from two sources often does — and a sort that
+/// rewrites every ending is a sort that quietly edits lines the user never
+/// asked it to touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalLine {
+    /// The line, without its terminator.
+    pub contents: String,
+    /// `\n`, `\r\n`, `\r`, or `None` for the last line of a file that does
+    /// not end in one.
+    pub line_ending: Option<String>,
+}
+
+/// Split `range` into logical lines, each keeping its own terminator.
+pub fn logical_lines(text: &str, range: &Range<usize>) -> Vec<LogicalLine> {
+    let contents = line_content_ranges(text, range);
+    let end = floor_char_boundary(text, range.end.min(text.len()));
+
+    contents
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            // The terminator runs from the end of this line's text to the start
+            // of the next line, or to the end of the range for the last one.
+            let next = contents.get(index + 1).map_or(end, |next| next.start);
+            let ending = &text[line.end..next.max(line.end)];
+            LogicalLine {
+                contents: text[line.clone()].to_string(),
+                line_ending: (!ending.is_empty()).then(|| ending.to_string()),
+            }
+        })
+        .collect()
+}
+
+/// Join logical lines, re-attaching each one's own terminator.
+///
+/// A line that arrives without one — the last line of a file that does not end
+/// in a newline — is given `base` when it lands anywhere but last, and nothing
+/// when it stays last unless `including_trailing_line_ending` says otherwise.
+/// `base` is the first terminator the block had, so a block that had any keeps
+/// ending its lines the way its author did.
+pub fn join_logical_lines(
+    lines: &[LogicalLine],
+    base: &str,
+    including_trailing_line_ending: bool,
+) -> String {
+    let last = lines.len().saturating_sub(1);
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        out.push_str(&line.contents);
+        if index == last && !including_trailing_line_ending {
+            continue;
+        }
+        out.push_str(line.line_ending.as_deref().unwrap_or(base));
+    }
+    out
+}
+
+/// The whole lines `selection` touches, terminator included.
+fn line_block(text: &str, selection: &Range<usize>) -> Range<usize> {
     let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
     let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
-    let block = &text[block_start..block_end];
-    let trailing_newline = block.ends_with('\n');
-    let body = block.trim_end_matches('\n');
-    let mut lines: Vec<&str> = if body.is_empty() { Vec::new() } else { body.split('\n').collect() };
+    block_start..block_end
+}
 
-    // Fisher-Yates.
-    for i in (1..lines.len()).rev() {
-        let j = random(i + 1) % (i + 1);
-        lines.swap(i, j);
-    }
+/// Reorder the selected lines with `reorder`, keeping each line's own
+/// terminator attached to it.
+///
+/// The selection that comes back covers the first line's text, which is what
+/// CotEditor leaves highlighted after a sort: the block the user picked is
+/// still the block they are looking at, and the caret is at its head.
+fn reorder_lines(
+    text: &str,
+    selection: &Range<usize>,
+    reorder: impl FnOnce(&mut Vec<LogicalLine>),
+) -> Edit {
+    let block = line_block(text, selection);
+    let mut lines = logical_lines(text, &block);
+    let includes_trailing = lines.last().is_some_and(|line| line.line_ending.is_some());
 
-    let mut joined = lines.join("\n");
-    if trailing_newline && !joined.is_empty() {
-        joined.push('\n');
+    // One line is already sorted, and a block with no terminators at all has
+    // nothing to re-attach — CotEditor bails out of both.
+    if lines.len() < 2 {
+        return Edit::unchanged(text, selection.clone());
     }
+    let Some(base) = lines.iter().find_map(|line| line.line_ending.clone()) else {
+        return Edit::unchanged(text, selection.clone());
+    };
+
+    reorder(&mut lines);
+
+    let joined = join_logical_lines(&lines, &base, includes_trailing);
+    let head = lines.first().map_or(0, |line| line.contents.len());
     let mut out = String::with_capacity(text.len());
-    out.push_str(&text[..block_start]);
+    out.push_str(&text[..block.start]);
     out.push_str(&joined);
-    out.push_str(&text[block_end..]);
-    Edit { text: out, selection: block_start..block_start + joined.len() }
+    out.push_str(&text[block.end..]);
+    Edit { text: out, selection: block.start..block.start + head }
+}
+
+/// Compare two sort keys under `options`.
+fn compare_keys(a: &Option<String>, b: &Option<String>, options: &SortOptions) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            // A pair of numbers is compared as numbers; everything else — and
+            // any pair where the numbers are equal — falls back to text.
+            if options.numeric
+                && let (Some(x), Some(y)) = (leading_number(a), leading_number(b))
+                && x != y
+            {
+                return x.partial_cmp(&y).unwrap_or(Ordering::Equal);
+            }
+            if options.ignores_case {
+                a.to_lowercase().cmp(&b.to_lowercase())
+            } else {
+                a.cmp(b)
+            }
+        }
+        // A line with no key at all sorts after one that has a key.
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+/// The number at the head of `value`, if there is one.
+///
+/// CotEditor reads numbers with `FloatingPointFormatStyle`, which consumes a
+/// *prefix*: `-1000.1 m/s` is `-1000.1`, and `dog 10` is nothing at all.
+/// `f64::from_str` insists on the whole string, so the leading number is cut
+/// out first.
+///
+/// Grouping separators follow the rule ICU applies — a separator only counts
+/// when exactly three digits follow it — which is why `-1000,1` reads as
+/// `-1000` and not as `-10001`. The locale is fixed to the one CotEditor falls
+/// back on, so `.` is the decimal point and `,` and a space group digits.
+fn leading_number(value: &str) -> Option<f64> {
+    let text = value.trim_start();
+    let bytes = text.as_bytes();
+    let mut cleaned = String::new();
+    let mut i = 0;
+
+    if let Some(&sign @ (b'+' | b'-')) = bytes.first() {
+        cleaned.push(sign as char);
+        i = 1;
+    }
+
+    let integer_start = i;
+    while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+    }
+    if i == integer_start {
+        return None;
+    }
+    cleaned.push_str(&text[integer_start..i]);
+
+    while let Some(&separator) = bytes.get(i)
+        && matches!(separator, b',' | b' ')
+    {
+        let group = i + 1;
+        let end = group + 3;
+        if end > bytes.len() || !bytes[group..end].iter().all(u8::is_ascii_digit) {
+            break;
+        }
+        cleaned.push_str(&text[group..end]);
+        i = end;
+    }
+
+    if bytes.get(i) == Some(&b'.') {
+        let point = i;
+        i += 1;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i > point + 1 {
+            cleaned.push_str(&text[point..i]);
+        }
+    }
+
+    cleaned.parse().ok()
 }
 
 /// Remove duplicate lines, keeping the first occurrence.
@@ -868,6 +1161,270 @@ pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> E
     Edit { text: out, selection: start..start + replaced.len() }
 }
 
+// ---- enclosing symbols --------------------------------------------------
+
+/// A pair of characters that enclose a region, such as `(` and `)`.
+///
+/// This is CotEditor's `SymbolPair`. The Select menu looks for the nearest
+/// enclosing pair; a syntax's own quote delimiters are built from the same
+/// shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolPair {
+    pub begin: char,
+    pub end: char,
+}
+
+impl SymbolPair {
+    pub const fn new(begin: char, end: char) -> Self {
+        Self { begin, end }
+    }
+
+    /// `()`, `{}` and `[]` — the pairs a syntax names as its brackets.
+    pub const BRACES: [SymbolPair; 3] = [
+        SymbolPair::new('(', ')'),
+        SymbolPair::new('{', '}'),
+        SymbolPair::new('[', ']'),
+    ];
+
+    /// `<>`, which *Select Enclosing Symbols* adds to [`Self::BRACES`].
+    pub const LTGT: SymbolPair = SymbolPair::new('<', '>');
+
+    /// What *Select Enclosing Symbols* searches, in CotEditor's order.
+    pub const ENCLOSING: [SymbolPair; 4] = [
+        SymbolPair::new('(', ')'),
+        SymbolPair::new('{', '}'),
+        SymbolPair::new('[', ']'),
+        SymbolPair::new('<', '>'),
+    ];
+}
+
+/// The nearest range enclosed by one of `candidates`, delimiters included.
+///
+/// This answers the question *Select Enclosing Symbols* asks: starting from
+/// `range`, which bracketed region am I inside? It is CotEditor's
+/// `rangeOfEnclosingSymbolPair(at:candidates:escapeCharacter:)` with the
+/// escape character left out — see the note at the end.
+///
+/// It works outwards in two passes. The forward pass walks on from the end of
+/// `range` until it meets a closing delimiter no opener accounts for, counting
+/// nesting per pair so that `{ foo {} }` does not stop at the inner `}`. The
+/// backward pass then walks back from the start of `range` to the matching
+/// opener, and it considers only the pair the forward pass settled on — which
+/// is why `def [ foo }` finds nothing rather than pairing `[` with `}`.
+///
+/// `range` and the result are byte offsets; the scan itself runs on
+/// characters, because a delimiter is always exactly one of them.
+///
+/// CotEditor also lets a caller name an escape character, so that `\(` is not
+/// an opener. Nothing in SubText needs that yet: the Select menu passes no
+/// escape character, and the brace-highlighting path that does is not built.
+pub fn range_of_enclosing_symbol_pair(
+    text: &str,
+    range: &Range<usize>,
+    candidates: &[SymbolPair],
+) -> Option<Range<usize>> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let to_char = |offset: usize| chars.partition_point(|(byte, _)| *byte < offset);
+
+    let mut scanner = PairScanner {
+        chars: &chars,
+        candidates,
+        scanning: to_char(range.start)..to_char(range.end),
+        pair: None,
+        finished: false,
+        found: false,
+    };
+    let found = scanner.scan()?;
+
+    // A character index maps to the byte offset of the character sitting at
+    // it; `end` points one past the last character in play, which is the end
+    // of the text when the delimiter was the last thing in the document.
+    let to_byte = |index: usize| chars.get(index).map_or(text.len(), |(byte, _)| *byte);
+    Some(to_byte(found.start)..to_byte(found.end))
+}
+
+/// The two-pass scan behind [`range_of_enclosing_symbol_pair`].
+///
+/// `scanning` is a half-open range of *character* indices, so its `end` points
+/// one past the last character in play — which is what makes a closing
+/// delimiter part of the range the scan reports.
+struct PairScanner<'a> {
+    chars: &'a [(usize, char)],
+    candidates: &'a [SymbolPair],
+    scanning: Range<usize>,
+    /// The pair the forward pass found a closer for. The backward pass then
+    /// looks for that pair's opener alone, which is what stops a stray `}` in
+    /// `def [ foo }` from pairing up with the `[`.
+    pair: Option<SymbolPair>,
+    finished: bool,
+    found: bool,
+}
+
+impl PairScanner<'_> {
+    /// The nearest enclosing pair, or `None` when there is not one.
+    fn scan(&mut self) -> Option<Range<usize>> {
+        // The backward pass always finishes — either by finding the opener or
+        // by running off the start of the text — so one round trip is enough.
+        while !self.finished {
+            self.scan_forward();
+            if self.finished {
+                return None;
+            }
+            self.scan_backward();
+        }
+        self.found.then(|| self.scanning.clone())
+    }
+
+    /// Walk on to the first closing delimiter no opener accounts for.
+    fn scan_forward(&mut self) {
+        let start = self.scanning.start;
+        let mut depths = vec![0usize; self.candidates.len()];
+
+        for i in self.scanning.end..self.chars.len() {
+            let character = self.chars[i].1;
+
+            // An opener wins over a closer for a pair whose two halves are the
+            // same character, which is how `'` and `"` are meant to read.
+            if let Some(pair) = position_of_begin(self.candidates, character) {
+                depths[pair] += 1;
+            } else if let Some(pair) = position_of_end(self.candidates, character) {
+                if depths[pair] > 0 {
+                    depths[pair] -= 1;
+                } else {
+                    // `i + 1`, not `i`: the closer belongs to the range the
+                    // scan reports, so the end has to point past it.
+                    self.scanning = start..i + 1;
+                    self.pair = Some(self.candidates[pair]);
+                    return;
+                }
+            }
+        }
+
+        self.finished = true;
+    }
+
+    /// Walk back to the opener that matches the closer the forward pass found.
+    fn scan_backward(&mut self) {
+        // Only the pair the forward pass settled on counts now. When it found
+        // nothing — because the range ended inside unclosed text — every
+        // candidate is still in play.
+        let narrowed;
+        let candidates: &[SymbolPair] = match self.pair {
+            Some(pair) => {
+                narrowed = [pair];
+                &narrowed
+            }
+            None => self.candidates,
+        };
+
+        let start = self.scanning.start;
+        let end = self.scanning.end;
+        let mut depths = vec![0usize; candidates.len()];
+
+        for i in (0..start).rev() {
+            let character = self.chars[i].1;
+
+            if let Some(pair) = position_of_begin(candidates, character) {
+                if depths[pair] > 0 {
+                    depths[pair] -= 1;
+                } else {
+                    self.finished = true;
+                    self.found = true;
+                    self.scanning = i..end;
+                    return;
+                }
+            } else if let Some(pair) = position_of_end(candidates, character) {
+                depths[pair] += 1;
+            }
+        }
+
+        self.finished = true;
+    }
+}
+
+/// Index of the first candidate that opens with `character`.
+fn position_of_begin(candidates: &[SymbolPair], character: char) -> Option<usize> {
+    candidates.iter().position(|pair| pair.begin == character)
+}
+
+/// Index of the first candidate that closes with `character`.
+fn position_of_end(candidates: &[SymbolPair], character: char) -> Option<usize> {
+    candidates.iter().position(|pair| pair.end == character)
+}
+
+// ---- selection expansion ------------------------------------------------
+
+/// The logical-line content ranges `range` covers, terminators excluded.
+///
+/// This is CotEditor's `lineContentsRanges(for:)`, the work behind ⌃L
+/// (*Split Selection by Lines*): a multi-line selection becomes one selection
+/// per line, so the next keystroke lands on all of them.
+///
+/// The range is cut at line starts, each piece runs to the end of its line's
+/// content — so a `\r\n` pair is never split down the middle — and each piece
+/// is clipped to `range`. The clipping is what makes a caret mid-line yield
+/// that caret back rather than the whole line, and what keeps a selection
+/// ending exactly at a line start from pulling in the line below.
+pub fn line_content_ranges(text: &str, range: &Range<usize>) -> Vec<Range<usize>> {
+    let start = floor_char_boundary(text, range.start.min(text.len()));
+    let end = floor_char_boundary(text, range.end.min(text.len()));
+    if end < start {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    for (line_start, content_end) in line_bounds(text) {
+        // A line counts when it holds the range's start, or when its own start
+        // falls strictly inside the range. A line beginning exactly at the
+        // range's end does not: the selection stopped before it.
+        if line_start > start && line_start >= end {
+            continue;
+        }
+        let from = line_start.max(start);
+        let to = content_end.min(end);
+        if from <= to {
+            ranges.push(from..to);
+        }
+    }
+    ranges
+}
+
+/// `(start, content_end)` for every logical line in `text`.
+///
+/// A line terminator is `\r\n`, a lone `\r`, or a lone `\n` — the three
+/// NSString recognises, which is why a document saved with classic Mac line
+/// endings still splits where its author meant it to. The final line always
+/// appears, even when the text ends with a terminator and the line is empty.
+fn line_bounds(text: &str) -> Vec<(usize, usize)> {
+    // Scanning bytes is safe here: `\r` and `\n` are ASCII and cannot occur
+    // inside a multi-byte sequence.
+    let bytes = text.as_bytes();
+    let mut bounds = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\r' => {
+                bounds.push((start, i));
+                i += if bytes.get(i + 1) == Some(&b'\n') { 2 } else { 1 };
+                start = i;
+            }
+            b'\n' => {
+                bounds.push((start, i));
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    bounds.push((start, text.len()));
+    bounds
+}
+
 /// The line number (1-based) containing `offset`, and the column (1-based).
 pub fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
     let offset = floor_char_boundary(text, offset.min(text.len()));
@@ -982,17 +1539,202 @@ mod tests {
     #[test]
     fn sort_lines_ascending_and_descending() {
         let text = "banana\napple\ncherry";
-        let options = SortOptions::default();
-        assert_eq!(sort_lines(text, &all(text), &options).text, "apple\nbanana\ncherry");
-        let desc = SortOptions { descending: true, ..Default::default() };
-        assert_eq!(sort_lines(text, &all(text), &desc).text, "cherry\nbanana\napple");
+        let options = SortOptions::whole_line();
+        assert_eq!(
+            sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
+            "apple\nbanana\ncherry"
+        );
+        let desc = SortOptions { descending: true, ..options };
+        assert_eq!(
+            sort_lines(text, &all(text), &SortKey::EntireLine, &desc).text,
+            "cherry\nbanana\napple"
+        );
     }
 
     #[test]
     fn sort_lines_numeric_orders_by_value() {
         let text = "10\n9\n100";
-        let options = SortOptions { numeric: true, ..Default::default() };
-        assert_eq!(sort_lines(text, &all(text), &options).text, "9\n10\n100");
+        let options = SortOptions { numeric: true, ..SortOptions::whole_line() };
+        assert_eq!(
+            sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
+            "9\n10\n100"
+        );
+    }
+
+    #[test]
+    fn sort_by_column_reads_the_field_and_leaves_short_rows_alone() {
+        // CotEditor's own fixture: `dog, 🐕, 2, イヌ` and friends, sorted by the
+        // third field.
+        let text = "dog, 🐕, 2, イヌ\ncat, 🐈, 1, ねこ\ncow, 🐄, 3, ｳｼ\n";
+        let key = SortKey::Column { delimiter: String::new(), column: 3 };
+        assert_eq!(
+            sort_lines(text, &all(text), &key, &SortOptions::default()).text,
+            "cat, 🐈, 1, ねこ\ndog, 🐕, 2, イヌ\ncow, 🐄, 3, ｳｼ\n"
+        );
+
+        // A row with no such field has no key, so it sorts to the end.
+        let ragged = "a,b,c\nx\ny,b,z\n";
+        let key = SortKey::Column { delimiter: String::new(), column: 3 };
+        assert_eq!(
+            sort_lines(ragged, &all(ragged), &key, &SortOptions::default()).text,
+            "a,b,c\ny,b,z\nx\n"
+        );
+    }
+
+    #[test]
+    fn sort_by_column_understands_an_escaped_delimiter() {
+        let text = "b\t2\na\t1\n";
+        let key = SortKey::Column { delimiter: "\\t".to_string(), column: 2 };
+        assert_eq!(
+            sort_lines(text, &all(text), &key, &SortOptions::default()).text,
+            "a\t1\nb\t2\n"
+        );
+    }
+
+    #[test]
+    fn sort_by_regular_expression_uses_the_match_or_a_group() {
+        let text = "dog, 🐕, 2, イヌ\ncat, 🐈, 1, ねこ\ncow, 🐄, 3, ｳｼ\n";
+        let sorted = "cat, 🐈, 1, ねこ\ndog, 🐕, 2, イヌ\ncow, 🐄, 3, ｳｼ\n";
+
+        let whole_match = SortKey::RegularExpression {
+            pattern: ", ([0-9]),".to_string(),
+            ignore_case: true,
+            group: None,
+        };
+        assert_eq!(
+            sort_lines(text, &all(text), &whole_match, &SortOptions::default()).text,
+            sorted
+        );
+
+        let first_group = SortKey::RegularExpression {
+            pattern: ", ([0-9]),".to_string(),
+            ignore_case: true,
+            group: Some(1),
+        };
+        assert_eq!(
+            sort_lines(text, &all(text), &first_group, &SortOptions::default()).text,
+            sorted
+        );
+    }
+
+    #[test]
+    fn a_line_without_a_key_keeps_out_of_the_way() {
+        // Nothing matches `^x`, so every line has no key and the order stands.
+        let text = "b\na\nc\n";
+        let key =
+            SortKey::RegularExpression { pattern: "^x".to_string(), ignore_case: true, group: None };
+        assert_eq!(sort_lines(text, &all(text), &key, &SortOptions::default()).text, text);
+    }
+
+    #[test]
+    fn sort_keeps_the_first_line_when_asked() {
+        let text = "3\n12\n1\n";
+        let options = SortOptions { keeps_first_line: true, ..SortOptions::whole_line() };
+        assert_eq!(
+            sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
+            "3\n1\n12\n"
+        );
+    }
+
+    #[test]
+    fn sort_carries_each_line_s_own_terminator() {
+        // CotEditor's `sortMixedLineEndings` fixture. A file whose lines end
+        // differently must not have them rewritten by a sort.
+        let options = SortOptions::whole_line();
+        let key = SortKey::EntireLine;
+
+        assert_eq!(
+            sort_lines("b\r\na\nc", &(0..6), &key, &options).text,
+            "a\nb\r\nc"
+        );
+        assert_eq!(
+            sort_lines("b\r\na\n", &(0..5), &key, &options).text,
+            "a\nb\r\n"
+        );
+    }
+
+    #[test]
+    fn sort_needs_two_lines_and_a_terminator() {
+        // A single line is already sorted; a block with no terminator at all
+        // has nothing to re-attach.
+        let options = SortOptions::whole_line();
+        for text in ["abc", "abc\n", ""] {
+            let edit = sort_lines(text, &all(text), &SortKey::EntireLine, &options);
+            assert_eq!(edit.text, text);
+            assert_eq!(edit.selection, all(text));
+        }
+    }
+
+    #[test]
+    fn sort_hands_back_the_first_line_as_the_selection() {
+        let text = "banana\napple\n";
+        let edit = sort_lines(text, &all(text), &SortKey::EntireLine, &SortOptions::whole_line());
+        assert_eq!(edit.text, "apple\nbanana\n");
+        // "apple" — the first line of the result, not the whole block.
+        assert_eq!(edit.selection, 0..5);
+    }
+
+    #[test]
+    fn logical_lines_keep_their_endings_apart() {
+        let text = "a\r\nb\nc";
+        let lines = logical_lines(text, &(0..text.len()));
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].contents, "a");
+        assert_eq!(lines[0].line_ending.as_deref(), Some("\r\n"));
+        assert_eq!(lines[1].line_ending.as_deref(), Some("\n"));
+        assert_eq!(lines[2].line_ending, None);
+
+        // A block that ends in a terminator produces no phantom last line.
+        let text = "a\nb\n";
+        assert_eq!(logical_lines(text, &(0..text.len())).len(), 2);
+    }
+
+    #[test]
+    fn leading_numbers_follow_the_parser_coteditor_uses() {
+        assert_eq!(leading_number("0"), Some(0.0));
+        assert_eq!(leading_number("10 000"), Some(10_000.0));
+        assert_eq!(leading_number("-1000.1 m/s"), Some(-1000.1));
+        // A grouping separator needs exactly three digits behind it, so the
+        // comma in `-1000,1` ends the number rather than joining it.
+        assert_eq!(leading_number("-1000,1 m/s"), Some(-1000.0));
+        assert_eq!(leading_number("+1,000"), Some(1000.0));
+        assert_eq!(leading_number("dog 10"), None);
+        assert_eq!(leading_number(""), None);
+    }
+
+    #[test]
+    fn sort_keys_report_why_they_cannot_be_used() {
+        assert_eq!(SortKey::EntireLine.validate(), None);
+        assert_eq!(
+            SortKey::RegularExpression {
+                pattern: String::new(),
+                ignore_case: true,
+                group: None,
+            }
+            .validate(),
+            Some(SortKeyError::EmptyPattern)
+        );
+        assert_eq!(
+            SortKey::RegularExpression {
+                pattern: "\\".to_string(),
+                ignore_case: true,
+                group: None,
+            }
+            .validate(),
+            Some(SortKeyError::InvalidPattern)
+        );
+        // `(a)(b)c` has two groups, so 0, 1 and 2 are usable and 3 is not.
+        let key = |group| SortKey::RegularExpression {
+            pattern: "(a)(b)c".to_string(),
+            ignore_case: true,
+            group: Some(group),
+        };
+        assert_eq!(key(2).validate(), None);
+        assert_eq!(key(3).validate(), Some(SortKeyError::InvalidPattern));
+        assert_eq!(
+            SortKey::Column { delimiter: String::new(), column: 0 }.validate(),
+            Some(SortKeyError::EmptyColumn)
+        );
     }
 
     #[test]
@@ -1075,5 +1817,79 @@ mod tests {
             convert_indentation_to_tabs("        x", &all("        x"), 4).text,
             "\t\tx"
         );
+    }
+
+    #[test]
+    fn enclosing_symbols_find_the_nearest_pair() {
+        // CotEditor's own fixture for `rangeOfEnclosingSymbolPair`.
+        let text = "def { foo {} | { bar } } ";
+        let pairs = SymbolPair::BRACES;
+
+        // Outside every pair, and past the end of the text.
+        assert_eq!(range_of_enclosing_symbol_pair(text, &(1..2), &pairs), None);
+        assert_eq!(range_of_enclosing_symbol_pair(text, &(24..24), &pairs), None);
+        // The outer braces, not the inner ones the caret sits between.
+        assert_eq!(
+            range_of_enclosing_symbol_pair(text, &(13..14), &pairs),
+            Some(4..24)
+        );
+        // Standing inside the empty pair, the nearest thing is that pair.
+        assert_eq!(
+            range_of_enclosing_symbol_pair(text, &(11..11), &pairs),
+            Some(10..12)
+        );
+    }
+
+    #[test]
+    fn enclosing_symbols_will_not_pair_mismatched_delimiters() {
+        // The `[` never gets to claim the `}`: the forward pass settles on the
+        // brace, and the backward pass then finds no `{` before it.
+        assert_eq!(
+            range_of_enclosing_symbol_pair("def [ foo }", &(7..7), &SymbolPair::BRACES),
+            None
+        );
+    }
+
+    #[test]
+    fn enclosing_symbols_nest_the_angle_pair() {
+        let text = "if < foo < bar > > else";
+        assert_eq!(
+            range_of_enclosing_symbol_pair(text, &(8..8), &SymbolPair::ENCLOSING),
+            Some(3..18)
+        );
+    }
+
+    #[test]
+    fn enclosing_symbols_measure_in_characters_not_bytes() {
+        // A multi-byte character before the pair must not shift the answer:
+        // the scan counts characters, the caller counts bytes.
+        let text = "🐕 (woof)";
+        let inside = text.find('(').expect("the fixture has an opener") + 1;
+        assert_eq!(
+            range_of_enclosing_symbol_pair(text, &(inside..inside), &SymbolPair::BRACES),
+            Some(inside - 1..text.len())
+        );
+    }
+
+    #[test]
+    fn line_content_ranges_clip_to_the_selection() {
+        // A caret mid-line comes back as that caret, not as the whole line.
+        assert_eq!(line_content_ranges("foo\nbar", &(1..1)), vec![1..1]);
+        // A selection reaching into two lines is cut at the line start, and
+        // stops before the line whose start is its own end.
+        assert_eq!(line_content_ranges("foo\nbar\nbaz", &(1..8)), vec![1..3, 4..7]);
+    }
+
+    #[test]
+    fn line_content_ranges_cover_every_line_terminator() {
+        assert_eq!(line_content_ranges("foo\nbar", &(0..7)), vec![0..3, 4..7]);
+        assert_eq!(line_content_ranges("foo\r\nbar", &(0..8)), vec![0..3, 5..8]);
+        assert_eq!(
+            line_content_ranges("foo\r\r\rbar", &(0..9)),
+            vec![0..3, 4..4, 5..5, 6..9]
+        );
+        // The line after a trailing terminator is empty, and an empty range at
+        // the end of the selection is not a selection.
+        assert_eq!(line_content_ranges("foo\nbar\n", &(0..8)), vec![0..3, 4..7]);
     }
 }

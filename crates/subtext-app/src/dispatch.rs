@@ -67,9 +67,19 @@ impl Workspace {
             | "CopyWithStyle" => self.notice("Handled by the text engine", cx),
             "SelectWord" => self.select_word(cx),
             "SelectParagraph" => self.select_line(cx),
-            "SelectEnclosingSymbols" | "SelectColumnUp" | "SelectColumnDown"
-            | "SplitSelectionByLines" | "Complete" | "InputBackSlash" | "InputYenMark"
-            | "ShowUnicodeInputPanel" => {
+            "SelectEnclosingSymbols" => self.select_enclosing_symbols(cx),
+            "SplitSelectionByLines" => self.split_selection_by_lines(cx),
+            "InputBackSlash" => self.insert_text("\\", window, cx),
+            "InputYenMark" => self.insert_text("¥", window, cx),
+            // Column selection is defined in terms of the layout manager's
+            // wrapped rows: CotEditor's version asks TextKit which visual line
+            // a cursor is on and places the new one at the same glyph column.
+            // SubText's editor has no such model to ask.
+            "SelectColumnUp" | "SelectColumnDown" => self.notice(
+                "Column selection needs the text layout engine's visual rows, which SubText's editor does not expose",
+                cx,
+            ),
+            "Complete" | "ShowUnicodeInputPanel" => {
                 self.notice("That selection command is not implemented yet", cx)
             }
 
@@ -237,9 +247,14 @@ impl Workspace {
                 textops::move_lines(text, selection, false)
             }),
             "SortLinesAscending" => self.text_op(window, cx, |text, selection, _| {
-                textops::sort_lines(text, selection, &textops::SortOptions::default())
+                textops::sort_lines(
+                    text,
+                    selection,
+                    &textops::SortKey::EntireLine,
+                    &textops::SortOptions::whole_line(),
+                )
             }),
-            "PatternSort" => self.notice("Sort by pattern is not implemented yet", cx),
+            "PatternSort" => self.pattern_sort_dialog(window, cx),
             "ReverseLines" => self.text_op(window, cx, |text, selection, _| {
                 textops::reverse_lines(text, selection)
             }),
@@ -299,7 +314,7 @@ impl Workspace {
             }),
             "ShowSelectionInfo" => self.inspect_selection(window, cx),
             "ToggleAdvancedCounter" => self.inspect_document(window, cx),
-            "EditColorCode" => self.notice("Colour code editing is not implemented yet", cx),
+            "EditColorCode" => self.color_code_dialog(window, cx),
             "ShowSnippetEditor" => self.notice("Snippets are not implemented yet", cx),
 
             // ---- find --------------------------------------------------

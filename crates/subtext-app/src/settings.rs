@@ -582,6 +582,13 @@ pub struct Settings {
     pub enables_remote_editing: bool,
     pub remote_editing_port: u16,
 
+    /// The notation the *Edit Color Code* panel writes colour codes in.
+    ///
+    /// The number is CotEditor's `ColorCodeType` raw value, kept rather than
+    /// translated so the two applications agree on what is stored; see
+    /// [`subtext_core::colorcode::ColorCodeType::from_raw_value`].
+    pub color_code_type: i32,
+
     /// The most recently opened documents, newest first.
     pub recent_documents: Vec<PathBuf>,
 }
@@ -615,6 +622,8 @@ impl Default for Settings {
             find_whole_word: false,
             enables_remote_editing: false,
             remote_editing_port: 52698,
+            // CotEditor's `colorCodeType` default is `1`, which is `Hex`.
+            color_code_type: subtext_core::colorcode::ColorCodeType::default().raw_value(),
             recent_documents: Vec::new(),
         }
     }

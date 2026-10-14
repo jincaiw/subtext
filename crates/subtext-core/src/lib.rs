@@ -8,6 +8,7 @@
 //! without a window server and reused by the command-line tool.
 
 pub mod charinfo;
+pub mod colorcode;
 pub mod document;
 pub mod encoding;
 pub mod finder;
@@ -15,6 +16,7 @@ pub mod line_ending;
 pub mod textops;
 
 pub use charinfo::{CharacterCount, CharacterInfo};
+pub use colorcode::{Color, ColorCodeType};
 pub use document::{Document, DocumentError, FileStatus};
 pub use encoding::{Bom, DecodedFile, Detection, TextEncoding};
 pub use finder::{
@@ -22,5 +24,6 @@ pub use finder::{
 };
 pub use line_ending::LineEnding;
 pub use textops::{
-    CaseTransform, CommentDelimiters, Edit, Normalization, SortOptions, WidthTransform,
+    CaseTransform, CommentDelimiters, Edit, LogicalLine, Normalization, SortKey, SortKeyError,
+    SortOptions, SymbolPair, WidthTransform,
 };

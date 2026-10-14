@@ -42,14 +42,16 @@ use gpui_kit::{
     Styled as _, Subscription, WeakEntity, Window, WindowOptions, div, px,
 };
 
-use subtext_core::{Document, LineEnding, TextEncoding, charinfo, encoding, finder, textops};
+use subtext_core::{Document, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder, textops};
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
 
+use crate::color_sheet::ColorSheet;
 use crate::dialogs::AboutView;
 use crate::highlighter;
 use crate::settings::{InspectorPane, Settings, SidebarPane};
 use crate::settings_window::SettingsWindow;
+use crate::sort_sheet::SortSheet;
 
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
@@ -141,6 +143,13 @@ pub struct Workspace {
     loading: bool,
     settings_window: Option<AnyWindowHandle>,
     about_window: Option<AnyWindowHandle>,
+    /// The colour the *Edit Color Code* panel opens on when the caret is not on
+    /// a colour code.
+    ///
+    /// CotEditor keeps this in the shared `NSColorPanel`, which survives for the
+    /// length of a session; SubText has no shared panel, so the workspace holds
+    /// the last colour inserted instead. Like upstream's, it is not persisted.
+    last_color_code_color: colorcode::Color,
 }
 
 impl Workspace {
@@ -176,6 +185,7 @@ impl Workspace {
             loading: false,
             settings_window: None,
             about_window: None,
+            last_color_code_color: colorcode::Color::BLACK,
         };
         this.new_document(window, cx);
         this
@@ -591,9 +601,143 @@ impl Workspace {
         });
     }
 
-    /// Select the word under the caret, as ⌘D does.
-    pub fn select_word(&mut self, cx: &mut Context<Self>) {
+    /// Sort the selection by a pattern sort key, as the sheet describes one.
+    pub fn sort_lines_by(
+        &mut self,
+        key: &textops::SortKey,
+        options: &textops::SortOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (key, options) = (key.clone(), options.clone());
+        self.text_op(window, cx, move |text, selection, _| {
+            textops::sort_lines(text, selection, &key, &options)
+        });
+    }
+
+    /// The line the Pattern Sort sheet shows as its sample: the one the caret
+    /// sits on, which is CotEditor's rule as well.
+    fn sample_line(&self, cx: &App) -> SharedString {
         let Some(text) = self.active_text(cx) else {
+            return SharedString::default();
+        };
+        let offset = self.active_selection(cx).start.min(text.len());
+        let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+        let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
+        SharedString::from(text[start..end].to_string())
+    }
+
+    /// The *Sort Lines by Pattern* sheet.
+    pub fn pattern_sort_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sample = self.sample_line(cx);
+        let workspace = Workspace::weak(cx);
+        let sheet = cx.new(|cx| SortSheet::new(workspace, sample, window, cx));
+        window.open_dialog(cx, move |dialog, window, _| {
+            let submit = sheet.clone();
+            dialog
+                .title("Sort Lines by Pattern")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 32.)
+                .child(sheet.clone())
+                // Enter and Escape reach the dialog's own actions, not the
+                // buttons the sheet draws, so the callbacks are installed here
+                // too. `submit` re-checks the key, so confirming an unfinished
+                // pattern is a no-op rather than a surprise.
+                .on_ok(move |_, _, cx| {
+                    submit.update(cx, |sheet, cx| sheet.submit(cx));
+                    true
+                })
+        });
+    }
+
+    /// The text the caret has selected, or empty when it is a bare caret.
+    ///
+    /// The *Edit Color Code* panel opens on this, the way CotEditor's does.
+    fn selected_text(&self, cx: &App) -> String {
+        let Some(text) = self.active_text(cx) else {
+            return String::new();
+        };
+        let selection = self.active_selection(cx);
+        let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+        if start >= end {
+            return String::new();
+        }
+        // `get` rather than `[..]`: a selection reported in the middle of a
+        // multi-byte character would otherwise panic, and a panel opening on an
+        // empty field is a better failure than a crash.
+        text.get(start..end).unwrap_or_default().to_string()
+    }
+
+    /// The *Edit Color Code* panel.
+    pub fn color_code_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selected_text(cx);
+        let kind = colorcode::ColorCodeType::from_raw_value(self.settings.color_code_type);
+        let fallback = self.last_color_code_color;
+        let workspace = Workspace::weak(cx);
+        let sheet =
+            cx.new(|cx| ColorSheet::new(workspace, &selected, kind, fallback, window, cx));
+        window.open_dialog(cx, move |dialog, window, _| {
+            let submit = sheet.clone();
+            dialog
+                .title("Edit Color Code")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 26.)
+                .child(sheet.clone())
+                // Enter and Escape reach the dialog's own actions, not the
+                // buttons the panel draws. Confirming something that is not a
+                // colour code leaves the panel open with the reason in the
+                // status bar, rather than closing on a no-op.
+                .on_ok(move |_, _, cx| submit.update(cx, |sheet, cx| sheet.submit(cx)))
+        });
+    }
+
+    /// Put a colour code at the caret, leaving it selected.
+    ///
+    /// The notation and the colour are remembered past the panel's lifetime:
+    /// the notation is CotEditor's `colorCodeType`, which outlives the
+    /// application, and the colour stands in for the shared `NSColorPanel`
+    /// upstream keeps for the length of a session.
+    pub fn insert_color_code(
+        &mut self,
+        code: &str,
+        kind: colorcode::ColorCodeType,
+        color: colorcode::Color,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.last_color_code_color = color;
+        if self.settings.color_code_type != kind.raw_value() {
+            self.settings.color_code_type = kind.raw_value();
+            let _ = self.settings.save();
+        }
+
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let editor = document.editor.clone();
+        let code = code.to_string();
+        // Deferred for the same reason every other text change is: `replace`
+        // emits `Change`, and the subscription that follows the buffer back
+        // into the document model must not run inside this update.
+        window.defer(cx, {
+            let code = code.clone();
+            move |window, cx| {
+                editor.update(cx, |state, cx| {
+                    let start = state.selected_range().start;
+                    state.replace(code.clone(), window, cx);
+                    // CotEditor leaves the inserted code selected, so pressing
+                    // Insert twice replaces the code rather than stacking two.
+                    state.set_selected_range(start..start + code.len(), cx);
+                });
+            }
+        });
+        self.set_status(format!("Inserted {code}"), cx);
+    }
+
+    /// Select the word under the caret, as ⌘D does.
+    pub fn select_word(&mut self, cx: &mut Context<Self>) {        let Some(text) = self.active_text(cx) else {
             return;
         };
         let offset = self.active_selection(cx).start.min(text.len());
@@ -624,6 +768,75 @@ impl Workspace {
         let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
         let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
         self.set_selection(start..end, cx);
+    }
+
+    /// Select the nearest enclosing bracketed region, delimiters included.
+    ///
+    /// Like the two commands above, this stays quiet when there is nothing to
+    /// select: the caret sitting outside every pair is an ordinary state, not
+    /// a failure worth interrupting the user over.
+    pub fn select_enclosing_symbols(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
+        let selection = self.active_selection(cx);
+        let Some(range) = textops::range_of_enclosing_symbol_pair(
+            &text,
+            &selection,
+            &textops::SymbolPair::ENCLOSING,
+        ) else {
+            return;
+        };
+        self.set_selection(range, cx);
+    }
+
+    /// Split the selection into one selection per line it covers, so the next
+    /// keystroke lands on every line at once — CotEditor's ⌃L.
+    ///
+    /// The editor exposes only the active selection for reading, so this
+    /// splits that one and adds the rest. A document already carrying several
+    /// cursors therefore splits the active cursor and leaves the others where
+    /// they are.
+    pub fn split_selection_by_lines(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
+        let selection = self.active_selection(cx);
+        let ranges = textops::line_content_ranges(&text, &selection);
+        let Some((first, rest)) = ranges.split_first() else {
+            return;
+        };
+        let (first, rest) = (first.clone(), rest.to_vec());
+
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        document.editor.update(cx, |state, cx| {
+            state.set_selected_range(first, cx);
+            for range in rest {
+                state.add_selection(range, cx);
+            }
+        });
+        cx.notify();
+    }
+
+    /// Insert `text` at the caret, replacing the selection.
+    ///
+    /// The two `Insert …` menu items use this: ⌘Y and ⌘¥ exist because a
+    /// Japanese keyboard cannot type `\` or `¥` directly, so the menu has to
+    /// stand in for a key the hardware does not have.
+    pub fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let editor = document.editor.clone();
+        let text = text.to_string();
+        // Deferred for the same reason the text operations are: `replace`
+        // emits `Change`, and the subscription that follows the buffer back
+        // into the document model must not run inside this update.
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |state, cx| state.replace(text, window, cx));
+        });
     }
 
     fn set_selection(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
@@ -657,18 +870,38 @@ impl Workspace {
             }
             let weak = weak.clone();
             let input_value = input.clone();
+            let go_value = input.clone();
+            // `button_props` wires Enter and Escape to the dialog's own
+            // actions but renders nothing on a plain `Dialog`, so the footer
+            // is built here as well — otherwise the panel would be a field
+            // with no visible way to confirm it.
+            let footer_weak = weak.clone();
+            let footer = h_flex()
+                .w_full()
+                .gap_2()
+                .justify_end()
+                .child(
+                    Button::new("goto-cancel")
+                        .label("Cancel")
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                )
+                .child(Button::new("goto-apply").primary().label("Go").on_click(
+                    move |_, window, cx| {
+                        let raw = go_value.read(cx).value().to_string();
+                        let line = raw.trim().parse::<usize>().unwrap_or(1);
+                        footer_weak
+                            .update(cx, |workspace, cx| workspace.goto_line(line, cx))
+                            .ok();
+                        window.close_dialog(cx);
+                    },
+                ));
             dialog
                 .title("Go to Line")
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 20.)
                 .child(Input::new(&input))
-                .button_props(
-                    gpui_kit::component::dialog::DialogButtonProps::default()
-                        .ok_text("Go")
-                        .cancel_text("Cancel")
-                        .show_cancel(true),
-                )
+                .footer(footer)
                 .on_ok(move |_, _, cx| {
                     let raw = input_value.read(cx).value().to_string();
                     let line = raw.trim().parse::<usize>().unwrap_or(1);
