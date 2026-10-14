@@ -1,0 +1,11 @@
+[package]
+name = "subtext-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CotEditor .cottheme support: colour parsing and the token-to-colour mapping."
+
+[dependencies]
+subtext-syntax.workspace = true
+serde.workspace = true
+serde_json.workspace = true

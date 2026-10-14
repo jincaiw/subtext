@@ -1,0 +1,12 @@
+[package]
+name = "subtext-syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CotEditor .cotsyntax bundle support: parsing, syntax selection and highlighting."
+
+[dependencies]
+subtext-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true

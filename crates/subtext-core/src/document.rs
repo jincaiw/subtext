@@ -1,0 +1,360 @@
+//! The document: a text buffer plus everything needed to write it back
+//! byte-for-byte, and the file lifecycle CotEditor exposes in its File menu.
+
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use crate::encoding::{Bom, DecodedFile, Detection, TextEncoding};
+use crate::line_ending::{self, LineEnding};
+
+#[derive(Debug, thiserror::Error)]
+pub enum DocumentError {
+    #[error("cannot read {path}: {source}")]
+    Read { path: PathBuf, #[source] source: std::io::Error },
+    #[error("cannot write {path}: {source}")]
+    Write { path: PathBuf, #[source] source: std::io::Error },
+    #[error("{0} is not valid UTF-8 and no other encoding matched")]
+    Undecodable(PathBuf),
+}
+
+/// What changed on disk since the document was last read or written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileStatus {
+    /// The file on disk still matches what we hold.
+    Unchanged,
+    /// The file changed underneath us.
+    Modified,
+    /// The file is gone.
+    Missing,
+    /// The document has never been saved.
+    Untitled,
+}
+
+/// An open text document.
+#[derive(Debug, Clone)]
+pub struct Document {
+    path: Option<PathBuf>,
+    text: String,
+    encoding: TextEncoding,
+    bom: Bom,
+    line_ending: LineEnding,
+    detection: Detection,
+    dirty: bool,
+    /// The file's modification time when we last read or wrote it.
+    saved_at: Option<SystemTime>,
+    /// The file's length when we last read or wrote it, used as a cheap
+    /// second signal when the filesystem's timestamps are coarse.
+    saved_len: Option<u64>,
+}
+
+impl Document {
+    /// A new, empty, unsaved document.
+    pub fn untitled(default_encoding: TextEncoding, default_line_ending: LineEnding) -> Self {
+        Self {
+            path: None,
+            text: String::new(),
+            encoding: default_encoding,
+            bom: Bom::None,
+            line_ending: default_line_ending,
+            detection: Detection::Default,
+            dirty: false,
+            saved_at: None,
+            saved_len: None,
+        }
+    }
+
+    /// Read a document from disk, detecting encoding and line endings.
+    pub fn open(path: impl AsRef<Path>, fallback: TextEncoding) -> Result<Self, DocumentError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path)
+            .map_err(|source| DocumentError::Read { path: path.to_path_buf(), source })?;
+        let metadata = std::fs::metadata(path).ok();
+
+        let decoded = DecodedFile::decode(&bytes, fallback);
+        let line_ending = line_ending::detect(&decoded.text);
+
+        Ok(Self {
+            path: Some(path.to_path_buf()),
+            text: decoded.text,
+            encoding: decoded.encoding,
+            bom: decoded.bom,
+            line_ending,
+            detection: decoded.detection,
+            dirty: false,
+            saved_at: metadata.as_ref().and_then(|m| m.modified().ok()),
+            saved_len: metadata.as_ref().map(|m| m.len()),
+        })
+    }
+
+    /// Adopt the text of an already-decoded file (used when reopening in a
+    /// different encoding, and by the CLI).
+    pub fn from_decoded(path: Option<PathBuf>, decoded: DecodedFile) -> Self {
+        let line_ending = line_ending::detect(&decoded.text);
+        Self {
+            path,
+            text: decoded.text,
+            encoding: decoded.encoding,
+            bom: decoded.bom,
+            line_ending,
+            detection: decoded.detection,
+            dirty: false,
+            saved_at: None,
+            saved_len: None,
+        }
+    }
+
+    // ---- accessors -------------------------------------------------------
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub fn display_name(&self) -> String {
+        self.path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map_or_else(|| "Untitled".to_string(), |n| n.to_string_lossy().into_owned())
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn encoding(&self) -> TextEncoding {
+        self.encoding
+    }
+
+    pub fn bom(&self) -> Bom {
+        self.bom
+    }
+
+    pub fn line_ending(&self) -> LineEnding {
+        self.line_ending
+    }
+
+    pub fn detection(&self) -> Detection {
+        self.detection
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn is_untitled(&self) -> bool {
+        self.path.is_none()
+    }
+
+    pub fn character_count(&self) -> usize {
+        self.text.chars().count()
+    }
+
+    pub fn line_count(&self) -> usize {
+        line_ending::split_lines(&self.text).len()
+    }
+
+    // ---- mutation --------------------------------------------------------
+
+    /// Replace the buffer. Marks the document dirty unless `dirty` is false.
+    pub fn set_text(&mut self, text: impl Into<String>, dirty: bool) {
+        self.text = text.into();
+        if dirty {
+            self.dirty = true;
+        }
+    }
+
+    pub fn mark_saved(&mut self) {
+        self.dirty = false;
+    }
+
+    /// Rewrite every line ending in the buffer.
+    pub fn set_line_ending(&mut self, ending: LineEnding) {
+        if self.line_ending == ending {
+            return;
+        }
+        self.text = line_ending::convert(&self.text, ending);
+        self.line_ending = ending;
+        self.dirty = true;
+    }
+
+    /// Change the encoding the buffer will be *written* in, without touching
+    /// the text — CotEditor's "Convert Encoding".
+    pub fn convert_encoding(&mut self, encoding: TextEncoding, bom: Bom) {
+        self.encoding = encoding;
+        self.bom = if encoding.supports_bom() { bom } else { Bom::None };
+        self.dirty = true;
+    }
+
+    /// Re-read the file's bytes as a different encoding — CotEditor's
+    /// "Reinterpret". The on-disk bytes are untouched; only the buffer's
+    /// interpretation of them changes.
+    pub fn reinterpret(&mut self, encoding: TextEncoding) -> Result<(), DocumentError> {
+        let Some(path) = self.path.clone() else {
+            // Nothing on disk to reinterpret: re-encode what we already have.
+            let (text, _) = encoding.decode(self.text.as_bytes());
+            self.text = text;
+            self.encoding = encoding;
+            self.bom = Bom::None;
+            self.dirty = true;
+            return Ok(());
+        };
+        let bytes = std::fs::read(&path)
+            .map_err(|source| DocumentError::Read { path: path.clone(), source })?;
+        let bom = crate::encoding::detect_bom(&bytes);
+        let body = &bytes[bom.len()..];
+        let (text, _) = encoding.decode(body);
+        self.text = text;
+        self.encoding = encoding;
+        self.bom = if encoding.supports_bom() { bom } else { Bom::None };
+        self.line_ending = line_ending::detect(&self.text);
+        Ok(())
+    }
+
+    // ---- file I/O --------------------------------------------------------
+
+    /// Write the buffer back to `self.path`, or to `path` when given.
+    pub fn save(&mut self, path: Option<PathBuf>) -> Result<(), DocumentError> {
+        let target = match path {
+            Some(p) => p,
+            None => self.path.clone().ok_or_else(|| DocumentError::Write {
+                path: PathBuf::from("Untitled"),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "no path"),
+            })?,
+        };
+
+        let file = DecodedFile {
+            text: self.text.clone(),
+            encoding: self.encoding,
+            bom: self.bom,
+            detection: self.detection,
+        };
+        let bytes = file.encode();
+
+        // Write to a sibling temp file and rename, so a crash mid-write cannot
+        // truncate the user's document. This is what an editor must do.
+        let temp = target.with_extension("subtext-tmp");
+        std::fs::write(&temp, &bytes)
+            .map_err(|source| DocumentError::Write { path: temp.clone(), source })?;
+        std::fs::rename(&temp, &target)
+            .map_err(|source| DocumentError::Write { path: target.clone(), source })?;
+
+        let metadata = std::fs::metadata(&target).ok();
+        self.path = Some(target);
+        self.saved_at = metadata.as_ref().and_then(|m| m.modified().ok());
+        self.saved_len = metadata.as_ref().map(|m| m.len());
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// Whether the file on disk has changed since we read it.
+    pub fn file_status(&self) -> FileStatus {
+        let Some(path) = &self.path else {
+            return FileStatus::Untitled;
+        };
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return FileStatus::Missing;
+        };
+        let modified = metadata.modified().ok();
+        let len = metadata.len();
+        let changed_time = match (modified, self.saved_at) {
+            (Some(now), Some(before)) => now > before,
+            _ => false,
+        };
+        let changed_len = self.saved_len.is_some_and(|before| before != len);
+        if changed_time || changed_len { FileStatus::Modified } else { FileStatus::Unchanged }
+    }
+
+    /// Reload the file from disk, discarding the buffer.
+    pub fn revert(&mut self) -> Result<(), DocumentError> {
+        let Some(path) = self.path.clone() else {
+            return Ok(());
+        };
+        let reloaded = Self::open(&path, self.encoding)?;
+        let encoding = self.encoding;
+        *self = reloaded;
+        self.encoding = encoding;
+        Ok(())
+    }
+
+    /// Move the document to the trash and forget its path.
+    pub fn forget_path(&mut self) {
+        self.path = None;
+        self.saved_at = None;
+        self.saved_len = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("subtext-test-{}-{name}", std::process::id()));
+        path
+    }
+
+    #[test]
+    fn save_then_open_round_trips_everything() {
+        let path = temp_path("round-trip.txt");
+        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::CRLF);
+        document.set_text("first\r\nsecond\r\n", true);
+        document.set_line_ending(LineEnding::CRLF);
+        document.save(Some(path.clone())).unwrap();
+
+        let reopened = Document::open(&path, TextEncoding::UTF8).unwrap();
+        assert_eq!(reopened.text(), "first\r\nsecond\r\n");
+        assert_eq!(reopened.line_ending(), LineEnding::CRLF);
+        assert!(!reopened.is_dirty());
+        assert_eq!(reopened.display_name(), path.file_name().unwrap().to_string_lossy());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn line_ending_change_rewrites_the_buffer() {
+        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        document.set_text("a\nb\nc", false);
+        document.set_line_ending(LineEnding::CRLF);
+        assert_eq!(document.text(), "a\r\nb\r\nc");
+        assert_eq!(document.line_count(), 3);
+    }
+
+    #[test]
+    fn unsaved_document_is_untitled_and_clean() {
+        let document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        assert!(document.is_untitled());
+        assert!(!document.is_dirty());
+        assert_eq!(document.file_status(), FileStatus::Untitled);
+        assert_eq!(document.display_name(), "Untitled");
+    }
+
+    #[test]
+    fn external_modification_is_detected() {
+        let path = temp_path("external.txt");
+        std::fs::write(&path, "original").unwrap();
+        let document = Document::open(&path, TextEncoding::UTF8).unwrap();
+        assert_eq!(document.file_status(), FileStatus::Unchanged);
+
+        std::fs::write(&path, "changed and longer").unwrap();
+        assert_eq!(document.file_status(), FileStatus::Modified);
+
+        std::fs::remove_file(&path).ok();
+        assert_eq!(document.file_status(), FileStatus::Missing);
+    }
+
+    #[test]
+    fn convert_encoding_does_not_change_the_text() {
+        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        document.set_text("日本語", false);
+        document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::None);
+        assert_eq!(document.text(), "日本語");
+        assert!(document.is_dirty());
+    }
+
+    #[test]
+    fn bom_is_dropped_for_encodings_that_cannot_carry_one() {
+        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::Utf8);
+        assert_eq!(document.bom(), Bom::None);
+    }
+}

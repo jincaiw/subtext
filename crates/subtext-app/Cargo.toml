@@ -1,0 +1,25 @@
+[package]
+name = "subtext-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The SubText desktop application: windows, menus, key bindings and views."
+
+[[bin]]
+name = "subtext"
+path = "src/main.rs"
+
+[dependencies]
+subtext-core.workspace = true
+subtext-syntax.workspace = true
+subtext-theme.workspace = true
+
+gpui-kit.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+env_logger.workspace = true
+dirs.workspace = true
+clap.workspace = true

@@ -1,0 +1,26 @@
+//! # subtext-core
+//!
+//! The parts of a text editor that have nothing to do with a window: the
+//! document model, text encodings, line endings, the operations behind the
+//! Text menu, find and replace, and character inspection.
+//!
+//! This crate has no UI dependencies on purpose, so it can be unit-tested
+//! without a window server and reused by the command-line tool.
+
+pub mod charinfo;
+pub mod document;
+pub mod encoding;
+pub mod finder;
+pub mod line_ending;
+pub mod textops;
+
+pub use charinfo::{CharacterCount, CharacterInfo};
+pub use document::{Document, DocumentError, FileStatus};
+pub use encoding::{Bom, DecodedFile, Detection, TextEncoding};
+pub use finder::{
+    FindOptions, ReplaceRule, ReplacementSyntax, Searcher, apply_rules, replace_all, replace_one,
+};
+pub use line_ending::LineEnding;
+pub use textops::{
+    CaseTransform, CommentDelimiters, Edit, Normalization, SortOptions, WidthTransform,
+};

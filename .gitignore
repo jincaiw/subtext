@@ -1,0 +1,40 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Reference checkouts. These are upstream repositories cloned for study —
+# 80 MB of someone else's history has no place in this repository's history.
+/.refs/
+
+# WorkBuddy AI workspace data
+/.workbuddy-ai/
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+compile_commands.json
+
+# Release artefacts
+/dist/
+*.dmg
+*.app/
+*.zip
