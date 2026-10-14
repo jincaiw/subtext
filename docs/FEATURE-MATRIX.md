@@ -17,7 +17,7 @@
 | 动作类型 | 153 个 `@objc` selector | 182 个类型化动作 | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 30,923（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 31,495（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -127,6 +127,7 @@
 | 工具栏 | `update_window_options` | ✅ |
 | 工具栏自定义 | — | ⏳ |
 | 快速操作 | `show_quick_actions` | ✅ 浮动面板 + 子序列匹配菜单路径；空查询不列结果 |
+| 快速操作的命令来源 | `NSApp.actionCommands`（遍历实时主菜单） | `menus::commands`（重建菜单栏再摊平） | ✅ 含运行时条目；排除打开面板自身那条 |
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
 | 文件夹查找 | `show_sidebar(FolderFind)` | ✅ |
 | 侧边栏 | `update_window_options` | ✅ |
@@ -287,11 +288,11 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 123 | 62% |
+| ✅ 完整实现 | 约 124 | 62% |
 | 🔁 等价实现（委托或改写） | 约 25 | 13% |
 | ⚠️ 平台受限（菜单保留） | 约 19 | 9% |
 | ⏳ 未实现（菜单保留 + 提示） | 约 32 | 16% |
-| **合计** | **199** | **100%** |
+| **合计** | **200** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。
 未实现的功能不是「从菜单里删掉」，而是「保留 + 说明」——

@@ -10,9 +10,14 @@
 //!
 //! # What the query matches
 //!
-//! [`crate::menu::COMMANDS`] is the whole menu bar in one table. A command is
-//! searched on its path from the second component onwards plus its own title:
-//! `Format > Tab Width > Custom…` is matched as `Tab Width` and then
+//! [`crate::menus::commands`] is the whole menu bar as a flat list, and it is
+//! read off the bar the moment the panel is shown — upstream's
+//! `NSApp.actionCommands`, which walks the live `NSMenu` for the same reason: a
+//! syntax, a theme or a script cannot be named before the user has installed it,
+//! and the list the bar searches has to be the list the bar shows.
+//!
+//! A command is searched on its path from the second component onwards plus its
+//! own title: `Format > Tab Width > Custom…` is matched as `Tab Width` and then
 //! `Custom…`. The first component is the menu bar's own title and is dropped,
 //! which is what lets `tab` find the item without naming `Format` first —
 //! upstream's `ActionCommand.match(command:)`, which drops `paths[0]` for the
@@ -30,9 +35,6 @@
 //!
 //! # Where this differs from upstream
 //!
-//! * The Script menu is one of the runtime placeholders in [`crate::menu`], so
-//!   every command in the table is a menu command. Upstream's second kind — a
-//!   script — has no rows to draw until that menu is filled in.
 //! * Upstream closes the panel when it stops being the key window. GPUI has no
 //!   window-activation event to hang that on, so the bar closes on Escape, on
 //!   Enter, or on a click on a row, and stays up if the user clicks the
@@ -41,6 +43,10 @@
 //!   padding and corner radius, the list's inset — is the component family's,
 //!   as the design guides require of a palette. The *content* of a row is
 //!   upstream's, down to the bolded match.
+//! * Upstream draws the SF Symbol `filemenu.and.selection` beside a menu
+//!   command and an AppleScript glyph beside a script. The two glyphs here are
+//!   the component family's nearest pair — a menu and a terminal, both in the
+//!   same square box — because there is no AppleScript artwork to draw from.
 //!
 //! # Working with the palette
 //!
@@ -73,8 +79,8 @@ use gpui_kit::{
     SharedString, Styled as _, Subscription, WeakEntity, Window, div, px, rems, size,
 };
 
-use crate::keymap;
 use crate::menu;
+use crate::menus::{self, CommandKind, PATH_SEPARATOR, UPSTREAM_MENU_TITLE};
 use crate::outline::highlight_segments;
 use crate::workspace::Workspace;
 
@@ -101,13 +107,6 @@ const LIST_INSET: f32 = 0.5;
 /// name from its placeholder and offers no other way to set one, so the same
 /// string does both jobs here.
 const TITLE: &str = "Quick Actions";
-
-/// How the application menu is spelled in the generated table.
-///
-/// [`menu::COMMANDS`] spells every path with CotEditor's own name because
-/// [`keymap::SHORTCUTS`] does, and the two are joined on the path. The display
-/// is the one place the two applications have to differ.
-const UPSTREAM_MENU_TITLE: &str = "CotEditor";
 
 /// How tall the panel is for a given number of results.
 ///
@@ -139,7 +138,7 @@ fn row_height(window: &Window) -> Pixels {
 #[derive(Clone, Debug)]
 pub struct MatchedPath {
     /// The component, as the menu bar spells it.
-    pub string: &'static str,
+    pub string: String,
     /// Byte ranges of `string` the query matched, one per character and in
     /// order — upstream reports a range per character, and the bold run is
     /// built from them.
@@ -149,8 +148,8 @@ pub struct MatchedPath {
 /// A command the query matches, with the evidence.
 #[derive(Clone)]
 pub struct Candidate {
-    /// The menu entry, which carries the path and the command's name.
-    pub entry: &'static menu::Command,
+    /// The menu entry, which carries the path, the action and the shortcut.
+    pub command: menus::Command,
     /// The components the query was matched against, in path order.
     pub matches: Vec<MatchedPath>,
     /// How far the match spans, summed over the components. Lower is better.
@@ -161,37 +160,28 @@ pub struct Candidate {
 ///
 /// The path is `Format > Syntax > Swift`; the searchable part is `Syntax` and
 /// `Swift`. See the module docs for why the first component is dropped.
-fn searchable(path: &'static str) -> impl Iterator<Item = &'static str> {
-    path.split(" > ").skip(1)
+fn searchable(path: &str) -> impl Iterator<Item = &str> {
+    path.split(PATH_SEPARATOR).skip(1)
 }
 
 /// The components of a command's path that are *not* searched: what the row
 /// shows underneath the matched line.
-fn breadcrumbs(path: &'static str) -> Vec<&'static str> {
-    let mut parts: Vec<&'static str> = path.split(" > ").collect();
+///
+/// Owned, because a row's content is built by a closure that outlives the
+/// command it was read from.
+fn breadcrumbs(path: &str) -> Vec<String> {
+    let mut parts: Vec<String> = path.split(PATH_SEPARATOR).map(str::to_string).collect();
     parts.pop();
     parts
 }
 
 /// The name a path component is shown under.
-fn shown(component: &'static str) -> &'static str {
+fn shown(component: &str) -> &str {
     if component == UPSTREAM_MENU_TITLE {
         menu::APP_MENU_TITLE
     } else {
         component
     }
-}
-
-/// The shortcut the menu bar shows for a command, if it has one.
-///
-/// The key map is generated from the same table as the menu, so the path is
-/// the join key and the two cannot disagree about which command a shortcut
-/// belongs to.
-fn shortcut_for(path: &str) -> Option<&'static str> {
-    keymap::SHORTCUTS
-        .iter()
-        .find(|row| row.0 == path)
-        .map(|row| row.1)
 }
 
 /// Match `query` against one command, the way `ActionCommand.match(command:)`
@@ -203,10 +193,7 @@ fn shortcut_for(path: &str) -> Option<&'static str> {
 /// whitespace after a matched component is treated as the separator between
 /// two menu levels, so `format font` finds `Format > Font` without either
 /// component containing the space.
-pub fn match_command(
-    entry: &'static menu::Command,
-    query: &str,
-) -> Option<(Vec<MatchedPath>, usize)> {
+pub fn match_command(command: &menus::Command, query: &str) -> Option<(Vec<MatchedPath>, usize)> {
     if query.is_empty() {
         return None;
     }
@@ -215,7 +202,7 @@ pub fn match_command(
     let mut score = 0;
     let mut remaining = query.to_string();
 
-    for string in searchable(entry.path) {
+    for string in searchable(&command.path) {
         let search = if matches.is_empty() {
             remaining.clone()
         } else {
@@ -231,7 +218,7 @@ pub fn match_command(
         }
 
         matches.push(MatchedPath {
-            string,
+            string: string.to_string(),
             ranges: found
                 .as_ref()
                 .map(|found| found.ranges.clone())
@@ -249,12 +236,16 @@ pub fn match_command(
 }
 
 /// Every command the query matches, best first.
-pub fn candidates_for(query: &str) -> Vec<Candidate> {
-    let mut found: Vec<Candidate> = menu::COMMANDS
+pub fn candidates_for(commands: &[menus::Command], query: &str) -> Vec<Candidate> {
+    let mut found: Vec<Candidate> = commands
         .iter()
-        .filter_map(|entry| {
-            let (matches, score) = match_command(entry, query)?;
-            Some(Candidate { entry, matches, score })
+        .filter_map(|command| {
+            let (matches, score) = match_command(command, query)?;
+            Some(Candidate {
+                command: command.clone(),
+                matches,
+                score,
+            })
         })
         .collect();
 
@@ -271,6 +262,9 @@ pub struct CommandBar {
     /// The palette's own interaction state: the query, the highlighted row,
     /// the focus and the scroll position.
     state: Entity<CommandState>,
+    /// Every command the menu bar offered when the panel was opened, which is
+    /// what the queries are matched against.
+    commands: Vec<menus::Command>,
     /// The commands the current query matches, best first. The palette is
     /// handed these as its items on every render, so this is the list the
     /// rows are built from.
@@ -295,6 +289,7 @@ pub struct CommandBar {
 
 impl CommandBar {
     pub fn new(
+        commands: Vec<menus::Command>,
         workspace: WeakEntity<Workspace>,
         workspace_window: AnyWindowHandle,
         window: &mut Window,
@@ -315,6 +310,7 @@ impl CommandBar {
 
         Self {
             state,
+            commands,
             candidates: Vec::new(),
             query: SharedString::default(),
             selected: None,
@@ -346,7 +342,7 @@ impl CommandBar {
             let has_rows = !self.candidates.is_empty();
 
             self.query = query;
-            self.candidates = candidates_for(&self.query);
+            self.candidates = candidates_for(&self.commands, &self.query);
             self.resize(window);
 
             // Upstream selects the first candidate on every query change, and
@@ -395,7 +391,7 @@ impl CommandBar {
         let Some(candidate) = self.candidates.get(row) else {
             return;
         };
-        let name = candidate.entry.action;
+        let action = candidate.command.action.boxed_clone();
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
@@ -404,10 +400,15 @@ impl CommandBar {
         // panel: a command that opens a dialog, asks for a file, or reveals a
         // path has to be answered by the window the user is editing in. That
         // is also why upstream closes the panel before it performs anything.
+        //
+        // It is run from the action rather than from the command's name because
+        // the bar offers the runtime items too — a syntax, a theme, an encoding,
+        // a snippet, a script — and their actions carry the value they stand for
+        // instead of naming it. See [`Workspace::perform`].
         self.workspace_window
             .update(cx, |_, window, cx| {
                 workspace.update(cx, |workspace, cx| {
-                    workspace.dispatch(name, window, cx);
+                    workspace.perform(action.as_ref(), window, cx);
                 });
             })
             .ok();
@@ -480,17 +481,20 @@ impl Render for CommandBar {
 /// through that builder, so the answer has to arrive as a plain value.
 fn item(candidate: &Candidate, selected: bool) -> CommandItem {
     let matches = candidate.matches.clone();
-    let path = breadcrumbs(candidate.entry.path);
-    let shortcut = shortcut_for(candidate.entry.path);
+    let path = breadcrumbs(&candidate.command.path);
+    let shortcut = candidate.command.shortcut.clone();
+    let kind = candidate.command.kind;
 
-    CommandItem::new().child(move |_, cx| draw_row(&matches, &path, shortcut, selected, cx))
+    CommandItem::new()
+        .child(move |_, cx| draw_row(&matches, &path, shortcut.as_deref(), kind, selected, cx))
 }
 
 /// The row: the kind icon, the matched path, the breadcrumb, the shortcut.
 fn draw_row(
     matches: &[MatchedPath],
-    path: &[&'static str],
-    shortcut: Option<&'static str>,
+    path: &[String],
+    shortcut: Option<&str>,
+    kind: CommandKind,
     selected: bool,
     cx: &App,
 ) -> AnyElement {
@@ -498,10 +502,9 @@ fn draw_row(
     let strong = cx.theme().accent_foreground;
 
     // Upstream draws `filemenu.and.selection` here for a menu command and an
-    // AppleScript glyph for a script. SubText's Script menu is a runtime
-    // placeholder, so every row in the table is a menu command and one glyph
-    // covers them all. The slot is a fixed box, as upstream's is, so the text
-    // of every row starts at the same place.
+    // AppleScript glyph for a script; the two glyphs below are the component
+    // family's nearest pair, in the same square box. The slot is a fixed box, as
+    // upstream's is, so the text of every row starts at the same place.
     let icon = div()
         .w(rems(1.625))
         .h(rems(1.375))
@@ -510,14 +513,17 @@ fn draw_row(
         .items_center()
         .justify_center()
         .text_color(if selected { strong } else { muted })
-        .child(Icon::new(IconName::SquareMenu).small());
+        .child(Icon::new(match kind {
+            CommandKind::Script => IconName::SquareTerminal,
+            CommandKind::Command => IconName::SquareMenu,
+        }).small());
 
     let mut matched = line();
     for (offset, component) in matches.iter().enumerate() {
         if offset > 0 {
             matched = matched.child(chevron(muted));
         }
-        matched = matched.child(runs(component.string, &component.ranges));
+        matched = matched.child(runs(&component.string, &component.ranges));
     }
 
     let mut trail = line().text_xs();
@@ -525,7 +531,7 @@ fn draw_row(
         if offset > 0 {
             trail = trail.child(chevron(muted));
         }
-        trail = trail.child(div().child(shown(component)));
+        trail = trail.child(div().child(shown(component).to_string()));
     }
     if !selected {
         // Selected, the row's own colour is the one that reads on the accent
@@ -549,7 +555,7 @@ fn draw_row(
                 .text_xs()
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(if selected { strong } else { muted })
-                .child(shortcut),
+                .child(shortcut.to_string()),
         );
     }
 
@@ -592,9 +598,33 @@ fn runs(text: &str, ranges: &[Range<usize>]) -> AnyElement {
 mod tests {
     use super::*;
 
-    fn command(path: &'static str) -> &'static menu::Command {
-        menu::COMMANDS
-            .iter()
+    use subtext_core::{FileEncoding, LineEnding, TextEncoding};
+
+    /// A menu bar with a document open and the tables the settings would
+    /// supply, which is what the commands are read off.
+    fn state() -> menus::MenuState {
+        menus::MenuState {
+            document: Some(menus::DocumentState {
+                syntax: "Markdown".into(),
+                line_ending: LineEnding::LF,
+                encoding: FileEncoding::of(TextEncoding::UTF8),
+            }),
+            theme: "Solarized Dark".into(),
+            syntaxes: vec!["HTML".into(), "Markdown".into(), "Ruby".into()],
+            themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
+            snippets: Vec::new(),
+            scripts: Vec::new(),
+        }
+    }
+
+    /// The commands the bar offers, as the panel would read them.
+    fn commands() -> Vec<menus::Command> {
+        menus::commands(&state())
+    }
+
+    fn command(path: &str) -> menus::Command {
+        commands()
+            .into_iter()
             .find(|command| command.path == path)
             .unwrap_or_else(|| panic!("{path} is not in the menu"))
     }
@@ -623,7 +653,7 @@ mod tests {
     /// A query that names the command finds it, and the match is the title.
     #[test]
     fn a_query_finds_a_command_by_its_title() {
-        let (matches, _) = match_command(command("File > Save"), "save").unwrap();
+        let (matches, _) = match_command(&command("File > Save"), "save").unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].string, "Save");
         assert_eq!(matches[0].ranges, [0..1, 1..2, 2..3, 3..4]);
@@ -633,14 +663,14 @@ mod tests {
     #[test]
     fn a_query_can_name_two_components_in_order() {
         let entry = command("Format > Tab Width > Custom…");
-        let (matches, _) = match_command(entry, "tab custom").unwrap();
+        let (matches, _) = match_command(&entry, "tab custom").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string).collect::<Vec<_>>(),
+            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
             ["Tab Width", "Custom…"]
         );
 
         // The other way round is not a match: the search only moves forward.
-        assert!(match_command(entry, "custom tab").is_none());
+        assert!(match_command(&entry, "custom tab").is_none());
     }
 
     /// The whitespace between two components is a separator, not a character
@@ -648,7 +678,7 @@ mod tests {
     #[test]
     fn the_whitespace_between_components_is_a_separator() {
         let entry = command("Format > Tab Width > Custom…");
-        let (matches, _) = match_command(entry, "tab   custom").unwrap();
+        let (matches, _) = match_command(&entry, "tab   custom").unwrap();
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[1].string, "Custom…");
     }
@@ -658,9 +688,9 @@ mod tests {
     #[test]
     fn a_skipped_component_is_not_part_of_the_match() {
         let entry = command("Edit > Select > Select All");
-        let (matches, _) = match_command(entry, "all").unwrap();
+        let (matches, _) = match_command(&entry, "all").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string).collect::<Vec<_>>(),
+            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
             ["Select All"]
         );
     }
@@ -671,9 +701,9 @@ mod tests {
     #[test]
     fn a_component_after_the_match_is_kept_with_nothing_to_highlight() {
         let entry = command("Edit > Select > Select All");
-        let (matches, _) = match_command(entry, "select").unwrap();
+        let (matches, _) = match_command(&entry, "select").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string).collect::<Vec<_>>(),
+            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
             ["Select", "Select All"]
         );
         assert!(matches[1].ranges.is_empty());
@@ -683,67 +713,145 @@ mod tests {
     /// whitespace, or it was never matched.
     #[test]
     fn a_query_the_path_cannot_absorb_is_not_a_match() {
-        assert!(match_command(command("File > Save"), "save document").is_none());
+        let entry = command("File > Save");
+        assert!(match_command(&entry, "save document").is_none());
         // Trailing whitespace is what a separator ends as, so it is allowed.
-        assert!(match_command(command("File > Save"), "save ").is_some());
+        assert!(match_command(&entry, "save ").is_some());
     }
 
     /// An empty query matches nothing at all — upstream's `guard`.
     #[test]
     fn an_empty_query_matches_nothing() {
-        assert!(match_command(command("File > Save"), "").is_none());
-        assert!(candidates_for("").is_empty());
+        assert!(match_command(&command("File > Save"), "").is_none());
+        assert!(candidates_for(&commands(), "").is_empty());
     }
 
     /// The results are sorted by how far the match spans, so the closest match
     /// to the query is the one Enter runs.
     #[test]
     fn the_closest_match_comes_first() {
-        let found = candidates_for("save");
+        let found = candidates_for(&commands(), "save");
         assert!(!found.is_empty());
-        assert_eq!(found[0].entry.path, "File > Save");
+        assert_eq!(found[0].command.path, "File > Save");
         assert!(
             found.windows(2).all(|pair| pair[0].score <= pair[1].score),
             "the results are not sorted by score"
         );
     }
 
-    /// Every command is reachable: naming it in full finds it, and nothing in
-    /// the table is missing a shortcut lookup that would panic.
+    /// Every command is reachable: naming it in full finds it. The list is the
+    /// bar's own, so this covers the items the bar builds at runtime as well as
+    /// the ones its table names.
     #[test]
     fn every_command_can_be_found_by_its_own_title() {
-        for entry in menu::COMMANDS {
-            let title = entry.path.rsplit(" > ").next().expect("a path has a title");
-            let found = candidates_for(title);
+        for entry in commands() {
+            let title = entry
+                .path
+                .rsplit(PATH_SEPARATOR)
+                .next()
+                .expect("a path has a title");
+            let found = candidates_for(&commands(), title);
             assert!(
-                found.iter().any(|candidate| candidate.entry.path == entry.path),
+                found.iter().any(|candidate| candidate.command.path == entry.path),
                 "{title} does not find {}",
                 entry.path
             );
-            // A row draws the shortcut when there is one; the lookup is by
-            // path, so a path spelled differently would silently lose it.
-            let _ = shortcut_for(entry.path);
         }
+    }
+
+    /// The runtime items are in the list, which is the whole point of reading it
+    /// off the bar: a table written at compile time cannot name a syntax.
+    ///
+    /// The three below are the ones upstream fills in from the document in
+    /// front, so a query that names one has to reach it.
+    #[test]
+    fn the_items_the_bar_builds_at_runtime_are_offered() {
+        for path in [
+            "Format > Syntax > Ruby",
+            "Format > Theme > Solarized Light",
+            "Format > Line Endings > macOS / Unix (LF)",
+            "Text > Unicode Normalizations > NFC",
+        ] {
+            assert!(
+                candidates_for(&commands(), path.rsplit(PATH_SEPARATOR).next().unwrap())
+                    .iter()
+                    .any(|candidate| candidate.command.path == path),
+                "{path} is not offered"
+            );
+        }
+    }
+
+    /// A submenu that needs a document offers nothing without one, which is
+    /// upstream's `isEnabled` test — the items are greyed there, and a greyed
+    /// item is not a command the bar can run.
+    #[test]
+    fn a_disabled_item_is_not_offered() {
+        let mut state = state();
+        state.document = None;
+
+        let offered = menus::commands(&state);
+        assert!(
+            !offered
+                .iter()
+                .any(|command| command.path.starts_with("Format > Syntax")),
+            "a syntax is offered with no document open"
+        );
+        // The theme is the application's, so it survives.
+        assert!(
+            offered
+                .iter()
+                .any(|command| command.path == "Format > Theme > Solarized Light")
+        );
+    }
+
+    /// Searching from inside the bar cannot find the command that opens it.
+    /// Upstream leaves it out of `unsupportedActions`' complement for the same
+    /// reason.
+    #[test]
+    fn the_command_that_opens_the_bar_is_not_in_it() {
+        assert!(
+            !commands()
+                .iter()
+                .any(|command| command.path == "View > Show Quick Actions…")
+        );
     }
 
     /// Every shortcut in the key map belongs to a command the bar lists, so a
     /// shortcut can never be shown on a row that does not exist.
     #[test]
     fn every_shortcut_belongs_to_a_listed_command() {
-        for row in keymap::SHORTCUTS {
+        let offered = commands();
+        for row in crate::keymap::SHORTCUTS {
+            // The one command the bar leaves out, because it is the bar. It has
+            // a shortcut like any other; it is just not one it offers.
+            if row.0 == "View > Show Quick Actions…" {
+                continue;
+            }
             assert!(
-                menu::COMMANDS.iter().any(|command| command.path == row.0),
+                offered.iter().any(|command| command.path == row.0),
                 "{} has a shortcut but is not a command",
                 row.0
             );
         }
     }
 
+    /// A command the key map knows shows its key, and the lookup is by path —
+    /// a path spelled differently would silently lose it.
+    #[test]
+    fn a_command_shows_the_shortcut_it_has() {
+        assert_eq!(
+            command("File > Save").shortcut,
+            Some(subtext_core::snippets::Shortcut::parse("@s").unwrap().symbol())
+        );
+        // A runtime item has none: nothing in the menu bar binds a syntax.
+        assert_eq!(command("Format > Syntax > Ruby").shortcut, None);
+    }
+
     /// The application menu is shown under SubText's name, and every other
     /// component is left as the table spells it.
     #[test]
     fn the_application_menu_is_renamed_for_display() {
-        assert_eq!(shown("CotEditor"), menu::APP_MENU_TITLE);
+        assert_eq!(shown(UPSTREAM_MENU_TITLE), menu::APP_MENU_TITLE);
         assert_eq!(shown("Format"), "Format");
     }
 }

@@ -42,6 +42,14 @@
 //! thing it names. Naming one by its *position* would make an item run the
 //! wrong command the moment the list above it changed.
 //!
+//! # The Quick Actions bar's list
+//!
+//! [`commands`] reads that same bar and flattens it into the rows ⌘K searches,
+//! which is what upstream's `NSApp.actionCommands` does — and for the same
+//! reason: a table written at compile time cannot name a syntax or a script the
+//! user has not installed yet, so the bar the user can see and the list the bar
+//! can search would drift apart the moment either was filled in.
+//!
 //! # The keymap
 //!
 //! Snippets are the reason the keymap is rebuilt here too: a snippet may carry a
@@ -67,11 +75,13 @@
 //! no modifier state, so there is no second and third behaviour to reach. See
 //! [`crate::scripts`].
 
-use gpui_kit::{App, Menu, MenuItem};
+use std::path::Path;
+
+use gpui_kit::{Action, App, Menu, MenuItem};
 
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
 use subtext_core::scripts::Item as ScriptItem;
-use subtext_core::snippets::Snippet;
+use subtext_core::snippets::{Shortcut, Snippet};
 use subtext_core::{FileEncoding, LineEnding, Normalization, Sections};
 
 use crate::actions;
@@ -79,6 +89,18 @@ use crate::keymap;
 use crate::menu;
 use crate::scripts;
 use crate::snippets;
+
+/// How a command's path separates two menu levels.
+pub(crate) const PATH_SEPARATOR: &str = " > ";
+
+/// How the application menu is spelled in a command's path.
+///
+/// [`menu::COMMANDS`] and [`crate::keymap::SHORTCUTS`] both spell it with the
+/// source application's name, because the key map is generated from the same
+/// table; the Quick Actions bar substitutes the display name when it draws a
+/// row. The live bar's own title is already the display name, so [`spelled`]
+/// puts the source name back.
+pub(crate) const UPSTREAM_MENU_TITLE: &str = "CotEditor";
 
 /// The submenu names the runtime fills in, as `resources/menu.json` spells them.
 ///
@@ -284,6 +306,191 @@ fn splice(menu: &mut Menu, name: &str, items: &mut Vec<MenuItem>) -> bool {
         }
     }
     false
+}
+
+// ---- the commands --------------------------------------------------------
+
+/// What a command is, which is what the glyph beside its row says.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CommandKind {
+    /// A menu command.
+    Command,
+    /// A script: a file in the user's Script folder.
+    Script,
+}
+
+/// One command the menu bar offers, as the Quick Actions bar sees it.
+pub struct Command {
+    /// The path, spelled the way the bar spells it: `Format > Syntax > Swift`.
+    pub path: String,
+    /// The action the menu item carries, kept as the item carries it.
+    ///
+    /// An item the bar builds at runtime has no name to be run by: its action
+    /// carries the value it stands for, and running it means running *that*
+    /// item's command rather than one that happens to share its title.
+    pub action: Box<dyn Action>,
+    /// Which of the two glyphs the row draws.
+    pub kind: CommandKind,
+    /// The key to draw beside the row, if the command has one.
+    pub shortcut: Option<String>,
+}
+
+impl Clone for Command {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            action: self.action.boxed_clone(),
+            kind: self.kind,
+            shortcut: self.shortcut.clone(),
+        }
+    }
+}
+
+/// Every command the menu bar offers, in menu order.
+///
+/// Read off the bar rather than out of a table, which is what upstream's
+/// `NSApp.actionCommands` does and the only way the runtime items can appear at
+/// all: [`menu::COMMANDS`] is a compile-time dump of the storyboard and cannot
+/// name a syntax, a theme or a script the user has not installed yet.
+///
+/// Upstream's walk is copied item for item:
+///
+/// * a submenu is walked into, and its title prefixed to every path below it;
+/// * a leaf counts only while it is enabled — so the items of a submenu that
+///   needs a document (Syntax, Line Endings, Text Encoding) are not offered
+///   with nothing open, and a snippet group's heading, which exists to be a
+///   label, is not offered at all;
+/// * the command that opens this bar is left out, because searching for it from
+///   inside it is a loop. Upstream lists it in `unsupportedActions` for the
+///   same reason.
+pub fn commands(state: &MenuState) -> Vec<Command> {
+    let mut commands = Vec::new();
+
+    for menu in build(state) {
+        // Upstream skips a menu with no title, which is how it leaves the Debug
+        // menu out. Nothing here has an empty title; the walk has the same
+        // shape so that one day something might.
+        if !menu.name.is_empty() {
+            walk(&menu, &mut Vec::new(), state, &mut commands);
+        }
+    }
+
+    commands
+}
+
+/// The recursive half of [`commands`]: one menu, with the titles above it.
+fn walk(menu: &Menu, ancestors: &mut Vec<String>, state: &MenuState, commands: &mut Vec<Command>) {
+    ancestors.push(spelled(&menu.name).to_string());
+
+    for item in &menu.items {
+        match item {
+            MenuItem::Action {
+                name,
+                action,
+                disabled,
+                ..
+            } => {
+                if *disabled || action.as_any().is::<actions::view::ShowQuickActions>() {
+                    continue;
+                }
+
+                ancestors.push(name.to_string());
+                let path = ancestors.join(PATH_SEPARATOR);
+                let shortcut = shortcut(state, &path, action.as_ref());
+                commands.push(Command {
+                    path,
+                    action: action.boxed_clone(),
+                    kind: if action.as_any().is::<actions::script::RunScript>() {
+                        CommandKind::Script
+                    } else {
+                        CommandKind::Command
+                    },
+                    shortcut,
+                });
+                ancestors.pop();
+            }
+            MenuItem::Submenu(submenu) => walk(submenu, ancestors, state, commands),
+            // A separator is not a command, and a system menu's items are the
+            // system's to name — Services is the only one, and it holds nothing
+            // until the platform fills it.
+            MenuItem::Separator | MenuItem::SystemMenu(_) => {}
+        }
+    }
+
+    ancestors.pop();
+}
+
+/// A menu's title, as a command's path spells it.
+fn spelled(title: &str) -> &str {
+    if title == menu::APP_MENU_TITLE {
+        UPSTREAM_MENU_TITLE
+    } else {
+        title
+    }
+}
+
+/// The key to draw beside a command's row, if it has one.
+///
+/// Three sources, and the command's own action says which applies: a script's
+/// key is written into its file name, a snippet's is its own record, and
+/// everything else is a menu command whose key the generated key map holds
+/// against the same path.
+///
+/// Both of the first two are looked up rather than carried because a menu item
+/// has nowhere to put a key: GPUI reads an item's shortcut out of the keymap,
+/// keyed by action, while this list is keyed by path.
+fn shortcut(state: &MenuState, path: &str, action: &dyn Action) -> Option<String> {
+    let any = action.as_any();
+
+    if let Some(action) = any.downcast_ref::<actions::script::RunScript>() {
+        return state
+            .scripts
+            .iter()
+            .find_map(|item| item.find(Path::new(&action.path)))
+            .and_then(|script| script.shortcut)
+            .map(Shortcut::symbol);
+    }
+
+    if let Some(action) = any.downcast_ref::<actions::snippet::InsertSnippet>() {
+        return state
+            .snippets
+            .iter()
+            .find(|snippet| snippet.id == action.id)
+            .and_then(|snippet| snippet.shortcut)
+            .map(Shortcut::symbol);
+    }
+
+    let row = keymap::SHORTCUTS.iter().find(|row| row.0 == path)?;
+    row_shortcut(row.2, row.3).map(Shortcut::symbol)
+}
+
+/// The [`Shortcut`] a generated key-map row stands for, read from its modifier
+/// and key columns.
+///
+/// The row's own displayed form is not read back, and the reason is upstream's:
+/// it spells the key in capitals whatever the modifiers — which is how a menu
+/// shows it — so an uppercase letter there says nothing about Shift, and it
+/// writes the chord without the thin space [`Shortcut::symbol`] puts between the
+/// symbols. One list cannot show two spellings of the same thing, so every row
+/// is rendered through the one formatter upstream's `Shortcut.symbol` uses.
+///
+/// The two columns this does read are unambiguous: the modifiers are words, and
+/// the key is one character, spelled in capitals only when Shift is among them.
+fn row_shortcut(modifiers: &str, key: &str) -> Option<Shortcut> {
+    let mut chars = key.chars();
+    let key = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+
+    let has = |word: &str| modifiers.split_whitespace().any(|modifier| modifier == word);
+    Some(Shortcut {
+        key: key.to_ascii_lowercase(),
+        control: has("control"),
+        option: has("option"),
+        shift: has("shift"),
+        command: has("command"),
+    })
 }
 
 // ---- the submenus --------------------------------------------------------
@@ -1147,5 +1354,193 @@ mod tests {
         state.themes.push("Novel".into());
         state.snippets = vec![snippet(1, "Header", None, None)];
         assert_eq!(state.signature(), before);
+    }
+
+    // ---- the commands ----------------------------------------------------
+
+    /// The path of every command the bar offers.
+    fn paths(state: &MenuState) -> Vec<String> {
+        commands(state).into_iter().map(|command| command.path).collect()
+    }
+
+    /// The list is the bar flattened: a submenu's title goes in front of every
+    /// path below it, and nothing that is not a command is in it.
+    #[test]
+    fn the_commands_are_the_bar_flattened() {
+        let paths = paths(&state());
+
+        assert!(paths.contains(&"File > Save".to_string()));
+        assert!(paths.contains(&"Format > Tab Width > Custom…".to_string()));
+        assert!(paths.contains(&"Edit > Select > Select All".to_string()));
+        // The three the storyboard leaves empty, and the one that is a menu of
+        // its own. A table written at compile time could name none of them.
+        assert!(paths.contains(&"Format > Syntax > Ruby".to_string()));
+        assert!(paths.contains(&"Format > Line Endings > Windows (CRLF)".to_string()));
+        assert!(paths.contains(&"Format > Theme > Solarized Dark".to_string()));
+        assert!(paths.contains(&"Format > Text Encoding > Unicode (UTF-8)".to_string()));
+        assert!(paths.contains(&"Text > Unicode Normalizations > NFC".to_string()));
+        assert!(paths.contains(&"Script > Open Scripts Folder".to_string()));
+        assert!(!paths.iter().any(|path| path.contains('―')));
+    }
+
+    /// The path is spelled the way [`crate::keymap::SHORTCUTS`] spells it, so
+    /// the two can be joined — and the Quick Actions bar substitutes the display
+    /// name when it draws a row.
+    #[test]
+    fn the_application_menu_is_spelled_the_way_the_key_map_spells_it() {
+        let paths = paths(&state());
+        assert!(paths.contains(&"CotEditor > Settings…".to_string()));
+        assert!(!paths.iter().any(|path| path.starts_with("SubText > ")));
+    }
+
+    /// A greyed item is not a command: upstream's walk asks `isEnabled` before
+    /// it takes a leaf, and so does this one.
+    #[test]
+    fn a_disabled_item_is_not_a_command() {
+        let mut state = state();
+        state.snippets = vec![
+            snippet(1, "Header", None, None),
+            snippet(2, "Emphasis", Some("Markdown"), None),
+        ];
+
+        // The group's heading is in the menu with a document open, and it is
+        // disabled: it exists to be a label, and a label is not a command.
+        let found = paths(&state);
+        assert!(found.contains(&"Text > Insert Snippet > Emphasis".to_string()));
+        assert!(!found.contains(&"Text > Insert Snippet > Markdown".to_string()));
+
+        state.document = None;
+        let found = paths(&state);
+
+        assert!(!found.iter().any(|path| path.starts_with("Format > Syntax > ")));
+        assert!(!found.iter().any(|path| path.starts_with("Format > Line Endings > ")));
+        assert!(!found.contains(&"Format > Text Encoding > Unicode (UTF-8)".to_string()));
+        assert!(!found.contains(&"Text > Insert Snippet > Emphasis".to_string()));
+        // The way to the list editor is not a way to change an encoding, so it
+        // stays — upstream leaves it live with nothing open.
+        assert!(found.contains(&"Format > Text Encoding > Customize Encodings List…".to_string()));
+        // And the theme belongs to the application rather than to a document.
+        assert!(found.contains(&"Format > Theme > Solarized Dark".to_string()));
+    }
+
+    /// Searching from inside the bar cannot find the command that opens it.
+    #[test]
+    fn the_command_that_opens_the_bar_is_left_out() {
+        assert!(
+            !paths(&state()).contains(&"View > Show Quick Actions…".to_string()),
+            "the bar offers the command that opens it"
+        );
+    }
+
+    /// A script is marked as one, which is what the row's glyph reads off. The
+    /// way to the folder is a command like any other.
+    #[test]
+    fn a_script_is_marked_as_one() {
+        let found: Vec<(String, CommandKind)> = commands(&scripted())
+            .into_iter()
+            .filter(|command| command.path.starts_with("Script > "))
+            .map(|command| (command.path, command.kind))
+            .collect();
+
+        assert_eq!(
+            found,
+            [
+                ("Script > Save".to_string(), CommandKind::Script),
+                ("Script > Python > Clean".to_string(), CommandKind::Script),
+                (
+                    "Script > Open Scripts Folder".to_string(),
+                    CommandKind::Command
+                ),
+            ]
+        );
+    }
+
+    /// A script's key is written into its file name, so it has to be read back
+    /// out of the script rather than out of the key map, which knows nothing of
+    /// the user's files.
+    #[test]
+    fn a_script_shows_the_key_its_file_name_carries() {
+        let commands = commands(&scripted());
+
+        let save = commands.iter().find(|c| c.path == "Script > Save").unwrap();
+        assert_eq!(save.shortcut, Some(Shortcut::parse("@s").expect("a key").symbol()));
+
+        let clean = commands
+            .iter()
+            .find(|c| c.path == "Script > Python > Clean")
+            .unwrap();
+        assert_eq!(clean.shortcut, None);
+    }
+
+    /// A snippet's key is its own record, for the same reason.
+    #[test]
+    fn a_snippet_shows_the_key_it_carries() {
+        let mut state = state();
+        state.snippets = vec![snippet(1, "Header", None, Some("@$k"))];
+
+        let commands = commands(&state);
+        let header = commands
+            .iter()
+            .find(|c| c.path == "Text > Insert Snippet > Header")
+            .unwrap();
+        assert_eq!(
+            header.shortcut,
+            Some(Shortcut::parse("@$k").expect("a key").symbol())
+        );
+    }
+
+    /// For everything the table names, the bar agrees with it: same path, same
+    /// action. The two are joined here so that a command one has and the other
+    /// does not fails a test rather than disappearing from ⌘K.
+    #[test]
+    fn the_live_bar_agrees_with_the_generated_table() {
+        let live: Vec<(String, &'static str)> = commands(&state())
+            .into_iter()
+            .map(|command| (command.path, crate::bridge::name_of(command.action.as_ref())))
+            .collect();
+
+        for entry in menu::COMMANDS {
+            // The one the bar leaves out, because it is the bar.
+            if entry.path == "View > Show Quick Actions…" {
+                continue;
+            }
+            assert!(
+                live.iter().any(|(path, action)| path == entry.path && *action == entry.action),
+                "{} is in the table but not in the bar",
+                entry.path
+            );
+        }
+    }
+
+    /// Every command carries an action rather than a name, which is the only
+    /// way the runtime items can be run: there is nothing to look a syntax or a
+    /// script up by.
+    #[test]
+    fn every_command_carries_an_action() {
+        for command in commands(&scripted()) {
+            assert!(!command.path.is_empty());
+            assert!(!crate::bridge::name_of(command.action.as_ref()).is_empty());
+        }
+    }
+
+    /// The generated key map's modifier and key columns describe a shortcut
+    /// this build can read: a modifier word it does not know would silently drop
+    /// that modifier from the row, and a key of more than one character is not a
+    /// shortcut at all.
+    #[test]
+    fn every_key_map_row_names_the_modifiers_it_has() {
+        for row in keymap::SHORTCUTS {
+            let shortcut = row_shortcut(row.2, row.3).unwrap_or_else(|| panic!("{} has no key", row.0));
+            let named = [shortcut.control, shortcut.option, shortcut.shift, shortcut.command]
+                .into_iter()
+                .filter(|set| *set)
+                .count();
+            assert_eq!(
+                named,
+                row.2.split_whitespace().count(),
+                "{} lost a modifier",
+                row.0
+            );
+        }
     }
 }

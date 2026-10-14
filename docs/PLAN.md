@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ 8.9d ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ 8.9d ✅ 8.9e ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -986,9 +986,52 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 - `Open Scripts Folder` 会先 `create_dir_all`：上游是沙箱应用，系统已把目录建好；SubText 不是，
   非 macOS 上这个目录根本不存在，而它又是唯一能把脚本放进菜单的入口。
 
-**8.9e 让 `COMMANDS` 包含运行时条目**：`Syntax ▸ Swift`、`Theme ▸ Solarized Dark`
-这类条目上游在 Quick Actions 里也能搜到，本表目前搜不到——`COMMANDS` 只由
-`menu.json` 生成。要把运行时的「子菜单名 ▸ 条目名」在构建时并进去。
+**8.9e 让 Quick Actions 看到运行时条目**（`menus.rs` / `command_bar.rs` / `bridge.rs`）
+
+- **上游的列表不是表，是菜单栏。** `CommandBarWindowController.showWindow` 在面板出现前
+  取 `NSApp.actionCommands`，那是把**实时主菜单**摊平：子菜单递归进去、把父标题插到每条
+  子孙路径前面，叶子只在 `isEnabled && !isHidden` 时入选，另有两个 selector 被列在
+  `unsupportedActions` 里排除。所以上游能搜到 `Format ▸ Syntax ▸ Swift`——那条目在那时
+  才存在。SubText 此前搜的是 `menu::COMMANDS`，一张编译期从 storyboard 导出的表，
+  永远不可能有它。
+- **改为读菜单栏**：`menus::commands(&state)` 把 `build(state)` 的结果按上游的规则摊平。
+  面板打开时取一次（`show_quick_actions` 里 `menus::commands(&self.menu_state())`），
+  与上游在 `showWindow` 里取一次同理。探针实测 316 条，其中 168 条来自表、其余是运行时的。
+- **三条上游的入选规则都复刻了**：子菜单标题进路径；`disabled` 的叶子不入选
+  （所以没有文档时 `Format ▸ Syntax`、`Line Endings`、`Text Encoding` 一条都不在，
+  而 `Customize Encodings List…` 在——它不是改编码的入口；snippet 的分组标题是
+  `disabled` 的，作为标签也不入选）；以及 **`View ▸ Show Quick Actions…` 被排除**——
+  在搜索框里搜打开搜索框的命令是个环，上游正是为此把它列进 `unsupportedActions`。
+  顺带修掉一处既有偏差：此前那条命令是能被 ⌘K 搜到的。
+- **`Workspace::perform` 按动作运行，不按名字。** 运行时条目的动作携带它代表的值
+  （语法名、主题名、编码标识符、规范化形式、snippet id、脚本路径），没有名字可查。
+  `bridge::perform` 是唯一同时懂两套词汇的地方，`Workspace::perform` 先问它，
+  不是它才退回按名字分发（名字取 `Action::name()` 的最后一段，即 `menu.json` 里那一个）。
+  `bridge.rs` 里原先七个手写的 `cx.on_action` 收成 `bind_runtime_actions!` 一张表 +
+  `perform` 一个函数，菜单点击与面板走同一条路。
+- **为什么不是 `window.dispatch_action`。** 那会把动作交给全局 handler，而
+  `bridge::run` 从注册表里挑 workspace（最旧的先赢）——面板是从哪个窗口开的就是哪个窗口，
+  多窗口时两者不是一回事。上游 `ActionCommand.perform()` 走的是**该窗口**的响应链，
+  所以命令必须留在它来的那个窗口里，这正是面板已经持有 `WeakEntity<Workspace>` 的原因。
+- **两种字形。** 上游命令画 `filemenu.and.selection`、脚本画 AppleScript 字形；
+  组件库里最近的一对是 `SquareMenu` 与 `SquareTerminal`，同一个方框，两行文字起点对齐。
+  `CommandKind` 由动作是不是 `RunScript` 决定。
+- **快捷键统一到上游的写法。** 生成的 `keymap::SHORTCUTS` 第 2 列把和弦写成 `"⌘S"`、
+  Control 写成 `⌃`；而上游 `Shortcut.symbol`（`Packages/MacUI/Sources/Shortcut/Shortcut.swift`）
+  是 `(modifierSymbols + [keyEquivalentSymbol]).joined(separator: .thinSpace)`，且
+  `ModifierKey.symbol` 的 Control 是 `"^"`。也就是说 `Shortcut::symbol()` 才是忠实的，
+  那一列不是。同一个列表不能有两种拼法，所以每一行都过 `Shortcut::symbol()`。
+  **不读那一列的显示形式**：它把键一律写成大写（菜单就是这么显示的），
+  所以大写字母说明不了 Shift，读回来会凭空多一个 ⇧——`Shortcut::parse("⌘S")` 就是这个坑。
+  改成读**修饰键列 + 键列**（`row_shortcut`），两者无歧义。
+- **偏差（记账）**：面板的宽度、行高、列表内边距仍是组件族的（设计指南要求面板如此），
+  行内容照上游，粗体命中位置一致。上游在面板失去 key window 时关闭，GPUI 没有对应的
+  窗口激活事件，仍只按 Esc / Enter / 点行关闭。
+- **`menu::COMMANDS` 的角色变了。** 它不再是命令的来源，只剩编译期记录 + 测试用
+  （`the_live_bar_agrees_with_the_generated_table` 把它和实时菜单栏逐条对起来）。
+  生成器里那段「GPUI 读不回菜单，所以面板读这张表」的说明已经过时——面板不是去**读**
+  已安装的菜单，而是把同一根菜单栏**重建**一遍再走，不需要平台支持。生成器的注释已改，
+  `menu.rs` 重新生成（`keymap.rs` 未变，两次生成 sha256 一致）。
 
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
@@ -1007,6 +1050,7 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
 | Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
 | 编码注册表与上游默认列表尚未逐条对齐 | `encoding_rs` 实现的是 WHATWG Encoding Standard（一个以 Windows 为中心的**子集**），不是 Apple 的 codec 集合。上游 `DefaultSettings+Encodings.swift` 的默认菜单列表有 60 条，SubText 只能提供其中约 40 条：Mac OS 系列（MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic）、Big5-E、EUC-TW、DOS 系列（DOSJapanese、DOSChineseTrad、DOSLatinUS、DOSRussian）、NextStep Latin、ASCII 都没有对应 codec；反过来 SubText 多出四条上游默认列表里没有的（KOI8-R、KOI8-U、Vietnamese Windows、Baltic Windows）。注册表里还有几对**共用 codec 的条目**（GBK / GB 2312、Big5 / Big5-HKSCS、Windows Latin 2 / Central European (Windows)、Turkish 两条、Baltic 两条、Shift JIS / Shift JIS X0213），名字与标识符都不同、各自可解析，但选任意一条效果相同。**本轮（8.9c）只修了会被菜单直接暴露的错**：ISO Latin 5–10 此前映射到完全不同的字母表（Latin 5 → ISO-8859-5 西里尔、6 → ISO-8859-6 阿拉伯、7 → ISO-8859-7 希腊、8 → ISO-8859-8 希伯来、9 → ISO-8859-10、10 → ISO-8859-13），现在按上游的名字与 Apple `CFStringEncodings` 的对应关系改成 windows-1254 / ISO-8859-10 / ISO-8859-13 / ISO-8859-14 / ISO-8859-15 / ISO-8859-16，Latin 2 与 4 的名字也对齐成上游的 "Central European (ISO Latin 2/4)"。剩下的一次性对齐见任务 #37。 |
+| Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |

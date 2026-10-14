@@ -2599,6 +2599,11 @@ impl Workspace {
         // The panel runs its commands against *this* window, whichever window
         // happens to be key when a command is confirmed.
         let document_window = window.window_handle();
+        // The commands are read off the bar as it stands now, which is what
+        // upstream does when it shows the panel and the only way the runtime
+        // items can be in the list at all: what the bar offers depends on the
+        // document in front and on the scripts in the user's folder.
+        let commands = menus::commands(&self.menu_state());
         // The panel is as tall as its content, so it opens at the height of an
         // empty bar and grows as the query brings results in. The metrics come
         // from this window because the two share a theme.
@@ -2630,7 +2635,7 @@ impl Workspace {
             }
             let root = weak.clone();
             let opened = cx.open_window(options, move |window, cx| {
-                cx.new(|cx| CommandBar::new(root, document_window, window, cx))
+                cx.new(|cx| CommandBar::new(commands, root, document_window, window, cx))
             });
             workspace.update(cx, |workspace, cx| match opened {
                 Ok(handle) => workspace.quick_actions_window = Some(handle.into()),

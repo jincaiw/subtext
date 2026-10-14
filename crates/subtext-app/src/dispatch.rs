@@ -10,7 +10,7 @@
 //! one that admits the gap: the user cannot tell a missing feature from a
 //! broken one.
 
-use gpui_kit::{Context, Window};
+use gpui_kit::{Action, Context, Window};
 
 use subtext_core::textops;
 
@@ -18,6 +18,27 @@ use crate::settings::{InspectorPane, SettingsPane, SidebarPane};
 use crate::workspace::Workspace;
 
 impl Workspace {
+    /// Run a command the way the menu item that carries it would.
+    ///
+    /// The menu bar names most of its commands at compile time, and those are
+    /// run by name — the vocabulary [`Workspace::dispatch`] speaks. The items it
+    /// builds at runtime cannot be: a syntax, a theme, an encoding, a snippet and
+    /// a script each carry the value they stand for in their action, so they are
+    /// run through [`crate::bridge::perform`], which is the one place that knows
+    /// both vocabularies.
+    ///
+    /// The Quick Actions bar is the caller. It holds the action a menu item
+    /// carries and has to run it in the window it was opened from, which is why
+    /// it comes here rather than dispatching the action: a global handler picks a
+    /// workspace out of a registry, and that is not the same window when more
+    /// than one is open.
+    pub fn perform(&mut self, action: &dyn Action, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::bridge::perform(action, self, window, cx) {
+            return;
+        }
+        self.dispatch(crate::bridge::name_of(action), window, cx);
+    }
+
     /// Run the command named `name` (the last segment of the action's path).
     ///
     /// Returns `true` when the command was recognised. An unrecognised name is

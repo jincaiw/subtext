@@ -12,9 +12,11 @@
 //! no registration would show up as a dead menu entry rather than as a
 //! command that reports its own absence.
 
-use std::path::PathBuf;
+use std::path::Path;
 
-use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
+use gpui_kit::{
+    Action, AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window,
+};
 
 use subtext_core::{FileEncoding, LineEnding, Normalization};
 
@@ -29,6 +31,25 @@ macro_rules! bind_actions {
     ($cx:expr, $($path:path => $name:literal),* $(,)?) => {
         $(
             $cx.on_action(move |_: &$path, cx: &mut App| dispatch($name, cx));
+        )*
+    };
+}
+
+/// Register one global handler per runtime action, each running through
+/// [`perform`].
+///
+/// The action is cloned into the closure because it has to outlive the borrow
+/// the handler is handed: [`tell`] hands the command to a workspace, which may
+/// not be able to answer it until after the handler has returned.
+macro_rules! bind_runtime_actions {
+    ($cx:expr, $($path:path),* $(,)?) => {
+        $(
+            $cx.on_action(|action: &$path, cx: &mut App| {
+                let action = action.clone();
+                tell(cx, move |workspace, window, cx| {
+                    perform(&action, workspace, window, cx);
+                });
+            });
         )*
     };
 }
@@ -72,15 +93,76 @@ pub fn dispatch(name: &'static str, cx: &mut App) {
     run(cx, move |workspace, window, cx| workspace.dispatch(name, window, cx));
 }
 
-/// Run the snippet with this id in the active window's workspace.
+/// The name a command is run by: the last segment of its action's path.
 ///
-/// A snippet cannot be reached by name the way the other commands are: it is
-/// the user's data, so its action carries the snippet's id and this is where
-/// that id is turned back into one. See [`crate::actions::snippet`].
-pub fn insert_snippet(id: u64, cx: &mut App) {
-    run(cx, move |workspace, window, cx| {
-        workspace.insert_snippet(id, window, cx)
-    });
+/// [`Workspace::dispatch`] speaks this vocabulary, and it is the string
+/// `resources/menu.json` records beside each command — so a command that went
+/// missing from either shows up as a message rather than as a dead menu item.
+pub fn name_of(action: &dyn Action) -> &'static str {
+    // A derived action's name is `namespace::Struct`, and the namespace is the
+    // crate's, not the menu's.
+    action.name().rsplit("::").next().unwrap_or_default()
+}
+
+/// Run a runtime item's action in `workspace`, and say whether it was one.
+///
+/// The items the menu bar builds at runtime carry the value they stand for
+/// rather than a name, so they cannot be run the way the rest are. This is the
+/// one place that knows both vocabularies: an abbreviation or a name nothing
+/// recognises is dropped rather than reported, because the menu was built from
+/// the same list this resolves against — the only way to reach one is a stale
+/// menu, and a stale menu is replaced on the next refresh.
+///
+/// Both callers come here: the global handlers below, for a menu click, and
+/// [`Workspace::perform`], for the Quick Actions bar — which holds the action a
+/// menu item carries and has to run it in the window it was opened from.
+pub fn perform(
+    action: &dyn Action,
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> bool {
+    let any = action.as_any();
+
+    if let Some(action) = any.downcast_ref::<actions::snippet::InsertSnippet>() {
+        workspace.insert_snippet(action.id, window, cx);
+        return true;
+    }
+    if let Some(action) = any.downcast_ref::<actions::format::ChangeLineEnding>() {
+        if let Some(ending) = LineEnding::from_abbreviation(&action.ending) {
+            workspace.set_line_ending(ending, window, cx);
+        }
+        return true;
+    }
+    if let Some(action) = any.downcast_ref::<actions::format::ChangeSyntax>() {
+        workspace.set_syntax(&action.name, window, cx);
+        return true;
+    }
+    if let Some(action) = any.downcast_ref::<actions::format::ChangeTheme>() {
+        workspace.apply_theme_by_name(&action.name, cx);
+        return true;
+    }
+    if let Some(action) = any.downcast_ref::<actions::format::ChangeEncoding>() {
+        if let Some(encoding) = FileEncoding::from_identifier(&action.identifier) {
+            workspace.change_encoding(encoding, window, cx);
+        }
+        return true;
+    }
+    if let Some(action) = any.downcast_ref::<actions::text::NormalizeUnicode>() {
+        if let Some(form) = Normalization::from_identifier(&action.form) {
+            workspace.normalize_unicode(form, window, cx);
+        }
+        return true;
+    }
+    // A script's action carries its path, which is the script's identity: the
+    // folder can be rearranged between the item being built and being chosen,
+    // and two folders may hold a script of the same name.
+    if let Some(action) = any.downcast_ref::<actions::script::RunScript>() {
+        workspace.run_script(Path::new(&action.path), window, cx);
+        return true;
+    }
+
+    false
 }
 
 /// Run `command` in the active window's workspace.
@@ -130,59 +212,20 @@ pub fn install(cx: &mut App) {
     if !cx.has_global::<Workspaces>() {
         cx.set_global(Workspaces::default());
     }
-    // The snippets' action carries an id, so it does not fit `bind_actions!`,
-    // which forwards an action's *name*; the id is what the handler needs.
-    cx.on_action(|action: &actions::snippet::InsertSnippet, cx: &mut App| {
-        insert_snippet(action.id, cx);
-    });
-    // The three the Format menu builds at runtime carry a value for the same
-    // reason, and each one is turned back into the thing it names here — the one
-    // place that knows both vocabularies. An abbreviation or a name nothing
-    // recognises is dropped rather than reported: the menu was built from the
-    // same list this resolves against, so the only way to reach one is a stale
-    // menu, and a stale menu is replaced on the next refresh.
-    cx.on_action(|action: &actions::format::ChangeLineEnding, cx: &mut App| {
-        if let Some(ending) = LineEnding::from_abbreviation(&action.ending) {
-            tell(cx, move |workspace, window, cx| {
-                workspace.set_line_ending(ending, window, cx)
-            });
-        }
-    });
-    cx.on_action(|action: &actions::format::ChangeSyntax, cx: &mut App| {
-        let name = action.name.clone();
-        tell(cx, move |workspace, window, cx| {
-            workspace.set_syntax(&name, window, cx)
-        });
-    });
-    cx.on_action(|action: &actions::format::ChangeTheme, cx: &mut App| {
-        let name = action.name.clone();
-        tell(cx, move |workspace, _window, cx| {
-            workspace.apply_theme_by_name(&name, cx)
-        });
-    });
-    cx.on_action(|action: &actions::format::ChangeEncoding, cx: &mut App| {
-        if let Some(encoding) = FileEncoding::from_identifier(&action.identifier) {
-            tell(cx, move |workspace, window, cx| {
-                workspace.change_encoding(encoding, window, cx)
-            });
-        }
-    });
-    cx.on_action(|action: &actions::text::NormalizeUnicode, cx: &mut App| {
-        if let Some(form) = Normalization::from_identifier(&action.form) {
-            tell(cx, move |workspace, window, cx| {
-                workspace.normalize_unicode(form, window, cx)
-            });
-        }
-    });
-    // A script's action carries its path, which is the script's identity: the
-    // folder can be rearranged between the item being built and being chosen,
-    // and two folders may hold a script of the same name.
-    cx.on_action(|action: &actions::script::RunScript, cx: &mut App| {
-        let path = PathBuf::from(&action.path);
-        tell(cx, move |workspace, window, cx| {
-            workspace.run_script(&path, window, cx)
-        });
-    });
+    // The items the menu bar builds at runtime carry a value rather than a name,
+    // so none of them fits `bind_actions!`: a snippet carries its id, the three
+    // Format popups carry the setting they stand for, a normalization carries
+    // its form, and a script carries its path. Each is turned back into the
+    // thing it names by `perform`.
+    bind_runtime_actions! { cx,
+        actions::snippet::InsertSnippet,
+        actions::format::ChangeLineEnding,
+        actions::format::ChangeSyntax,
+        actions::format::ChangeTheme,
+        actions::format::ChangeEncoding,
+        actions::text::NormalizeUnicode,
+        actions::script::RunScript,
+    };
     bind_actions! { cx,
         actions::app::ShowAboutPanel => "ShowAboutPanel",
         actions::app::ShowDonationWindow => "ShowDonationWindow",

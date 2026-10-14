@@ -466,9 +466,10 @@ class Renderer:
         lines.append("")
         lines.append("    /// A shortcut belongs to a command, so its path has to be one of ours.")
         lines.append("    ///")
-        lines.append("    /// This is the join the Quick Actions bar makes to draw a shortcut")
-        lines.append("    /// beside a result: if the two tables spelled a path differently the")
-        lines.append("    /// join would silently find nothing and the bar would show no key.")
+        lines.append("    /// This is the join [`crate::menus::shortcut`] makes to draw a")
+        lines.append("    /// shortcut beside a result: if the two tables spelled a path")
+        lines.append("    /// differently the join would silently find nothing and the bar")
+        lines.append("    /// would show no key.")
         lines.append("    #[test]")
         lines.append("    fn every_shortcut_belongs_to_a_listed_command() {")
         lines.append("        for row in crate::keymap::SHORTCUTS {")
@@ -484,7 +485,7 @@ class Renderer:
         return "\n".join(lines)
 
     def command_entries(self) -> list[dict]:
-        """The commands the Quick Actions bar can offer.
+        """The commands the storyboard names.
 
         A submenu has no action of its own, and a placeholder has no action at
         all; what is left is exactly the items a user can run.
@@ -502,14 +503,18 @@ class Renderer:
             fail("menu.json has no commands")
 
         lines = [
-            "/// A command in the menu bar, as the Quick Actions bar sees it.",
+            "/// A command in the menu bar, as the storyboard records it.",
             "///",
-            "/// CotEditor builds that list by walking the live `NSMenu`, which is also",
-            "/// where the items it fills in at runtime come from. GPUI can set a menu",
-            "/// but not read one back — `App::get_menus` returns `None` on every real",
-            "/// platform — so the bar reads this table instead. It is generated from",
-            "/// the same source as the menu bar itself, so the two cannot disagree",
-            "/// about what the menu holds.",
+            "/// CotEditor builds its Quick Actions list by walking the live `NSMenu`,",
+            "/// which is also where the items it fills in at runtime come from. GPUI",
+            "/// can set a menu but not read one back, so the bar does not walk the",
+            "/// installed menu — it walks the same bar built again, which is what",
+            "/// brings the runtime items with it. See [`crate::menus::commands`].",
+            "///",
+            "/// This table is the compile-time record of that bar: every command the",
+            "/// storyboard names, and the action each one runs. It is what makes the",
+            "/// two applications' menus comparable at a glance, and a test holds the",
+            "/// live bar against it.",
             "pub struct Command {",
             "    /// Where the command sits, e.g. `Format > Syntax`.",
             "    ///",
@@ -528,11 +533,13 @@ class Renderer:
             "/// substitute for it.",
             f"pub const APP_MENU_TITLE: &str = {rust_string(APP_MENU_TITLE)};",
             "",
-            "/// Every command in the menu bar, in menu order.",
+            "/// Every command the storyboard names, in menu order.",
             "///",
             "/// The greyed placeholders are not here: CotEditor fills those in from the",
-            "/// system or at runtime, and its Quick Actions bar lists only the items",
-            "/// that are enabled.",
+            "/// system or at runtime, and a placeholder has no action to run. This is",
+            "/// the storyboard's own record, not the list the Quick Actions bar reads —",
+            "/// that one is [`crate::menus::commands`], and the two are held together",
+            "/// by a test.",
             "pub const COMMANDS: &[Command] = &[",
         ]
         for entry in rows:
