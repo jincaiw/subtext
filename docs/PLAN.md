@@ -218,6 +218,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
 | 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9h |
+| 8.10 | 大纲导航命令 | 8.0 留下的大纲条目只有行号，没有位置 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1266,10 +1267,69 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 验收：4 条新测试（八个码点各归位；`«»`/`‹›`/`′″`/全角/直引号一律不动；只改选区且多字节
 偏移正确；空选区是 no-op）。全工作区 **508** 项测试全绿（504 → 508），clippy 零自有警告。
 
+### 8.10 大纲导航命令 ✅
+
+`Find ▸ Select Previous Outline Item`（⌃⌘↑）与 `Select Next Outline Item`（⌃⌘↓）此前是两条
+占位臂，状态栏回一句「Outline navigation is not implemented yet」。
+
+上游语义（`OutlineNavigator.swift` 加 `OutlineItem.swift` 的 `BidirectionalCollection` 扩展）：
+
+| 步骤 | 上游 |
+| --- | --- |
+| 「光标所在的那个条目」 | `indexOfItem(at:)` = `lastIndex { $0.range.location <= location && !$0.isSeparator }` |
+| 上一个 | `previousItem(for:)`：先取 `indexOfItem(at: range.lowerBound)`，再在它**之前**找最后一个非分隔项 |
+| 下一个 | `nextItem(for:)`：若选区**末端**在第一个条目之前，答案就是第一个条目；否则取 `indexOfItem(at: range.upperBound)` 之后第一个非分隔项 |
+| 落点 | `textView.select(range: item.range)` = 设选区 + `scrollRangeToVisible` + 让文本视图成为第一响应者 |
+
+关键的一点是**判据是范围不是行**：`item.range` 是正则**整个匹配**的范围（`OutlineExtractor` 里的
+`result.range`），所以像 SVG 的 `id="…"` 那样匹配在行中间的规则，落点也在行中间。
+
+于是这一轮做的其实是「**条目知道自己站在哪**」。8.0 起 `OutlineEntry` 只有 `line`，凡是要位置的地方
+都拿行当替身；`range` 一旦有了，四处替身一起换掉：
+
+| 位置 | 之前 | 现在 |
+| --- | --- | --- |
+| `sort_key` | `(line, indent.level())`，注释写明「用层级代替匹配长度」 | `(range.start, range.len())`，即上游的 `(location, length)` |
+| 光标落在哪个条目 | `entry_at_line(entries, line_of_offset(text, caret))` | `entry_at(entries, caret)` |
+| `extract` 的去重 | `a.line == b.line && a.title == b.title` | `a.range == b.range && a.title == b.title` |
+| 点大纲行 | `goto_line(entry.line)` | `set_selection(entry.range)` |
+
+前两处不换会**互相矛盾**：规则匹配在行中间时，行会认领光标而范围不认，于是大纲高亮第 k 行、
+⌃⌘↑ 却从第 k+1 行起步。第 3、4 处是同一个「行是范围的替身」的顺带修正——上游 `selectItem(id:)`
+选的就是 `item.range`，点 `fn main` 应该选中 `fn main`，而不是把光标丢到那一行行首。
+
+`line` 字段因此整个删掉：它唯一的**生产**读取就是去重（其余是测试），而它的算法是每命中一次就
+扫一遍前缀，代价是 O(命中数 × 文本长度)，每次按键刷新大纲都要付。删掉之后 `OutlineEntry` 与上游
+`OutlineItem` 的字段对齐（`id`/`title`/`range`/`indent`/`kind`——上游没有行）。`line_of_offset`
+随之无人调用，一并删除（含它的两条测试）。
+
+实现：
+
+- `outline.rs`：新增 `previous_item` / `next_item` / `index_of_item` 三个纯函数，逐例照搬上游；
+  `entry_at` 换掉 `entry_at_line`。
+- `workspace.rs`：`select_previous_outline_item` / `select_next_outline_item` 走同一个
+  `step_outline_item(forward)`——读活动缓冲区与选区、按 `document.syntax` 取该语法的大纲规则、
+  重新抽取一次、找条目、把选区设到 `entry.range` 上。
+  **重新抽取而不是读 `outline_entries`**：后者只在大纲面板渲染时刷新，而上游是从语法控制器读
+  `outlineItems`，面板关着也照样工作。代价是每次按键解析一遍缓冲区，但这是用户手按出来的动作。
+- `dispatch.rs`：两条命令从占位臂改成实际调用。
+
+**一处偏差**：上游找不到条目时菜单项是**置灰**的；GPUI 的菜单项只有固定 `disabled`，要跟着光标动
+就得每次选区变化重建整条菜单栏（与 §8.9h 同一个理由）。所以保持可用，状态栏说
+`No previous outline item` / `No next outline item`，选区不动、文本不动。
+
+验收：**8 条新测试**——上游 `OutlineCollectionTests` 的 `previousItem()` / `nextItem()` 逐例照搬
+（含 `NSRange(40..<61)` 这种跨两个条目的选区）、分隔符在两个方向上都不是答案、多字节条目按字节
+偏移、同跨度同标签才合并、同行不同跨度是两个条目；删掉 2 条随 `line_of_offset` 一起走的测试。
+全工作区 **514** 项测试全绿（508 → 514），clippy 零自有警告。生成器幂等
+（`menu.rs` `d72a9524` / `keymap.rs` `75c5c9e0`，与 8.9f 起一致——这一轮没有碰生成输入）。
+死菜单命令探针重跑：165 条菜单命令，**0 条** `dispatch` 不认。
+冒烟：开一份含大纲的 Markdown 存活 5 秒、stderr 0 字节。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（508 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（514 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
@@ -1290,6 +1350,11 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | `Straighten Quotes` 不随选区置灰 | 上游在空选区时禁用它（`validateUserInterfaceItem`，见 §8.9h）；GPUI 的菜单项只有固定 `disabled`，要跟着光标动就得每次选区变化重建 258 项菜单栏。SubText 保持可用、空选区时在状态栏说明，两种情况都不改文本。 |
+| 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
+| 大纲里 `title` 类条目在 `heading` 之后的层级 | 上游 `normalizedLevels` 有一条 `title` 特例：前一个非分隔项是 `heading` 时，`title` 落在它**下一层**（`lastNormalizedLevel + 1`），否则与前一项目同级。SubText 的 `indent_for` 一律给 `Level(0)`。**38 个内置语法里够不到这个分支**：`title` 只出现在 iCalendar（唯一一条规则，前一项也是 `title`）与 SVG（前一个非分隔项是 `value`，其缩进是捕获空白，走 `guard` 分支、不更新 `lastNormalizedLevel`），两者都取不到 `heading` 那一支。只有用户自写的、同时含 `heading` 与 `title` 规则的语法才会碰到。 |
+| 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
+| `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
+| 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

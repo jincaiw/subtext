@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 32,289（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 32,554（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -203,7 +203,7 @@
 | 多重替换 | `multiple_replace_dialog` | ✅ 规则表 + TSV 导入模型 |
 | 高亮全部 / 移除高亮 | `highlight_all` / `clear_highlights` | ✅ |
 | 打开大纲菜单 | `show_inspector(Outline)` | ✅ |
-| 上一个 / 下一个大纲项 | — | ⏳ |
+| 上一个 / 下一个大纲项 | `select_previous/next_outline_item` | ✅ 落在条目匹配的范围上 |
 | 跳转到指定行 | `goto_dialog` | ✅ |
 
 **查找选项**：正则、区分大小写、全字匹配、循环查找、反向查找
@@ -295,10 +295,10 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 126 | 63% |
+| ✅ 完整实现 | 约 127 | 63% |
 | 🔁 等价实现（委托或改写） | 约 24 | 12% |
 | ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
-| ⏳ 未实现（菜单保留 + 提示） | 约 30 | 15% |
+| ⏳ 未实现（菜单保留 + 提示） | 约 29 | 15% |
 | **合计** | **200** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。

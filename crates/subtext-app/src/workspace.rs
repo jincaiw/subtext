@@ -1277,6 +1277,61 @@ impl Workspace {
         self.set_selection(range, cx);
     }
 
+    /// ⌃⌘↑ — the outline entry before the caret's, as `Select Previous Outline
+    /// Item` does.
+    pub fn select_previous_outline_item(&mut self, cx: &mut Context<Self>) {
+        self.step_outline_item(false, cx);
+    }
+
+    /// ⌃⌘↓ — the outline entry after the caret's.
+    pub fn select_next_outline_item(&mut self, cx: &mut Context<Self>) {
+        self.step_outline_item(true, cx);
+    }
+
+    /// Move the selection onto the neighbouring outline entry.
+    ///
+    /// CotEditor's `selectPreviousItem()` / `selectNextItem()`, which read the
+    /// items off the syntax controller and so work whether or not the Outline
+    /// inspector is on screen. `outline_entries` is only as fresh as that
+    /// pane's last render, so this parses the outline again rather than
+    /// reading it: one pass over the buffer, on a keystroke the user asked for
+    /// by hand.
+    ///
+    /// Finding nothing is an ordinary state rather than a failure — upstream
+    /// greys the menu item out, and a GPUI menu item cannot change with the
+    /// caret — so the status bar says which way there is nothing to go, and
+    /// the selection stays where it was. The text is untouched either way.
+    fn step_outline_item(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some((text, _)) = self.outline_input(cx) else {
+            return;
+        };
+        let selection = self.active_selection(cx);
+        let entries = match self.active_document() {
+            Some(document) => match self.syntaxes.by_name(&document.syntax) {
+                Some(syntax) => crate::outline::extract(&text, &syntax.outlines),
+                None => Vec::new(),
+            },
+            None => return,
+        };
+        let item = if forward {
+            crate::outline::next_item(&entries, &selection)
+        } else {
+            crate::outline::previous_item(&entries, &selection)
+        };
+        let Some(range) = item.map(|entry| entry.range.clone()) else {
+            self.set_status(
+                if forward {
+                    "No next outline item"
+                } else {
+                    "No previous outline item"
+                },
+                cx,
+            );
+            return;
+        };
+        self.set_selection(range, cx);
+    }
+
     /// Split the selection into one selection per line it covers, so the next
     /// keystroke lands on every line at once — CotEditor's ⌃L.
     ///
@@ -3058,10 +3113,10 @@ impl Workspace {
     /// The id of the row the caret sits in, if any.
     ///
     /// Both directions of the caret/row link go through here, so they cannot
-    /// disagree about which row the caret is in.
-    fn outline_caret_target<'a>(&'a self, text: &str, caret: usize) -> Option<&'a str> {
-        crate::outline::entry_at_line(&self.outline_entries, line_of_offset(text, caret))
-            .map(|entry| entry.id.as_str())
+    /// disagree about which row the caret is in — and the same question, asked
+    /// by the same rule, is what the two stepping commands step off.
+    fn outline_caret_target(&self, caret: usize) -> Option<&str> {
+        crate::outline::entry_at(&self.outline_entries, caret).map(|entry| entry.id.as_str())
     }
 
     /// Whether a rebuild or a selection move is due.
@@ -3077,7 +3132,7 @@ impl Workspace {
             Some(source) => self.outline_built_from.as_ref() != Some(&source),
             None => self.outline_built_from.is_some(),
         };
-        stale || self.outline_caret_target(&text, caret) != self.outline_selected.as_deref()
+        stale || self.outline_caret_target(caret) != self.outline_selected.as_deref()
     }
 
     /// Queue a rebuild, if one is due.
@@ -3182,12 +3237,10 @@ impl Workspace {
     /// no entry to select, so nothing happens — upstream does not open the path
     /// to the caret either.
     fn sync_outline_selection(&mut self, cx: &mut Context<Self>) {
-        let Some((text, caret)) = self.outline_input(cx) else {
+        let Some((_, caret)) = self.outline_input(cx) else {
             return;
         };
-        let target = self
-            .outline_caret_target(&text, caret)
-            .map(str::to_string);
+        let target = self.outline_caret_target(caret).map(str::to_string);
         if target == self.outline_selected {
             return;
         }
@@ -3201,6 +3254,11 @@ impl Workspace {
     /// editor's selection on the range the entry describes and scrolls it into
     /// view. A row the caret already sits in is left alone, which is what keeps
     /// the two directions — caret to row, row to caret — from ping-ponging.
+    ///
+    /// The range rather than the line, because that is what upstream selects:
+    /// clicking `fn main` selects `fn main`, not the start of its line. The
+    /// caret lands at the *end* of the selection, which is inside the entry,
+    /// so the row that was just clicked is still the row the caret is in.
     fn on_outline_row_selected(&mut self, tree: Entity<TreeState>, cx: &mut Context<Self>) {
         let selected = tree
             .read(cx)
@@ -3212,16 +3270,16 @@ impl Workspace {
         if self.outline_selected.as_deref() == Some(id.as_str()) {
             return;
         }
-        let Some(line) = self
+        let Some(range) = self
             .outline_entries
             .iter()
             .find(|entry| entry.id == id)
-            .map(|entry| entry.line)
+            .map(|entry| entry.range.clone())
         else {
             return;
         };
         self.outline_selected = Some(id);
-        self.goto_line(line, cx);
+        self.set_selection(range, cx);
     }
 
     /// The pane's title row, with CotEditor's Options menu at its trailing edge.
@@ -3834,20 +3892,6 @@ fn outline_item(node: &FilteredNode, expanded: &HashSet<String>) -> TreeItem {
         .expanded(expanded.contains(&node.entry.id))
 }
 
-/// The 1-based line an offset falls on.
-///
-/// The caret is always on a character boundary, but a refresh can be queued
-/// from a frame that ran before the buffer settled, so the offset is walked
-/// back to a boundary rather than indexed — the worst case is the last line,
-/// which is where a stale caret was anyway.
-fn line_of_offset(text: &str, offset: usize) -> usize {
-    let mut end = offset.min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].matches('\n').count() + 1
-}
-
 /// Load every `.cotsyntax` bundle the resource directory offers.
 ///
 /// A user's own bundle with the same name wins, so a customised `Rust.cotsyntax`
@@ -3980,7 +4024,7 @@ mod tests {
             entry: OutlineEntry {
                 id: id.to_string(),
                 title: title.to_string(),
-                line: 1,
+                range: 0..1,
                 indent: crate::outline::Indent::Level(0),
                 kind: Some(OutlineKind::Function),
             },
@@ -4031,24 +4075,5 @@ mod tests {
     fn a_leaf_is_never_a_folder() {
         let items = outline_items(&[node("leaf", "Leaf", Vec::new())], &HashSet::new());
         assert!(!items[0].is_folder());
-    }
-
-    #[test]
-    fn a_line_number_counts_the_newlines_before_the_offset() {
-        let text = "one\ntwo\nthree";
-        assert_eq!(line_of_offset(text, 0), 1);
-        assert_eq!(line_of_offset(text, 3), 1);
-        assert_eq!(line_of_offset(text, 4), 2);
-        assert_eq!(line_of_offset(text, 12), 3);
-        assert_eq!(line_of_offset(text, 13), 3);
-    }
-
-    /// The offset can be past the end, or inside a character, on the frame
-    /// after a buffer shrank under a queued refresh. Neither may panic.
-    #[test]
-    fn an_offset_past_the_end_or_inside_a_character_is_clamped() {
-        let text = "é\nx";
-        assert_eq!(line_of_offset(text, 99), 2);
-        assert_eq!(line_of_offset(text, 1), 1);
     }
 }

@@ -344,9 +344,8 @@ impl Workspace {
             "HighlightAll" => self.highlight_all(cx),
             "RemoveHighlights" => self.clear_highlights(cx),
             "OpenOutlineMenu" => self.show_inspector(InspectorPane::Outline, cx),
-            "SelectPrevItemOfOutlineMenu" | "SelectNextItemOfOutlineMenu" => {
-                self.notice("Outline navigation is not implemented yet", cx)
-            }
+            "SelectPrevItemOfOutlineMenu" => self.select_previous_outline_item(cx),
+            "SelectNextItemOfOutlineMenu" => self.select_next_outline_item(cx),
             "GotoLocation" => self.goto_dialog(window, cx),
 
             // ---- window ------------------------------------------------

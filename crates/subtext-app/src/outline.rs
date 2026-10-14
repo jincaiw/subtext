@@ -32,6 +32,15 @@
 //! number, as an earlier revision did, silently mis-nests every outline whose
 //! rules capture whitespace — which is most of them.
 //!
+//! # What an entry knows
+//!
+//! An entry carries the byte range its rule matched, because that range is
+//! what the entry *stands for* — the commands that step from one entry to the
+//! next put the selection on it, and so does clicking a row. Nothing is kept
+//! per entry that could be derived from it: there is no line, so which entry
+//! the caret is in is decided by the range alone, and a rule that matches
+//! mid-line puts the caret in a different entry than its line would.
+//!
 //! # What the filter does
 //!
 //! The filter field at the bottom of the pane is **not** a substring search.
@@ -154,8 +163,16 @@ pub struct OutlineEntry {
     /// The label, with the rule's nesting whitespace removed. Empty for a
     /// separator.
     pub title: String,
-    /// 1-based line the entry sits on.
-    pub line: usize,
+    /// The byte range of the text the rule matched — what the entry *stands
+    /// for*, as opposed to what it is called.
+    ///
+    /// CotEditor keeps the same thing (`OutlineItem.range`, an `NSRange` of
+    /// the match) and it is what the commands that step from one entry to the
+    /// next put the selection on, so a rule that matches mid-line selects
+    /// mid-line. The offsets are bytes rather than UTF-16 units because that
+    /// is what the editor's selections are; the two only differ past a
+    /// non-BMP character, and both name the same place.
+    pub range: Range<usize>,
     /// How the entry nests.
     pub indent: Indent,
     /// The rule's kind, or `None` for a rule that names none.
@@ -189,13 +206,13 @@ pub fn extract(text: &str, rules: &[OutlineItem]) -> Vec<OutlineEntry> {
             let Some(matched) = captures.get(0) else {
                 continue;
             };
-            let line = text[..matched.start()].matches('\n').count() + 1;
+            let range = matched.start()..matched.end();
 
             if kind == Some(OutlineKind::Separator) {
                 entries.push(OutlineEntry {
                     id: String::new(),
                     title: String::new(),
-                    line,
+                    range,
                     // `OutlineItem.separator` defaults to `.level(0)`, which is
                     // what makes a separator a root rather than a child.
                     indent: Indent::Level(0),
@@ -213,7 +230,7 @@ pub fn extract(text: &str, rules: &[OutlineItem]) -> Vec<OutlineEntry> {
             entries.push(OutlineEntry {
                 id: String::new(),
                 title: title.to_string(),
-                line,
+                range,
                 indent: indent_for(kind, &rule.kind, indent),
                 kind,
             });
@@ -221,7 +238,12 @@ pub fn extract(text: &str, rules: &[OutlineItem]) -> Vec<OutlineEntry> {
     }
 
     entries.sort_by_key(sort_key);
-    entries.dedup_by(|a, b| a.line == b.line && a.title == b.title);
+    // Two rules landing on the same span with the same label are one entry.
+    // Upstream has no dedup at all — `removingDuplicateIDs` only catches an
+    // identity resolver that handed one id out twice, which it does not do —
+    // so this is SubText's own rule, and keyed on the span rather than the
+    // line so that it only ever merges what a reader would call one thing.
+    entries.dedup_by(|a, b| a.range == b.range && a.title == b.title);
     assign_ids(&mut entries);
     entries
 }
@@ -264,14 +286,15 @@ fn indent_for(kind: Option<OutlineKind>, rule_kind: &str, indent: &str) -> Inden
     }
 }
 
-/// Where an entry sorts: by line, then by level.
+/// Where an entry sorts: by position, then by the match's length.
 ///
-/// CotEditor sorts by position and then by the match's *length*. SubText tracks
-/// lines rather than columns, so the level stands in for the length — and an
-/// entry whose indent is whitespace sorts after one that carries a level,
-/// because it is not part of the nesting at all.
+/// CotEditor sorts by `range.location` and then `range.length`, and now that
+/// an entry carries its range, this is that key exactly. An earlier revision
+/// sorted by line and then by nesting level, because a range was not kept —
+/// the level stood in for the length. The two agree except for two rules that
+/// match on the same line, where the length is the honest tie-break.
 fn sort_key(entry: &OutlineEntry) -> (usize, usize) {
-    (entry.line, entry.indent.level().unwrap_or(usize::MAX))
+    (entry.range.start, entry.range.end - entry.range.start)
 }
 
 /// Give every entry a stable identity.
@@ -557,15 +580,67 @@ pub fn abbreviated_matched_ranges(text: &str, filter: &str) -> Option<Vec<Range<
     Some(merged)
 }
 
-/// The entry the caret on `line` sits in.
+/// The entry the caret at `offset` sits in.
 ///
 /// CotEditor's `item(at:)`: the *last* entry that starts at or before the
 /// caret. Separators are skipped — they mark a boundary rather than a place.
-pub fn entry_at_line(entries: &[OutlineEntry], line: usize) -> Option<&OutlineEntry> {
-    entries
+///
+/// This asks about the entry's *range*, not its line. A rule that matches
+/// mid-line, like SVG's `id="…"`, puts the caret at the start of that line
+/// *before* the entry it will reach: the line would claim the caret for an
+/// entry the stepping commands below do not consider it to be in, and the two
+/// would disagree about which row ⌃⌘↑ starts from.
+pub fn entry_at(entries: &[OutlineEntry], offset: usize) -> Option<&OutlineEntry> {
+    index_of_item(entries, offset).map(|index| &entries[index])
+}
+
+/// The entry before the one `selection` sits in.
+///
+/// CotEditor's `previousItem(for:)`: find the entry the *start* of the
+/// selection is in, then step one back. `None` when there is none — which
+/// includes a selection that starts before the first entry, so the caret on
+/// the first line reaches back to nothing rather than wrapping to the end.
+pub fn previous_item<'a>(
+    entries: &'a [OutlineEntry],
+    selection: &Range<usize>,
+) -> Option<&'a OutlineEntry> {
+    let current = index_of_item(entries, selection.start)?;
+    entries[..current]
         .iter()
         .rev()
-        .find(|entry| !entry.is_separator() && entry.line <= line)
+        .find(|entry| !entry.is_separator())
+}
+
+/// The entry after the one `selection` sits in.
+///
+/// CotEditor's `nextItem(for:)`, including its first branch: a selection that
+/// *ends* before the first entry gets the first entry. That is what makes
+/// ⌃⌘↓ from the top of a file reach the outline at all — no entry contains the
+/// caret yet, so without the branch there would be nothing to step off.
+pub fn next_item<'a>(
+    entries: &'a [OutlineEntry],
+    selection: &Range<usize>,
+) -> Option<&'a OutlineEntry> {
+    if let Some(first) = entries.iter().find(|entry| !entry.is_separator())
+        && selection.end < first.range.start
+    {
+        return Some(first);
+    }
+    let current = index_of_item(entries, selection.end)?;
+    entries[current + 1..]
+        .iter()
+        .find(|entry| !entry.is_separator())
+}
+
+/// The index of the last non-separator entry that starts at or before `offset`.
+///
+/// CotEditor's `indexOfItem(at:)`. [`entry_at`] reads it directly and the two
+/// stepping functions step off it, so all three agree on which entry the caret
+/// is in — which is the whole reason they share it.
+fn index_of_item(entries: &[OutlineEntry], offset: usize) -> Option<usize> {
+    entries
+        .iter()
+        .rposition(|entry| !entry.is_separator() && entry.range.start <= offset)
 }
 
 // ---- what a row needs to be drawn ---------------------------------------
@@ -912,14 +987,15 @@ mod tests {
     }
 
     #[test]
-    fn entries_are_ordered_by_line() {
+    fn entries_are_ordered_by_position() {
         let text = "fn b() {}\nstruct A;\n";
         let entries = extract(text, &syntax("Rust").outlines);
-        let lines: Vec<_> = entries.iter().map(|entry| entry.line).collect();
-        let mut sorted = lines.clone();
+        let starts: Vec<_> = entries.iter().map(|entry| entry.range.start).collect();
+        let mut sorted = starts.clone();
         sorted.sort_unstable();
-        assert_eq!(lines, sorted);
-        assert_eq!(lines, [1, 2]);
+        assert_eq!(starts, sorted);
+        // `fn b` is the first line and `struct A` the second.
+        assert_eq!(starts, [0, 10]);
     }
 
     #[test]
@@ -934,6 +1010,30 @@ mod tests {
         assert_eq!(titles(&entries), ["Title"]);
     }
 
+    #[test]
+    fn two_rules_on_the_same_span_with_the_same_label_are_one_entry() {
+        // The one place `extract` drops something upstream would keep, and it
+        // is keyed on the span: the same text, described twice.
+        let rules = [
+            rule("function", r"^fn (\w+)", "$1"),
+            rule("value", r"^fn (\w+)", "$1"),
+        ];
+        let entries = extract("fn a() {}\n", &rules);
+        assert_eq!(titles(&entries), ["a"]);
+    }
+
+    #[test]
+    fn two_rules_on_the_same_line_are_two_entries() {
+        // …but the same *line* is not the same thing, which is what an earlier
+        // revision treated it as. A rule matching mid-line is its own entry.
+        let rules = [
+            rule("function", r"^fn (\w+)", "$1"),
+            rule("value", r#"id="([^"]+)""#, "#$1"),
+        ];
+        let entries = extract("fn a() {}  id=\"b\"\n", &rules);
+        assert_eq!(titles(&entries), ["a", "#b"]);
+    }
+
     // ---- identity --------------------------------------------------------
 
     #[test]
@@ -943,7 +1043,8 @@ mod tests {
         // The same entry, one line further down.
         let after = extract("\n\nfn a() {}\n", &rules);
         assert_eq!(before[0].id, after[0].id);
-        assert_eq!(after[0].line, 3);
+        assert_eq!(before[0].range, 0..4);
+        assert_eq!(after[0].range, 2..6);
     }
 
     #[test]
@@ -1001,7 +1102,7 @@ mod tests {
         entries.push(OutlineEntry {
             id: String::new(),
             title: "loose".into(),
-            line: 2,
+            range: 8..13,
             indent: Indent::String(String::new()),
             kind: Some(OutlineKind::Function),
         });
@@ -1138,14 +1239,33 @@ mod tests {
     // ---- the caret -------------------------------------------------------
 
     #[test]
-    fn the_caret_picks_the_last_entry_above_it() {
+    fn the_caret_picks_the_last_entry_at_or_before_it() {
         let rules = [rule("heading.1", r"^# (.+)$", "$1")];
-        let entries = extract("# One\n\n\n# Two\n", &rules);
-        assert_eq!(entry_at_line(&entries, 1).unwrap().title, "One");
-        assert_eq!(entry_at_line(&entries, 3).unwrap().title, "One");
-        assert_eq!(entry_at_line(&entries, 4).unwrap().title, "Two");
-        assert_eq!(entry_at_line(&entries, 9).unwrap().title, "Two");
-        assert!(entry_at_line(&entries, 0).is_none());
+        let text = "# One\n\n\n# Two\n";
+        let entries = extract(text, &rules);
+        // `# One` matches `0..5`, `# Two` matches `8..13`.
+        assert_eq!(entries[0].range, 0..5);
+        assert_eq!(entries[1].range, 8..13);
+        assert_eq!(entry_at(&entries, 0).unwrap().title, "One");
+        assert_eq!(entry_at(&entries, 4).unwrap().title, "One");
+        assert_eq!(entry_at(&entries, 5).unwrap().title, "One");
+        assert_eq!(entry_at(&entries, 7).unwrap().title, "One");
+        assert_eq!(entry_at(&entries, 8).unwrap().title, "Two");
+        assert_eq!(entry_at(&entries, 99).unwrap().title, "Two");
+    }
+
+    #[test]
+    fn a_caret_before_every_entry_is_in_none_of_them() {
+        // The difference between asking by offset and asking by line: the
+        // caret on line 1 but before the match is not yet in the entry that
+        // line 1 will produce.
+        let rules = [rule("value", r#"id="([^"]+)""#, "#$1")];
+        let entries = extract("  <g id=\"g1\">\n", &rules);
+        // `id="g1"` starts after `  <g `, so at 5.
+        assert_eq!(entries[0].range, 5..12);
+        assert!(entry_at(&entries, 0).is_none());
+        assert!(entry_at(&entries, 4).is_none());
+        assert_eq!(entry_at(&entries, 5).unwrap().title, "#g1");
     }
 
     #[test]
@@ -1155,7 +1275,128 @@ mod tests {
             rule("separator", r"^---$", ""),
         ];
         let entries = extract("# One\n---\n", &rules);
-        assert_eq!(entry_at_line(&entries, 2).unwrap().title, "One");
+        // The separator matches `6..9`, the heading `0..5`.
+        assert_eq!(entries[1].range, 6..9);
+        assert_eq!(entry_at(&entries, 7).unwrap().title, "One");
+    }
+
+    // ---- stepping through the entries ------------------------------------
+
+    /// The fixture CotEditor's `OutlineCollectionTests` uses: three entries
+    /// with separators between them, so every case there has a case here.
+    ///
+    /// It is built by hand for the same reason upstream builds it by hand —
+    /// these cases are about the ranges, and a real document would have to be
+    /// padded to put the matches on those exact offsets. The labels carry no
+    /// kind, matching `OutlineItem(title:range:)`'s default of `nil`.
+    fn upstream_fixture() -> Vec<OutlineEntry> {
+        fn item(range: Range<usize>, title: &str, kind: Option<OutlineKind>) -> OutlineEntry {
+            OutlineEntry {
+                id: format!("{title}@{}", range.start),
+                title: title.to_string(),
+                range,
+                indent: Indent::Level(0),
+                kind,
+            }
+        }
+        let separator = Some(OutlineKind::Separator);
+        vec![
+            item(10..15, "dog", None),        // 0
+            item(20..25, "", separator),      // 1
+            item(30..35, "", separator),      // 2
+            item(40..45, "dogcow", None),     // 3
+            item(50..55, "", separator),      // 4
+            item(60..65, "cow", None),        // 5
+            item(70..75, "", separator),      // 6
+        ]
+    }
+
+    fn title_of(entry: Option<&OutlineEntry>) -> Option<&str> {
+        entry.map(|entry| entry.title.as_str())
+    }
+
+    #[test]
+    fn the_previous_item_is_the_one_before_the_caret_s_own() {
+        // CotEditor's `previousItem()` test, case for case.
+        let entries = upstream_fixture();
+        assert!(title_of(previous_item(&[], &(10..20))).is_none());
+        // The caret is in the first entry, so there is nothing before it.
+        assert!(title_of(previous_item(&entries, &(10..20))).is_none());
+        // …and a caret before the first entry is in none of them either.
+        assert!(title_of(previous_item(&entries, &(19..19))).is_none());
+        // A selection starting inside the last entry steps back to the one
+        // before it, and a selection spanning two entries starts in the
+        // earlier one, so it steps back one further.
+        assert_eq!(title_of(previous_item(&entries, &(60..70))), Some("dogcow"));
+        assert_eq!(title_of(previous_item(&entries, &(59..70))), Some("dog"));
+    }
+
+    #[test]
+    fn the_previous_item_walks_back_one_entry_at_a_time() {
+        // The cases the upstream fixture cannot show, because its first entry
+        // has nothing before it.
+        let entries = upstream_fixture();
+        assert_eq!(title_of(previous_item(&entries, &(40..40))), Some("dog"));
+        assert_eq!(title_of(previous_item(&entries, &(65..65))), Some("dogcow"));
+        // Past the last entry the caret is still in the last entry.
+        assert_eq!(title_of(previous_item(&entries, &(99..99))), Some("dogcow"));
+    }
+
+    #[test]
+    fn the_next_item_is_the_one_after_the_caret_s_own() {
+        // CotEditor's `nextItem()` test, case for case.
+        let entries = upstream_fixture();
+        assert!(title_of(next_item(&[], &(10..20))).is_none());
+        // Before the first entry the *first* entry is next, which is the
+        // branch that makes ⌃⌘↓ work from the top of a file.
+        assert_eq!(title_of(next_item(&entries, &(0..0))), Some("dog"));
+        // A selection that ends at the first entry steps past it, and the
+        // separators in between are skipped.
+        assert_eq!(title_of(next_item(&entries, &(0..10))), Some("dogcow"));
+        assert_eq!(title_of(next_item(&entries, &(40..40))), Some("cow"));
+        assert!(title_of(next_item(&entries, &(60..60))).is_none());
+        assert!(title_of(next_item(&entries, &(40..61))).is_none());
+    }
+
+    #[test]
+    fn a_separator_is_never_the_answer_in_either_direction() {
+        // Separators sit at 20, 30, 50 and 70, and every answer above skipped
+        // them. This pins the skipping itself: with nothing but separators
+        // there is no answer at all, and no entry contains the caret.
+        let separators = vec![
+            OutlineEntry {
+                id: "a".into(),
+                title: String::new(),
+                range: 0..3,
+                indent: Indent::Level(0),
+                kind: Some(OutlineKind::Separator),
+            },
+            OutlineEntry {
+                id: "b".into(),
+                title: String::new(),
+                range: 10..13,
+                indent: Indent::Level(0),
+                kind: Some(OutlineKind::Separator),
+            },
+        ];
+        assert!(title_of(entry_at(&separators, 0)).is_none());
+        assert!(title_of(previous_item(&separators, &(10..13))).is_none());
+        assert!(title_of(next_item(&separators, &(0..3))).is_none());
+    }
+
+    #[test]
+    fn stepping_over_a_multibyte_entry_uses_byte_offsets() {
+        // A rule matching past a wide character: the entry's range is a byte
+        // range and the caret arrives as one, so they have to be counted the
+        // same way. `日` is three bytes and `本` three more, so `# 語` starts
+        // at 7 and the label runs to 12.
+        let rules = [rule("heading.1", r"^# (.+)$", "$1")];
+        let entries = extract("日本\n# 語\n", &rules);
+        assert_eq!(entries[0].range, 7..12);
+        assert!(title_of(entry_at(&entries, 6)).is_none());
+        assert_eq!(title_of(entry_at(&entries, 7)), Some("語"));
+        assert!(title_of(previous_item(&entries, &(7..12))).is_none());
+        assert_eq!(title_of(next_item(&entries, &(0..6))), Some("語"));
     }
 
     // ---- drawing ---------------------------------------------------------
