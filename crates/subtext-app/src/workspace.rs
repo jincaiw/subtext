@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash as _, Hasher as _};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::AnyWindowHandle;
@@ -48,15 +48,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, App, AppContext as _, Context, ElementId, Entity, Focusable as _, FontWeight,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, WindowOptions,
-    div, hsla, px,
+    Anchor, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
+    FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
+    WindowOptions, div, hsla, px,
 };
 
 use subtext_core::{
-    Document, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder, multireplace,
-    textops,
+    Document, DroppedFile, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder,
+    imagesize, line_ending, multireplace, textops,
 };
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
@@ -67,9 +67,7 @@ use crate::folder_find::FolderFindPane;
 use crate::highlighter;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
-use crate::settings::{
-    DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SidebarPane,
-};
+use crate::settings::{DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SettingsPane, SidebarPane};
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
 
@@ -279,6 +277,14 @@ pub struct Workspace {
     _outline_selection: Subscription,
     /// The filter field's `Change` subscription.
     _outline_filter_changes: Subscription,
+    /// The syntax the *Insert Snippet* submenu and its key bindings were last
+    /// built for.
+    ///
+    /// Both are application-wide, and a snippet may belong to one syntax, so
+    /// both depend on which document is in front. CotEditor's `SnippetManager`
+    /// watches `currentSyntaxName` for the same reason; this is what tells the
+    /// workspace the watch has something to do.
+    snippets_built_for: Option<String>,
 }
 
 impl Workspace {
@@ -375,6 +381,7 @@ impl Workspace {
             _outline_expansion: outline_expansion,
             _outline_selection: outline_selection,
             _outline_filter_changes: outline_filter_changes,
+            snippets_built_for: None,
         };
         this.new_document(window, cx);
         this
@@ -422,6 +429,7 @@ impl Workspace {
             modified_on_disk: false,
         });
         self.active = self.documents.len() - 1;
+        self.refresh_snippets(cx);
         cx.notify();
     }
 
@@ -594,6 +602,7 @@ impl Workspace {
             .position(|doc| doc.document.path() == Some(path.as_path()))
         {
             self.active = index;
+            self.refresh_snippets(cx);
             cx.notify();
             return;
         }
@@ -782,6 +791,7 @@ impl Workspace {
         // Keep the selection on the same document where possible, and on the
         // neighbour that took its place when the closed one was selected.
         self.active = self.active.min(self.documents.len() - 1);
+        self.refresh_snippets(cx);
         cx.notify();
     }
 
@@ -1223,6 +1233,177 @@ impl Workspace {
         window.defer(cx, move |window, cx| {
             editor.update(cx, |state, cx| state.replace(text, window, cx));
         });
+    }
+
+    // ---- snippets ---------------------------------------------------------
+
+    /// Insert the snippet with this id over the selection.
+    ///
+    /// CotEditor's `insertSnippet(_:)`: expand the snippet against the selected
+    /// text and the indentation of the line the selection starts on, replace
+    /// the selection with the result, and leave the caret where the format's
+    /// `<<<CURSOR>>>` token was. Returns whether a snippet with that id exists,
+    /// which is what tells the menu dispatch that the command was recognised.
+    ///
+    /// The expansion itself is [`subtext_core::Snippet::insertion`], so the two
+    /// subtleties — indent before splitting, split before substituting — are
+    /// the ones the unit tests in `subtext-core` hold down.
+    pub fn insert_snippet(
+        &mut self,
+        id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(snippet) = self
+            .settings
+            .snippets
+            .iter()
+            .find(|snippet| snippet.id == id)
+        else {
+            return false;
+        };
+        let Some(document) = self.documents.get(self.active) else {
+            return false;
+        };
+        let editor = document.editor().clone();
+
+        // One read of the buffer answers both questions the expansion asks, and
+        // the buffer is the whole document: `EditorState::value` materialises
+        // it, so asking twice would copy it twice.
+        let (selected, start, indent) = {
+            let state = editor.read(cx);
+            let text = state.value().to_string();
+            let selection = state.selected_range();
+            let selected = text.get(selection.clone()).unwrap_or_default().to_string();
+            let indent = subtext_core::snippets::indent_at(&text, selection.start).to_string();
+            (selected, selection.start, indent)
+        };
+
+        let insertion = snippet.insertion(&selected, &indent);
+        let caret = start + insertion.caret();
+        let text = insertion.text;
+
+        // Deferred for the same reason the text operations are: `replace` emits
+        // `Change`, and the subscription that follows the buffer back into the
+        // document model must not run inside this update. `replace` rather than
+        // `set_value`, so ⌘Z undoes a snippet the way it undoes a keystroke.
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |state, cx| {
+                state.replace(text, window, cx);
+                state.set_selected_range(caret..caret, cx);
+            });
+        });
+        true
+    }
+
+    /// The active document's syntax name, or `None` when nothing is open.
+    ///
+    /// This is the `scope` a snippet is matched against, and the heading the
+    /// *Insert Snippet* submenu shows.
+    pub fn snippets_scope(&self) -> Option<&str> {
+        self.active_document().map(|document| document.syntax.as_ref())
+    }
+
+    /// Rebuild the snippet submenu and its key bindings, if the syntax the
+    /// frontmost document is in changed.
+    ///
+    /// Cheap to call from anywhere a document is opened, closed or switched:
+    /// the comparison is what makes it a no-op the rest of the time.
+    pub fn refresh_snippets(&mut self, cx: &mut Context<Self>) {
+        if self.snippets_built_for.as_deref() == self.snippets_scope() {
+            return;
+        }
+        self.rebuild_snippets(cx);
+    }
+
+    /// Rebuild the snippet submenu and its key bindings unconditionally.
+    ///
+    /// The settings pane calls this after the snippet list is edited, where the
+    /// scope has not moved but the items under it have.
+    pub fn rebuild_snippets(&mut self, cx: &mut Context<Self>) {
+        let scope = self.snippets_scope().map(str::to_string);
+        self.snippets_built_for = scope;
+        crate::snippets::install(cx, &self.settings.snippets, self.snippets_built_for.as_deref());
+    }
+
+    // ---- file drop --------------------------------------------------------
+
+    /// Insert the text the dropped files stand for.
+    ///
+    /// CotEditor's `editorTextView(_:readDroppedURLs:)`, in the same order: the
+    /// first file-drop item that answers to a dropped file's extension *and* to
+    /// the document's syntax expands it, and a file no item answers to
+    /// contributes its own absolute path — which is what a plain text view
+    /// would have inserted, and what upstream falls back to.
+    ///
+    /// Returns whether the drop was handled at all, which is what upstream's
+    /// delegate answer means. It is `true` for a drop that expands to nothing,
+    /// so that a file the user deliberately described as empty does not fall
+    /// through to the platform's own behaviour.
+    ///
+    /// Two things upstream does are absent here. A macOS `.textClipping` file
+    /// is unpacked by AppKit and has no counterpart on the other two platforms,
+    /// so it is not special-cased. And a dropped web address arrives as a
+    /// `PathBuf`, because that is what GPUI hands over, so it is treated as the
+    /// text of its own path rather than as a URL.
+    pub fn drop_files(
+        &mut self,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if paths.is_empty() || self.settings.file_drop.is_empty() {
+            return false;
+        }
+        let Some(document) = self.documents.get(self.active) else {
+            return false;
+        };
+        let editor = document.editor().clone();
+        let scope = document.syntax.to_string();
+        let document_path = document.document.path().map(Path::to_path_buf);
+        let ending = document.document.line_ending();
+
+        let mut text = String::new();
+        for path in paths {
+            let extension = path.extension().map(|part| part.to_string_lossy().into_owned());
+            let item = self
+                .settings
+                .file_drop
+                .iter()
+                .find(|item| item.supports(extension.as_deref(), Some(&scope)));
+
+            let Some(item) = item else {
+                if !text.is_empty() {
+                    text.push_str(ending.as_str());
+                }
+                text.push_str(&path.to_string_lossy());
+                continue;
+            };
+
+            // The two things that need the file itself are read only when the
+            // format asks for them, so dropping a folder of pictures into a
+            // Markdown document does not read any of them.
+            let mut file = DroppedFile::new(path, document_path.as_deref());
+            if item.needs_content() {
+                file = file.with_content(std::fs::read_to_string(path).ok());
+            }
+            if item.needs_image_size() {
+                file = file.with_image_size(imagesize::read(path));
+            }
+            text.push_str(&item.drop_text(&file));
+        }
+
+        if text.is_empty() {
+            return true;
+        }
+
+        // The format's own line breaks are the user's; which of them the file
+        // uses is the document's.
+        let text = line_ending::convert(&text, ending);
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |state, cx| state.replace(text, window, cx));
+        });
+        true
     }
 
     fn set_selection(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
@@ -1793,6 +1974,9 @@ impl Workspace {
         for editor in document.editors() {
             editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
         }
+        // A snippet may be limited to one syntax, so the submenu's contents
+        // follow the document's.
+        self.refresh_snippets(cx);
         self.set_status(format!("Syntax: {name}"), cx);
     }
 
@@ -2006,26 +2190,81 @@ impl Workspace {
 
     /// Open the settings window, or bring the existing one forward.
     pub fn toggle_settings(&mut self, cx: &mut Context<Self>) {
+        self.open_settings(None, cx);
+    }
+
+    /// Show the settings window, on a particular pane.
+    ///
+    /// *Edit Snippets…* uses this: the command lives in the menu bar, but what
+    /// it opens is one pane of the settings window. CotEditor reaches it the
+    /// same way — `SnippetManager` asks the settings window controller to come
+    /// forward on the Snippets pane.
+    pub fn show_settings_pane(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
+        self.open_settings(Some(pane), cx);
+    }
+
+    /// Bring the settings window forward, opening it if it is not up.
+    ///
+    /// `pane` is `None` when the caller does not care which pane is showing,
+    /// which is the plain Settings… command: moving a window the user has
+    /// already arranged would be a surprise.
+    fn open_settings(&mut self, pane: Option<SettingsPane>, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            // `downcast` is how a handle that has been stored as *any* window
+            // becomes one whose root view this module knows the type of; a
+            // handle for a window that has since been reused for something else
+            // fails it and is dropped.
+            let shown = handle
+                .downcast::<SettingsWindow>()
+                .is_some_and(|handle| {
+                    handle
+                        .update(cx, |settings, window, cx| {
+                            window.activate_window();
+                            if let Some(pane) = pane {
+                                settings.show(pane, cx);
+                            }
+                        })
+                        .is_ok()
+                });
+            if shown {
                 return;
             }
             self.settings_window = None;
         }
 
-        let workspace = cx.entity().downgrade();
+        let workspace = cx.entity();
+        let weak = workspace.downgrade();
         let options = WindowOptions {
             // Platform window geometry, not design scale: a minimum window size
             // is a constraint on the OS window, so it stays in pixels.
             window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
             ..Default::default()
         };
-        match cx.open_window(options, move |window, cx| {
-            cx.new(|cx| SettingsWindow::new(workspace, window, cx))
-        }) {
-            Ok(handle) => self.settings_window = Some(handle.into()),
-            Err(error) => self.set_status(error.to_string(), cx),
-        }
+
+        // The settings window reads the settings and the syntax list *through*
+        // this workspace — it holds a weak handle rather than a copy, so that
+        // there is only ever one source of truth. But `open_window` builds and
+        // draws the new root view before it returns, and every command that
+        // reaches here is dispatched from inside `Workspace::update`, which has
+        // the workspace leased and therefore unreadable. Deferring the whole
+        // thing to the end of the effect cycle is what makes the read legal:
+        // by then the update has returned and the workspace is back in the
+        // entity map. Opening a window is not something the caller waits on, so
+        // nothing is lost by it happening a moment later.
+        cx.defer(move |cx| {
+            // Nothing to attach the window to if the workspace has gone.
+            if weak.upgrade().is_none() {
+                return;
+            }
+            let root = weak.clone();
+            let opened = cx.open_window(options, move |window, cx| {
+                cx.new(|cx| SettingsWindow::new(root, pane, window, cx))
+            });
+            workspace.update(cx, |workspace, cx| match opened {
+                Ok(handle) => workspace.settings_window = Some(handle.into()),
+                Err(error) => workspace.set_status(error.to_string(), cx),
+            });
+        });
     }
 
     pub fn show_about(&mut self, cx: &mut Context<Self>) {
@@ -2177,6 +2416,7 @@ impl Workspace {
                     .on_click(cx.listener(|this, index, _, cx| {
                         if *index < this.documents.len() {
                             this.active = *index;
+                            this.refresh_snippets(cx);
                             cx.notify();
                         }
                     })),
@@ -2933,6 +3173,13 @@ impl Workspace {
             .enumerate()
             .map(|(pane, editor)| {
                 let editor = editor.clone();
+                // The drop is handled by the pane the pointer is over, not by
+                // the focused one: dragging a file onto the right-hand editor
+                // should put it there. The workspace then decides what to
+                // insert, and `drop_files` reads the *active* pane's buffer, so
+                // the click that a drop begins with has already moved the focus
+                // — the same ordering CotEditor relies on.
+                let workspace = cx.entity().downgrade();
                 div()
                     .id(ElementId::NamedInteger("editor-pane".into(), (document_id.0 << 8) | pane as u64))
                     .flex_1()
@@ -2943,6 +3190,13 @@ impl Workspace {
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| this.focus_pane(pane, window, cx)),
                     )
+                    .on_drop::<ExternalPaths>(move |paths, _, cx| {
+                        workspace
+                            .update_in(cx, |workspace, window, cx| {
+                                workspace.drop_files(paths.0.as_slice(), window, cx);
+                            })
+                            .ok();
+                    })
                     .child(
                         // `Editor`, not `Input`: the styled code editor, whose
                         // state carries line numbers, folding and the

@@ -188,6 +188,20 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 **同轮发现的错误**：`gpui_kit::relative()` 是上一轮凭空写出的名字，并不存在；
 正确的辅助函数是 `rems()`。11 处调用全部改正，详见审计报告 §11.1。
 
+**8.7d 期间发现的崩溃（已修）**：打开设置窗口会 panic ——
+`cannot read subtext_app::workspace::Workspace while it is already being updated`。
+根因是开窗路径：Settings… 与 *Edit Snippets…* 都在 `Workspace::update` 里派发，
+而 `App::open_window` **在返回前就构造并绘制**新窗口的根视图
+（`gpui-pre/src/app.rs:1500-1513`，其中 `window.draw(cx)` 会把 `Render::render` 跑一遍），
+于是 `SettingsWindow::new` 的 `workspace.read_with(..)` 与首帧渲染里的
+`self.settings(cx)` 都在读一个正被 lease 的实体。改成把整个开窗动作
+`cx.defer` 到本轮 effect 周期末尾：`update_entity_erased` 在 `App::update` 的闭包内部
+就调了 `end_lease`，`flush_effects` 则在最外层 update 结束时才跑，所以那时 workspace
+已经回到实体表里，读它是合法的。开窗本来也不是调用方要等的事，晚一拍没有代价。
+
+这个 bug 从阶段 7.8 重写设置窗口起就存在，一直没被触发过——因为此前所有验证都只
+启动了主窗口，从没真正打开过设置窗口。8.7d 的冒烟第一次把它踩了出来。
+
 ## 阶段 8 — 补齐高价值缺失功能 ⏳
 
 从 [FEATURE-MATRIX](FEATURE-MATRIX.md) 的 39 项未实现中，按「用户可感知收益 ÷ 工作量」排序：
@@ -201,7 +215,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.4 | 颜色代码编辑 | `ColorPicker` 组件已提供 | ✅ |
 | 8.5 | 按模式排序 | 纯逻辑，`subtext-core` 可测 | ✅ |
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
-| 8.7 | 代码片段 | 需要编辑器与存储 | ⏳ |
+| 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ⏳ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
@@ -638,10 +652,98 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 6. *Highlight All* 只报告命中数并把范围交给查找栏，不绘制高亮——与 SubText 的
    *Find All* 现状一致（编辑器目前没有搜索高亮的绘制通道）。
 
+### 8.7 代码片段（Snippets）✅
+
+上游的代码片段有两条独立的通路，本轮两条都做：
+
+1. ***Text ▸ Insert Snippet* 子菜单**（`SnippetManager.swift` + `Snippet.swift`）：
+   用户在设置里维护一张表，每行是「名字 / 可选语法范围 / 可选快捷键 / 插入格式」，
+   格式里的 `<<<SELECTION>>>` 与 `<<<CURSOR>>>` 由文档在插入时填。
+2. **文件拖放**（`FileDropItem.swift`）：另一张表，每行是「语法 / 扩展名 / 描述 /
+   格式」，格式里是 11 个令牌之一，把一个拖进来的文件变成一段文本。
+
+分五块落地：
+
+**8.7a 片段模型**（`subtext-core/src/snippets.rs`，1060 行）
+- `Snippet`（`id` / `name` / `scope` / `shortcut` / `format`）与上游字段一一对应；
+- `Shortcut` 支持上游的三种拼写（`key-spec` / Cocoa 符号串 / 键盘词），
+  `parse` **不做 trim**（上游也不做——多一个空格就是另一个组合）；
+- `Rejection` 复刻 `Shortcut+Error.swift` 的四种拒绝，文案逐字一致；
+  `Shortcut::rejection()` 的检查顺序也是上游的（Tab/Backtab/Shift-Return →
+  `unsupported`；Shift+字母 → `shiftOnlyModifier`；`!is_valid` → `singleType`；
+  其余交给调用方查「已被占用」）；
+- `Sections` 复刻 `SnippetManager.updateMenu`：无范围片段在前、加分隔线，
+  然后按范围分节；**无范围片段的快捷键若与某个范围片段相同则不显示**；
+- `Variable` 是 `<<<SELECTION>>>` / `<<<CURSOR>>>` 两个令牌的名字与描述。
+- **两处顺序上的坑**（都有测试盯着）：先按行首缩进给格式加缩进、再切分行；
+  以及**先切分 `<<<CURSOR>>>`、后替换 `<<<SELECTION>>>`**——反过来的话，
+  选中文本里恰好含有的 `<<<CURSOR>>>` 会被当成标记，把光标塞进用户选中的内容中间。
+- **不移植**：上游 `insertions(for:ranges:)` 的多选区版本。SubText 的编辑器只有一个
+  选区，只移植单选区形式 `Snippet::insertion`。
+
+**8.7b 存储与菜单接线**（`crates/subtext-app/src/snippets.rs`）
+片段是**用户数据**，而菜单栏与键位表都在打开任何文档之前就建好了，两者都没法预先
+指名一个用户还没写出来的条目。所以 `install()` 每次重算：清空键位表、铺回内置绑定、
+再加上片段自己的，最后把带子菜单的整张菜单表设回去。之所以敢这么做，是因为 GPUI
+的 keymap 没有「只摘掉某几条」的能力，而两张表都不大（72 条绑定、258 个菜单项）。
+- 子菜单只显示适用于当前文档语法的片段，所以 `refresh_snippets()` 在文档打开、
+  关闭、切换时都会被调一次——**比较范围相等就直接返回**，因此平时是空操作；
+- 设置面板改完片段列表后调 `rebuild_snippets()`，那里范围没动但条目动了；
+- 手工编辑过的设置文件仍可能塞进一个与菜单冲突的快捷键，`install()` 会把它丢掉：
+  片段绝不能抢走 ⌘S、⌘F 已经在应答的键。
+
+**8.7c 插入到编辑器**（`Workspace::insert_snippet`）
+按上游 `insertSnippet(_:)` 的顺序：对选中文本与选区起始行的缩进展开片段、替换选区、
+把光标留在 `<<<CURSOR>>>` 处。写回走 `window.defer` + `replace`（不是 `set_value`），
+所以 **⌘Z 能像撤销一次按键那样撤销一次片段插入**。
+
+**8.7d 设置窗口的 Snippets 面板**（`crates/subtext-app/src/snippet_pane.rs` + `settings_window.rs`）
+复刻 `SnippetsSettingsView.swift`：`TabView` 两个页签（Command / File Drop，
+固定高 380pt → 23.75rem），各一张三列表格 + 增删按钮 + 表下高 100pt 的插入格式编辑器。
+- 每行是独立 entity，行的字段**就是**它的 `InputState`，所以打字只重绘这一行；
+- 格式编辑器由面板持有而非行持有（上游也是「表下单独一个编辑器」），
+  只在选中行变化时重新载入，避免打字与回写互相打架；
+- `SyntaxPicker` → `Button` + 下拉菜单，首项 `All`；
+- `AddRemoveButton` → `+` / `−` 幽灵按钮，**`+` 插到最后一个选中行之后**并选中新项，
+  `−` 删掉全部选中项，无选中时禁用；新行名字用上游的 `appendingUniqueNumber`
+  （`Untitled` → `Untitled 2` → `Untitled 3`…）；
+- `Insert Variable` 菜单插入令牌：Command 页签列 `SELECTION` / `CURSOR`，
+  File Drop 页签按 *pathTokens* / *Text File* / *Image File* 三组列 11 个令牌；
+- 快捷键录制用**可聚焦 `div` + `capture_key_down`**：`capture` 阶段先于 keymap 匹配，
+  所以一个已经被菜单占用的组合（例如 ⌘S）仍能录下来，然后按上游的文案报冲突。
+  Esc 取消、Delete 清空、有冲突则回滚并留在录制态——与 `ShortcutField.swift` 一致。
+
+**8.7f 文件拖放**（`subtext-core/src/filedrop.rs` + `imagesize.rs`）
+- 11 个令牌、替换顺序、匹配规则（扩展名 + 语法）都与上游一致，所以为 CotEditor 写的
+  格式在这里插入同样的文本；
+- `<<<FILECONTENT>>>` 与 `<<<IMAGEWIDTH>>>`/`<<<IMAGEHEIGHT>>>` **按需读取**：
+  `needs_content()` / `needs_image_size()` 说不需要就不碰磁盘，与上游的懒加载一致；
+- 尺寸读取是自己解文件头（PNG / GIF / JPEG / BMP / WebP 五种），因为 SubText 没有
+  图像库。读不出来的格式返回 `None`，令牌原样留在文本里——上游对 ImageIO 读不了的
+  图片也是这个行为。
+- 没有任何条目应答的文件，插入它自己的绝对路径——这正是上游的兜底，也是纯文本
+  视图本来会插入的东西。
+
+**已知偏差（记账）**：
+
+1. **「Multiple items selected」文案不可达**。上游在选中多行时把格式编辑器整体禁用并
+   提示这句；本实现的表格是**单选**（点一行即换选中），所以只剩「未选中 → No item
+   selected」这一种禁用态。要复刻多选得给表格加一个多选模型，收益不抵成本。
+2. `ShortcutField` 用 `capture_key_down` 而非 `NSEvent.addLocalMonitorForEvents`。
+   两者在「先于 keymap 拿到按键」这一点上等价，但前者是 GPUI 的原生机制，跨平台。
+3. 片段与文件拖放列表**存进 `Settings.json`**（`snippets` / `file_drop` 两个字段），
+   上游存 `UserDefaults`。字段名与形状对齐到可读的 JSON：上游把扩展名存成一个逗号
+   分隔的字符串（那是 `UserDefaults` 字典的遗留），这里存字符串数组，面板里仍按
+   逗号分隔的输入框呈现——因为那就是用户敲进去的样子。
+4. `<<<IMAGEHEIGHT>>>` 等尺寸令牌只覆盖五种格式；上游借 ImageIO 覆盖系统认识的
+   全部格式。未覆盖的格式令牌原样保留。
+5. 拖放只处理应用内的 `ExternalPaths`；macOS 的 `.textClipping` 没有对应物，不特判；
+   拖进来的网址在 GPUI 里就是一个 `PathBuf`，按路径文本处理而非 URL。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（296 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（385 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |

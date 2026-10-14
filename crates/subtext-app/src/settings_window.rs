@@ -28,17 +28,21 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
+    input::{Textarea, TextareaState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     radio::RadioGroup,
     tab::{Tab, TabBar},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px, rems,
+    Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, rems,
 };
 
+use subtext_core::filedrop::FileDropItem;
+use subtext_core::snippets::Snippet;
 use subtext_core::{LineEnding, TextEncoding, encoding};
 
 use crate::keymap;
@@ -46,26 +50,120 @@ use crate::settings::{
     DocumentAppearance, DocumentConflictOption, EditOptions, FontType, NoDocumentOnLaunchOption,
     Settings, SettingsPane, WindowTabbing, WritingDirection,
 };
+use crate::snippet_pane::{
+    CommandColumn, FileDropColumn, FileDropRow, SnippetRow, Tab as SnippetTab, header, unique_name,
+};
 use crate::workspace::Workspace;
 
 /// How wide the label column of a settings row is, in rem.
 const LABEL_COLUMN: f32 = 12.;
+
+/// How tall the Snippets pane's tab body is, in rem.
+///
+/// Upstream gives its `TabView` a fixed 380 points, which is what keeps the
+/// table, the buttons and the insertion-format editor in the same places on
+/// both tabs.
+const SNIPPETS_TAB_HEIGHT: f32 = 23.75;
+
+/// How tall the insertion-format editor is, in rem — upstream's 100 points.
+const FORMAT_EDITOR_HEIGHT: f32 = 6.25;
 
 pub struct SettingsWindow {
     workspace: WeakEntity<Workspace>,
     pane: SettingsPane,
     /// Which tab of the Snippets pane is showing.
     snippet_tab: usize,
+    /// The Command table's rows, in menu order.
+    snippets: Vec<Entity<SnippetRow>>,
+    snippet_selection: Option<u64>,
+    /// The File Drop table's rows, in matching order.
+    file_drop: Vec<Entity<FileDropRow>>,
+    file_drop_selection: Option<u64>,
+    /// The insertion-format editor of each tab.
+    ///
+    /// Upstream edits the selected item's format in one editor under the table
+    /// rather than in the row, so each tab has one of these and the rows hold
+    /// their formats as plain data.
+    snippet_format: Entity<TextareaState>,
+    file_drop_format: Entity<TextareaState>,
+    /// Which row the format editor is currently holding.
+    ///
+    /// The editor reloads only when this changes, so typing does not fight the
+    /// value the pane is about to push back into it. The two tables share the
+    /// field because their row ids come from one counter and so cannot collide.
+    format_owner: Option<u64>,
+    /// The last shortcut refusal, which upstream shows beside the buttons.
+    snippet_error: Option<String>,
+    /// Row identity for both tables, monotonic for the life of the window.
+    next_row_id: u64,
+    _format_subscriptions: Vec<Subscription>,
 }
 
 impl SettingsWindow {
     pub fn new(
         workspace: WeakEntity<Workspace>,
+        pane: Option<SettingsPane>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let _ = (window, cx);
-        Self { workspace, pane: SettingsPane::default(), snippet_tab: 0 }
+        let settings = workspace
+            .read_with(cx, |workspace, _| workspace.settings.clone())
+            .unwrap_or_default();
+
+        let snippet_format = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Text to insert, with <<<SELECTION>>> and <<<CURSOR>>> in it")
+        });
+        let file_drop_format = cx.new(|cx| {
+            TextareaState::new(window, cx).placeholder("Text to insert when a file is dropped")
+        });
+
+        let mut this = Self {
+            workspace,
+            pane: pane.unwrap_or_default(),
+            snippet_tab: 0,
+            snippets: Vec::new(),
+            snippet_selection: None,
+            file_drop: Vec::new(),
+            file_drop_selection: None,
+            snippet_format: snippet_format.clone(),
+            file_drop_format: file_drop_format.clone(),
+            format_owner: None,
+            snippet_error: None,
+            next_row_id: 1,
+            _format_subscriptions: Vec::new(),
+        };
+
+        for snippet in settings.snippets {
+            let id = this.take_row_id();
+            let pane = cx.weak_entity();
+            let row = cx.new(|cx| SnippetRow::new(id, pane, snippet, window, cx));
+            this.snippets.push(row);
+        }
+        for item in settings.file_drop {
+            let id = this.take_row_id();
+            let pane = cx.weak_entity();
+            let row = cx.new(|cx| FileDropRow::new(id, pane, item, window, cx));
+            this.file_drop.push(row);
+        }
+
+        // Upstream opens on the first row of each table, so the format editor
+        // has something to show straight away.
+        this.snippet_selection = this.snippets.first().map(|row| row.read(cx).id());
+        this.file_drop_selection = this.file_drop.first().map(|row| row.read(cx).id());
+
+        this._format_subscriptions = vec![
+            cx.subscribe_in(&snippet_format, window, Self::on_format_change),
+            cx.subscribe_in(&file_drop_format, window, Self::on_format_change),
+        ];
+        this.sync_rows(cx);
+        this
+    }
+
+    /// Move to `pane`, which is what *Edit Snippets…* asks for.
+    pub fn show(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
+        self.pane = pane;
+        cx.notify();
     }
 
     /// The settings as they stand, read through the workspace.
@@ -127,7 +225,7 @@ impl Render for SettingsWindow {
             SettingsPane::Edit => self.render_edit(&settings, cx),
             SettingsPane::Mode => self.render_mode(&settings, cx),
             SettingsPane::Format => self.render_format(&settings, cx),
-            SettingsPane::Snippets => self.render_snippets(cx),
+            SettingsPane::Snippets => self.render_snippets(window, cx),
             SettingsPane::Shortcuts => self.render_shortcuts(cx),
             SettingsPane::Integration => self.render_integration(&settings, cx),
         };
@@ -1020,13 +1118,22 @@ impl SettingsWindow {
 
     // ---- Snippets --------------------------------------------------------
 
-    /// The Snippets pane. CotEditor splits it into Command and File Drop tabs;
-    /// SubText has no snippet store yet, so both tabs show their real empty
-    /// state rather than invented content.
-    fn render_snippets(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = ["Command", "File Drop"]
+    /// The Snippets pane: two tables over one insertion-format editor.
+    ///
+    /// CotEditor's `SnippetsSettingsView`, whose `TabView` holds a
+    /// `CommandSnippetsView` and a `FileDropView`. The two are the same shape —
+    /// an explanatory line, a three-column table, an add/remove pair, and the
+    /// editor for the selected item's format — and differ in what the columns
+    /// hold and in what sits at the right-hand end of the button row: the last
+    /// shortcut refusal on one, *Restore Defaults* on the other.
+    fn render_snippets(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.sync_format_editor(window, cx);
+
+        let tab = if self.snippet_tab == 0 { SnippetTab::Command } else { SnippetTab::FileDrop };
+
+        let tabs = [SnippetTab::Command, SnippetTab::FileDrop]
             .into_iter()
-            .map(|label| Tab::new().label(label))
+            .map(|tab| Tab::new().label(tab.label()))
             .collect::<Vec<_>>();
 
         let tab_bar = TabBar::new("snippet-tabs")
@@ -1039,42 +1146,575 @@ impl SettingsWindow {
                 cx.notify();
             }));
 
-        let (intro, empty) = if self.snippet_tab == 0 {
-            (
-                "Text to be inserted by a command in the menu or by keyboard shortcut:",
-                "No snippets yet. CotEditor stores these under its application-support \
-                 directory; SubText reads the same file, but the editor for it has not been built.",
+        let (rows, selection, empty): (Vec<AnyElement>, Option<u64>, &str) = match tab {
+            SnippetTab::Command => (
+                self.snippets.iter().map(|row| row.clone().into_any_element()).collect(),
+                self.snippet_selection,
+                "No snippets yet. Add one to insert its text from the Insert Snippet submenu \
+                 or from a key equivalent.",
+            ),
+            SnippetTab::FileDrop => (
+                self.file_drop.iter().map(|row| row.clone().into_any_element()).collect(),
+                self.file_drop_selection,
+                "No file-drop settings yet. Add one to describe what dropping a file onto \
+                 the editor inserts.",
+            ),
+        };
+
+        let header = match tab {
+            SnippetTab::Command => header(
+                CommandColumn::ALL.iter().map(|column| (column.label(), column.width())),
+                cx,
             )
-        } else {
-            (
-                "Files you can drop onto the editor to insert a path:",
-                "No file-drop definitions yet. As with Command snippets, SubText reads \
-                 CotEditor's file but the editor for it has not been built.",
+            .into_any_element(),
+            SnippetTab::FileDrop => header(
+                FileDropColumn::ALL.iter().map(|column| (column.label(), column.width())),
+                cx,
             )
+            .into_any_element(),
         };
 
         let table = v_flex()
             .id("snippet-table")
-            .gap_0p5()
-            .p_2()
-            .h(rems(20.))
+            .w_full()
+            .flex_1()
+            .min_h(rems(6.))
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(note(empty, cx));
+            .child(header)
+            .child(
+                v_flex()
+                    .id("snippet-rows")
+                    .w_full()
+                    .flex_1()
+                    .min_h(rems(0.))
+                    .overflow_y_scroll()
+                    .py_1()
+                    .when(rows.is_empty(), |this| this.child(div().px_2().child(note(empty, cx))))
+                    .children(rows),
+            );
 
         v_flex()
             .gap_3()
             .child(tab_bar)
-            .child(note(intro, cx))
-            .child(table)
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(Button::new("snippet-add").small().label("Add").disabled(true))
-                    .child(Button::new("snippet-remove").small().label("Remove").disabled(true)),
+                v_flex()
+                    .h(rems(SNIPPETS_TAB_HEIGHT))
+                    .gap_3()
+                    .child(note(tab.intro(), cx))
+                    .child(table)
+                    .child(self.render_snippet_buttons(tab, selection, cx))
+                    .child(self.render_format_editor(tab, selection, cx)),
             )
             .into_any_element()
+    }
+
+    /// The row under the table: *Add* and *Delete*, and what sits at the far
+    /// end of them.
+    fn render_snippet_buttons(
+        &self,
+        tab: SnippetTab,
+        selection: Option<u64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let add = cx.listener(move |this, _, window, cx| match tab {
+            SnippetTab::Command => this.add_snippet(window, cx),
+            SnippetTab::FileDrop => this.add_file_drop(window, cx),
+        });
+        let remove = cx.listener(move |this, _, _, cx| match tab {
+            SnippetTab::Command => this.remove_snippet(cx),
+            SnippetTab::FileDrop => this.remove_file_drop(cx),
+        });
+
+        h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(
+                Button::new(ElementId::Name(SharedString::from(format!("snippet-add-{tab:?}"))))
+                    .ghost()
+                    .small()
+                    .icon(gpui_kit::assets::IconName::Plus)
+                    .accessibility_label("Add")
+                    .tooltip("Add new item")
+                    .on_click(add),
+            )
+            .child(
+                Button::new(ElementId::Name(SharedString::from(format!("snippet-delete-{tab:?}"))))
+                    .ghost()
+                    .small()
+                    .icon(gpui_kit::assets::IconName::Minus)
+                    .accessibility_label("Delete")
+                    .tooltip("Delete selected items")
+                    .disabled(selection.is_none())
+                    .on_click(remove),
+            )
+            .child(div().flex_1())
+            .when(tab == SnippetTab::Command, |this| {
+                this.when_some(self.snippet_error.clone(), |this, error| {
+                    this.child(div().text_xs().text_color(cx.theme().danger).child(error))
+                })
+            })
+            .when(tab == SnippetTab::FileDrop, |this| {
+                this.child(
+                    Button::new("file-drop-restore-defaults")
+                        .small()
+                        .label("Restore Defaults")
+                        .tooltip("Put the file-drop settings back to the ones CotEditor ships.")
+                        .disabled(!self.can_restore_file_drop(cx))
+                        .on_click(cx.listener(|this, _, window, cx| this.restore_file_drop(window, cx))),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The insertion-format editor, which upstream calls
+    /// `InsertionFormatView`.
+    ///
+    /// Disabled unless exactly one row is selected, because a format belongs to
+    /// one item; the prompt says why. Upstream can also say *Multiple items
+    /// selected*, which cannot happen here — see the deviation note in
+    /// `docs/PLAN.md`.
+    fn render_format_editor(
+        &self,
+        tab: SnippetTab,
+        selection: Option<u64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let editor = match tab {
+            SnippetTab::Command => self.snippet_format.clone(),
+            SnippetTab::FileDrop => self.file_drop_format.clone(),
+        };
+        let disabled = selection.is_none();
+
+        let header = h_flex()
+            .w_full()
+            .items_end()
+            .gap_2()
+            .child(div().text_sm().child("Insertion format:"))
+            .child(div().flex_1())
+            .child(self.render_variable_menu(tab, disabled, cx));
+
+        let body = div()
+            .relative()
+            .w_full()
+            .h(rems(FORMAT_EDITOR_HEIGHT))
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .overflow_hidden()
+            .child(
+                Textarea::new(&editor)
+                    .bordered(false)
+                    .h(rems(FORMAT_EDITOR_HEIGHT))
+                    .disabled(disabled)
+                    .aria_label("Insertion format"),
+            )
+            .when(disabled, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No item selected"),
+                        ),
+                )
+            });
+
+        v_flex().w_full().gap_2().child(header).child(body).into_any_element()
+    }
+
+    /// The *Insert Variable* menu, which inserts a token at the caret.
+    ///
+    /// Upstream's `InsertionMenuContent`: each entry shows the variable's name
+    /// and, under it, what it stands for. The File Drop menu is three groups —
+    /// the path tokens with no heading, then *Text File* and *Image File* —
+    /// which is the shape `Section` gives it there and a label item gives it
+    /// here.
+    fn render_variable_menu(
+        &self,
+        tab: SnippetTab,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let editor = match tab {
+            SnippetTab::Command => self.snippet_format.clone(),
+            SnippetTab::FileDrop => self.file_drop_format.clone(),
+        };
+        let pane = cx.entity().downgrade();
+
+        Button::new(ElementId::Name(SharedString::from(format!("insert-variable-{tab:?}"))))
+            .ghost()
+            .small()
+            .label("Insert Variable")
+            .tooltip("Insert a variable into the insertion format.")
+            .disabled(disabled)
+            .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
+                let mut menu = menu;
+                match tab {
+                    SnippetTab::Command => {
+                        for variable in subtext_core::snippets::Variable::ALL {
+                            menu = menu.item(variable_item(
+                                variable.name(),
+                                variable.description(),
+                                variable.token(),
+                                &editor,
+                                &pane,
+                            ));
+                        }
+                    }
+                    SnippetTab::FileDrop => {
+                        for (heading, group) in [
+                            (None, subtext_core::filedrop::Variable::PATH.as_slice()),
+                            (Some("Text File"), subtext_core::filedrop::Variable::TEXT.as_slice()),
+                            (Some("Image File"), subtext_core::filedrop::Variable::IMAGE.as_slice()),
+                        ] {
+                            if let Some(heading) = heading {
+                                menu = menu.separator().label(heading);
+                            }
+                            for variable in group {
+                                menu = menu.item(variable_item(
+                                    variable.name(),
+                                    variable.description(),
+                                    variable.token(),
+                                    &editor,
+                                    &pane,
+                                ));
+                            }
+                        }
+                    }
+                }
+                menu
+            })
+            .into_any_element()
+    }
+
+    // ---- the snippet tables ----------------------------------------------
+
+    /// Row identity for both tables.
+    fn take_row_id(&mut self) -> u64 {
+        let id = self.next_row_id;
+        self.next_row_id += 1;
+        id
+    }
+
+    /// The syntaxes the rows' pickers offer.
+    fn syntax_names(&self, cx: &App) -> Vec<String> {
+        self.workspace
+            .read_with(cx, |workspace, _| workspace.syntax_names())
+            .unwrap_or_default()
+    }
+
+    /// Push the syntax list and the selection into every row.
+    fn sync_rows(&self, cx: &mut Context<Self>) {
+        let syntaxes = Rc::new(self.syntax_names(cx));
+        for row in &self.snippets {
+            let id = row.read(cx).id();
+            let state = crate::snippet_pane::row_state(&syntaxes, self.snippet_selection == Some(id));
+            row.update(cx, |row, cx| row.sync(state, cx));
+        }
+        for row in &self.file_drop {
+            let id = row.read(cx).id();
+            let state =
+                crate::snippet_pane::row_state(&syntaxes, self.file_drop_selection == Some(id));
+            row.update(cx, |row, cx| row.sync(state, cx));
+        }
+    }
+
+    /// Select a row, which is what clicking one does.
+    pub fn select_row(&mut self, tab: SnippetTab, id: u64, cx: &mut Context<Self>) {
+        let slot = match tab {
+            SnippetTab::Command => &mut self.snippet_selection,
+            SnippetTab::FileDrop => &mut self.file_drop_selection,
+        };
+        if *slot == Some(id) {
+            return;
+        }
+        *slot = Some(id);
+        self.sync_rows(cx);
+        cx.notify();
+    }
+
+    /// A Command row has changed; the settings and the menu follow it.
+    ///
+    /// The rows are read back rather than handed in, which is safe because a
+    /// subscription handler runs as an effect — after the row's own update has
+    /// ended. The error is recomputed here rather than pushed, so a row that
+    /// was loaded from a hand-edited settings file with a conflicting shortcut
+    /// shows it as soon as the pane opens.
+    pub fn snippets_edited(&mut self, cx: &mut Context<Self>) {
+        self.snippet_error =
+            self.snippets.iter().find_map(|row| row.read(cx).error().map(str::to_string));
+        self.commit_snippets(cx);
+    }
+
+    /// The same for the File Drop table, which has no error to show.
+    pub fn file_drop_edited(&mut self, cx: &mut Context<Self>) {
+        self.commit_file_drop(cx);
+    }
+
+    /// Write the snippet list back, and rebuild the menu and key map from it.
+    fn edit_snippets(&self, cx: &mut App, apply: impl FnOnce(&mut Settings) + 'static) {
+        self.edit_snippets_and(cx, apply, true);
+    }
+
+    fn edit_file_drop(&self, cx: &mut App, apply: impl FnOnce(&mut Settings) + 'static) {
+        self.edit_snippets_and(cx, apply, false);
+    }
+
+    /// Run `apply`, save, and rebuild what depends on it.
+    ///
+    /// The snippet list is what the *Insert Snippet* submenu and its key
+    /// equivalents are built from, so a change to it has to reach both; the
+    /// file-drop list is read only when a file is dropped, so it needs the save
+    /// and nothing else.
+    fn edit_snippets_and(
+        &self,
+        cx: &mut App,
+        apply: impl FnOnce(&mut Settings) + 'static,
+        rebuild_menu: bool,
+    ) {
+        let mut apply = Some(apply);
+        self.workspace
+            .update_in(cx, move |workspace, window, cx| {
+                if let Some(apply) = apply.take() {
+                    apply(&mut workspace.settings);
+                }
+                workspace.apply_settings(window, cx);
+                if rebuild_menu {
+                    workspace.rebuild_snippets(cx);
+                }
+            })
+            .ok();
+    }
+
+    /// *Add* on the Command tab.
+    ///
+    /// The name is upstream's: *Untitled*, with the smallest number that is
+    /// free. The row goes after the last selected one, or at the end when
+    /// nothing is selected — upstream's own placement.
+    fn add_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let taken: Vec<String> = self.snippets.iter().map(|row| row.read(cx).name(cx)).collect();
+        let id = self.take_row_id();
+        let snippet = Snippet::new(id, unique_name("Untitled", &taken));
+        let pane = cx.weak_entity();
+        let row = cx.new(|cx| SnippetRow::new(id, pane, snippet, window, cx));
+
+        let at = self
+            .snippet_selection
+            .and_then(|selected| {
+                self.snippets.iter().position(|row| row.read(cx).id() == selected)
+            })
+            .map_or(self.snippets.len(), |index| index + 1);
+        self.snippets.insert(at, row.clone());
+        self.snippet_selection = Some(id);
+        self.snippet_error = None;
+        self.sync_rows(cx);
+        self.commit_snippets(cx);
+        row.update(cx, |row, cx| row.focus_name(window, cx));
+        cx.notify();
+    }
+
+    /// *Delete* on the Command tab, which clears the selection afterwards.
+    fn remove_snippet(&mut self, cx: &mut Context<Self>) {
+        let Some(selected) = self.snippet_selection else {
+            return;
+        };
+        let Some(index) = self
+            .snippets
+            .iter()
+            .position(|row| row.read(cx).id() == selected)
+        else {
+            return;
+        };
+        self.snippets.remove(index);
+        self.snippet_selection = None;
+        self.snippet_error = None;
+        self.sync_rows(cx);
+        self.commit_snippets(cx);
+        cx.notify();
+    }
+
+    /// *Add* on the File Drop tab: a blank item, at the same place.
+    fn add_file_drop(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let id = self.take_row_id();
+        let pane = cx.weak_entity();
+        let row = cx.new(|cx| FileDropRow::new(id, pane, FileDropItem::new(), _window, cx));
+
+        let at = self
+            .file_drop_selection
+            .and_then(|selected| {
+                self.file_drop.iter().position(|row| row.read(cx).id() == selected)
+            })
+            .map_or(self.file_drop.len(), |index| index + 1);
+        self.file_drop.insert(at, row);
+        self.file_drop_selection = Some(id);
+        self.sync_rows(cx);
+        self.commit_file_drop(cx);
+        cx.notify();
+    }
+
+    /// *Delete* on the File Drop tab.
+    fn remove_file_drop(&mut self, cx: &mut Context<Self>) {
+        let Some(selected) = self.file_drop_selection else {
+            return;
+        };
+        let Some(index) = self
+            .file_drop
+            .iter()
+            .position(|row| row.read(cx).id() == selected)
+        else {
+            return;
+        };
+        self.file_drop.remove(index);
+        self.file_drop_selection = None;
+        self.sync_rows(cx);
+        self.commit_file_drop(cx);
+        cx.notify();
+    }
+
+    /// *Restore Defaults* on the File Drop tab.
+    fn restore_file_drop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.file_drop.clear();
+        self.file_drop_selection = None;
+        let defaults = FileDropItem::defaults();
+        for item in defaults {
+            let id = self.take_row_id();
+            let pane = cx.weak_entity();
+            let row = cx.new(|cx| FileDropRow::new(id, pane, item, window, cx));
+            self.file_drop.push(row);
+        }
+        self.file_drop_selection = self.file_drop.first().map(|row| row.read(cx).id());
+        self.sync_rows(cx);
+        self.commit_file_drop(cx);
+        cx.notify();
+    }
+
+    /// Whether *Restore Defaults* has anything to restore.
+    ///
+    /// Upstream keeps the answer in a flag it sets while saving; here it is
+    /// derived, because the list is always written out and so can simply be
+    /// compared with the shipped one.
+    fn can_restore_file_drop(&self, cx: &App) -> bool {
+        self.file_drop_items(cx) != FileDropItem::defaults()
+    }
+
+    /// The File Drop list as the table currently describes it.
+    ///
+    /// Upstream drops the items whose format is empty before saving, so a row
+    /// that has just been added and not yet described is not written out.
+    fn file_drop_items(&self, cx: &App) -> Vec<FileDropItem> {
+        self.file_drop
+            .iter()
+            .map(|row| row.read(cx).item(cx))
+            .filter(|item| !item.format.is_empty())
+            .collect()
+    }
+
+    fn commit_snippets(&self, cx: &mut Context<Self>) {
+        let snippets: Vec<Snippet> =
+            self.snippets.iter().map(|row| row.read(cx).snippet(cx)).collect();
+        self.edit_snippets(cx, move |settings| settings.snippets = snippets);
+    }
+
+    fn commit_file_drop(&self, cx: &mut Context<Self>) {
+        let items = self.file_drop_items(cx);
+        self.edit_file_drop(cx, move |settings| settings.file_drop = items);
+    }
+
+    /// Point the format editor at the selected row's format.
+    ///
+    /// Only when the selection has moved: the editor is also what writes the
+    /// format back, so reloading it on every frame would overwrite what the
+    /// user is typing with what the pane last heard about.
+    fn sync_format_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (owner, format) = match self.snippet_tab {
+            0 => (
+                self.snippet_selection,
+                self.snippet_selection.and_then(|id| {
+                    self.snippets
+                        .iter()
+                        .find(|row| row.read(cx).id() == id)
+                        .map(|row| row.read(cx).snippet(cx).format)
+                }),
+            ),
+            _ => (
+                self.file_drop_selection,
+                self.file_drop_selection.and_then(|id| {
+                    self.file_drop
+                        .iter()
+                        .find(|row| row.read(cx).id() == id)
+                        .map(|row| row.read(cx).item(cx).format)
+                }),
+            ),
+        };
+        if self.format_owner == owner {
+            return;
+        }
+        self.format_owner = owner;
+        let editor = self.format_editor().clone();
+        let text = format.unwrap_or_default();
+        editor.update(cx, |state, cx| state.set_value(text, window, cx));
+    }
+
+    /// The format editor of the tab that is showing.
+    fn format_editor(&self) -> &Entity<TextareaState> {
+        match self.snippet_tab {
+            0 => &self.snippet_format,
+            _ => &self.file_drop_format,
+        }
+    }
+
+    /// A keystroke in the format editor: the row and the settings follow it.
+    fn on_format_change(
+        &mut self,
+        _editor: &Entity<TextareaState>,
+        event: &gpui_kit::base::input::InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, gpui_kit::base::input::InputEvent::Change) {
+            return;
+        }
+        self.commit_format(cx);
+    }
+
+    /// Take whatever the format editor now says and put it in the selected row.
+    ///
+    /// Called both when the user types and when *Insert Variable* puts a token
+    /// in: `insert` is one of the state's silent edits, so it raises no event
+    /// of its own and the menu has to say so explicitly.
+    fn commit_format(&mut self, cx: &mut Context<Self>) {
+        let Some(owner) = self.format_owner else {
+            return;
+        };
+        let text = self.format_editor().read(cx).value().to_string();
+        match self.snippet_tab {
+            0 => {
+                if let Some(row) = self.snippets.iter().find(|row| row.read(cx).id() == owner).cloned()
+                {
+                    row.update(cx, |row, cx| row.set_format(text, cx));
+                }
+                self.commit_snippets(cx);
+            }
+            _ => {
+                if let Some(row) =
+                    self.file_drop.iter().find(|row| row.read(cx).id() == owner).cloned()
+                {
+                    row.update(cx, |row, cx| row.set_format(text, cx));
+                }
+                self.commit_file_drop(cx);
+            }
+        }
     }
 
     // ---- Shortcuts -------------------------------------------------------
@@ -1084,7 +1724,7 @@ impl SettingsWindow {
     /// from, so the two cannot disagree.
     fn render_shortcuts(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut groups: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
-        for (path, shortcut, _, _) in keymap::SHORTCUTS.iter() {
+        for (path, shortcut, _, _, _) in keymap::SHORTCUTS.iter() {
             let mut parts = path.split(" > ");
             let menu = parts.next().unwrap_or(path);
             let command = parts.next().unwrap_or(path);
@@ -1221,6 +1861,32 @@ impl SettingsWindow {
 }
 
 // ---- shared pieces -------------------------------------------------------
+
+/// One *Insert Variable* entry: the variable's name, and under it what it
+/// stands for. Choosing it puts the token where the caret is.
+fn variable_item(
+    name: &'static str,
+    description: &'static str,
+    token: String,
+    editor: &Entity<TextareaState>,
+    pane: &WeakEntity<SettingsWindow>,
+) -> PopupMenuItem {
+    let editor = editor.clone();
+    let pane = pane.clone();
+
+    PopupMenuItem::element(move |_, cx| {
+        v_flex()
+            .gap_0p5()
+            .child(div().text_sm().child(name))
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(description))
+    })
+    .on_click(move |_, window, cx| {
+        editor.update(cx, |state, cx| state.insert(token.clone(), window, cx));
+        // `insert` is one of the state's silent edits, so it raises no event of
+        // its own and the pane has to be told the format moved.
+        pane.update(cx, |pane, cx| pane.commit_format(cx)).ok();
+    })
+}
 
 /// A titled group of settings.
 fn section(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {

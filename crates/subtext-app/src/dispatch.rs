@@ -14,7 +14,7 @@ use gpui_kit::{Context, Window};
 
 use subtext_core::{LineEnding, textops};
 
-use crate::settings::{InspectorPane, SidebarPane};
+use crate::settings::{InspectorPane, SettingsPane, SidebarPane};
 use crate::workspace::Workspace;
 
 impl Workspace {
@@ -315,7 +315,7 @@ impl Workspace {
             "ShowSelectionInfo" => self.inspect_selection(window, cx),
             "ToggleAdvancedCounter" => self.inspect_document(window, cx),
             "EditColorCode" => self.color_code_dialog(window, cx),
-            "ShowSnippetEditor" => self.notice("Snippets are not implemented yet", cx),
+            "ShowSnippetEditor" => self.show_settings_pane(SettingsPane::Snippets, cx),
 
             // ---- find --------------------------------------------------
             "PerformTextFinderAction" => self.show_find(false, window, cx),

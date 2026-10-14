@@ -21,8 +21,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use subtext_core::encoding::TextEncoding;
+use subtext_core::filedrop::FileDropItem;
 use subtext_core::folderfind::FileScope;
 use subtext_core::line_ending::LineEnding;
+use subtext_core::snippets::Snippet;
 
 /// Which pane of the settings window is showing.
 ///
@@ -639,6 +641,31 @@ pub struct Settings {
     pub folder_find_scope: Option<FileScope>,
     /// Named scopes, keyed by name — upstream's `folderFindSavedScopes`.
     pub folder_find_saved_scopes: BTreeMap<String, FileScope>,
+
+    /// The snippets behind *Text > Insert Snippet*, in menu order.
+    ///
+    /// CotEditor keeps these in `UserDefaults` under `snippets`, which is the
+    /// same store as the rest of its preferences, so they belong in this file
+    /// rather than in one of their own. The order is the user's: the submenu
+    /// lists them in the order the settings table shows them, and a snippet's
+    /// position in that table is the only thing that decides which of two
+    /// snippets sharing a shortcut wins.
+    pub snippets: Vec<Snippet>,
+
+    /// The file-drop definitions behind the Snippets pane's second tab.
+    ///
+    /// CotEditor keeps these in `UserDefaults` under `fileDropArray`, as
+    /// dictionaries of strings. SubText stores the same four fields as typed
+    /// JSON, and — one deliberate difference — always writes the list out
+    /// rather than deleting it when it happens to equal the shipped defaults.
+    /// Upstream's trick of storing nothing in that case is what lets its
+    /// *Restore Defaults* button know whether it has anything to restore; here
+    /// the button simply puts [`FileDropItem::defaults`] back, which needs no
+    /// bookkeeping and survives a hand-edited file.
+    ///
+    /// The order is the user's, and it is the order that decides which item
+    /// answers when two of them match the same file.
+    pub file_drop: Vec<FileDropItem>,
 }
 
 impl Default for Settings {
@@ -688,6 +715,14 @@ impl Default for Settings {
             outline_font_size: DEFAULT_OUTLINE_FONT_SIZE,
             folder_find_scope: None,
             folder_find_saved_scopes: BTreeMap::new(),
+            // CotEditor ships no snippets of its own, and neither does
+            // SubText: the submenu holds only *Edit Snippets…* until one is
+            // made.
+            snippets: Vec::new(),
+            // The file-drop list is the exception: CotEditor ships six, and a
+            // fresh SubText drops a picture into Markdown as an image for the
+            // same reason a fresh CotEditor does.
+            file_drop: FileDropItem::defaults(),
         }
     }
 }

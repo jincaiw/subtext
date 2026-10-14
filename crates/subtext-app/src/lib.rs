@@ -42,6 +42,8 @@ pub mod outline;
 pub mod resources;
 pub mod settings;
 pub mod settings_window;
+pub mod snippet_pane;
+pub mod snippets;
 pub mod sort_sheet;
 pub mod workspace;
 
@@ -101,8 +103,11 @@ pub fn run() {
             }
 
             bridge::install(cx);
-            cx.bind_keys(keymap::default_bindings());
-            cx.set_menus(menu::app_menus());
+            // The keymap and the menu bar, with the saved snippets already in
+            // them. The workspace rebuilds both when the frontmost document's
+            // syntax changes; this is what gives the application a menu before
+            // any window exists.
+            snippets::install(cx, &settings.snippets, None);
 
             open_main_window(cx, syntaxes, themes, settings, paths);
         });

@@ -176,80 +176,89 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 ///
 /// The table comes from the same `resources/menu.json` the menu bar and the
 /// key map are generated from, so the three cannot drift apart. Each row is
-/// (menu path, the shortcut as macOS draws it, its modifiers, the key).
-pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
-    ("CotEditor > Settings…", "⌘,", "command", ","),
-    ("CotEditor > Hide CotEditor", "⌘H", "command", "h"),
-    ("CotEditor > Hide Others", "⌥⌘H", "option command", "h"),
-    ("CotEditor > Quit CotEditor", "⌘Q", "command", "q"),
-    ("File > New", "⌘N", "command", "n"),
-    ("File > New Window", "⇧⌘N", "shift command", "N"),
-    ("File > New Tab", "⌘T", "command", "t"),
-    ("File > Open…", "⌘O", "command", "o"),
-    ("File > Close", "⌘W", "command", "w"),
-    ("File > Save", "⌘S", "command", "s"),
-    ("File > Save As…", "⇧⌘S", "shift command", "S"),
-    ("File > Page Setup…", "⇧⌘P", "shift command", "P"),
-    ("File > Print…", "⌘P", "command", "p"),
-    ("Edit > Undo", "⌘Z", "command", "z"),
-    ("Edit > Redo", "⇧⌘Z", "shift command", "Z"),
-    ("Edit > Cut", "⌘X", "command", "x"),
-    ("Edit > Copy", "⌘C", "command", "c"),
-    ("Edit > Copy as Rich Text", "⇧⌘C", "shift command", "C"),
-    ("Edit > Paste", "⌘V", "command", "v"),
-    ("Edit > Paste Exactly", "⌥⌘V", "option command", "v"),
-    ("Edit > Select > Select All", "⌘A", "command", "a"),
-    ("Edit > Select > Select Line", "⇧⌘A", "shift command", "A"),
-    ("Edit > Select > Select Word", "⌘D", "command", "d"),
-    ("Edit > Select > Select Column Up", "⌃⇧↑", "control shift", "↑"),
-    ("Edit > Select > Select Column Down", "⌃⇧↓", "control shift", "↓"),
-    ("Edit > Select > Split Selection by Lines", "⌃⇧L", "control shift", "L"),
-    ("Edit > Insert Backslash", "⌘¥", "command", "¥"),
-    ("Edit > Insert Yen Mark", "⌘Y", "command", "y"),
-    ("Edit > Spelling and Grammar > Show Spelling and Grammar", "⇧⌘;", "shift command", ":"),
-    ("Edit > Spelling and Grammar > Check Document Now", "⌘;", "command", ";"),
-    ("Format > Reset Syntax Analysis", "⌥⌘R", "option command", "r"),
-    ("Format > Font > Bigger", "⇧⌘=", "shift command", "+"),
-    ("Format > Font > Smaller", "⌘-", "command", "-"),
-    ("Format > Font > Reset to Default", "⌘0", "command", "0"),
-    ("View > Show Tab Bar", "⇧⌘T", "shift command", "T"),
-    ("View > Hide Toolbar", "⌥⌘T", "option command", "t"),
-    ("View > Show Quick Actions…", "⌘K", "command", "k"),
-    ("View > Sidebar > File Browser", "⌃⌘1", "control command", "1"),
-    ("View > Sidebar > Folder Find", "⌃⌘2", "control command", "2"),
-    ("View > Sidebar > Show Sidebar", "⌃⌘S", "control command", "s"),
-    ("View > Inspector > Show Inspector", "⌘I", "command", "i"),
-    ("View > Move Focus to Next Editor", "⌃`", "control", "`"),
-    ("View > Move Focus to Previous Editor", "⌃⇧`", "control shift", "`"),
-    ("View > Enter Full Screen", "⌃⌘F", "control command", "f"),
-    ("Text > Comment > Toggle Comment", "⌘/", "command", "/"),
-    ("Text > Indentation > Shift Right", "⌘]", "command", "]"),
-    ("Text > Indentation > Shift Left", "⌘[", "command", "["),
-    ("Text > Surround Selection With > Single Quotes", "⌘'", "command", "'"),
-    ("Text > Surround Selection With > Double Quotes", "⇧⌘'", "shift command", "\""),
-    ("Text > Surround Selection With > Parentheses", "⇧⌘9", "shift command", "("),
-    ("Text > Surround Selection With > Custom…", "⇧⌘L", "shift command", "L"),
-    ("Text > Lines > Move Up", "⌃⌘↑", "control command", "↑"),
-    ("Text > Lines > Move Down", "⌃⌘↓", "control command", "↓"),
-    ("Text > Lines > Duplicate Line", "⇧⌘D", "shift command", "D"),
-    ("Text > Lines > Join Lines", "⇧⌘J", "shift command", "J"),
-    ("Text > Inspect Character", "⌥⌘I", "option command", "i"),
-    ("Text > Edit Color Code…", "⌃⌘H", "control command", "h"),
-    ("Find > Find…", "⌘F", "command", "f"),
-    ("Find > Find Next", "⌘G", "command", "g"),
-    ("Find > Find Previous", "⇧⌘G", "shift command", "G"),
-    ("Find > Find All", "⇧⌘F", "shift command", "F"),
-    ("Find > Use Selection for Find", "⌘E", "command", "e"),
-    ("Find > Use Selection for Replace", "⇧⌘E", "shift command", "E"),
-    ("Find > Jump to Selection", "⌘J", "command", "j"),
-    ("Find > Replace and Find Next", "⌥⌘G", "option command", "g"),
-    ("Find > Highlight All", "⇧⌘H", "shift command", "H"),
-    ("Find > Remove Highlights", "⌃⇧⌘H", "control shift command", "H"),
-    ("Find > Select Previous Outline Item", "⌥⌘↑", "option command", "↑"),
-    ("Find > Select Next Outline Item", "⌥⌘↓", "option command", "↓"),
-    ("Find > Go to Line…", "⌘L", "command", "l"),
-    ("Window > Minimize", "⌘M", "command", "m"),
-    ("Help > CotEditor Help", "⇧⌘/", "shift command", "?"),
+/// (menu path, the shortcut as macOS draws it, its modifiers, the key, the
+/// keystroke).
+///
+/// The last field is the very string [`default_bindings`] hands GPUI, which
+/// is what lets anything asking "does a command already answer to this key?"
+/// — the Snippets pane's shortcut field — get the same answer the key map
+/// would give, and name the command in the message. It is kept here rather
+/// than derived from the two fields before it because the translation from a
+/// character to a key lives in the generator, and a second copy of it in Rust
+/// would be a second thing to get wrong.
+pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
+    ("CotEditor > Settings…", "⌘,", "command", ",", "secondary-,"),
+    ("CotEditor > Hide CotEditor", "⌘H", "command", "h", "secondary-h"),
+    ("CotEditor > Hide Others", "⌥⌘H", "option command", "h", "alt-secondary-h"),
+    ("CotEditor > Quit CotEditor", "⌘Q", "command", "q", "secondary-q"),
+    ("File > New", "⌘N", "command", "n", "secondary-n"),
+    ("File > New Window", "⇧⌘N", "shift command", "N", "shift-secondary-n"),
+    ("File > New Tab", "⌘T", "command", "t", "secondary-t"),
+    ("File > Open…", "⌘O", "command", "o", "secondary-o"),
+    ("File > Close", "⌘W", "command", "w", "secondary-w"),
+    ("File > Save", "⌘S", "command", "s", "secondary-s"),
+    ("File > Save As…", "⇧⌘S", "shift command", "S", "shift-secondary-s"),
+    ("File > Page Setup…", "⇧⌘P", "shift command", "P", "shift-secondary-p"),
+    ("File > Print…", "⌘P", "command", "p", "secondary-p"),
+    ("Edit > Undo", "⌘Z", "command", "z", "secondary-z"),
+    ("Edit > Redo", "⇧⌘Z", "shift command", "Z", "shift-secondary-z"),
+    ("Edit > Cut", "⌘X", "command", "x", "secondary-x"),
+    ("Edit > Copy", "⌘C", "command", "c", "secondary-c"),
+    ("Edit > Copy as Rich Text", "⇧⌘C", "shift command", "C", "shift-secondary-c"),
+    ("Edit > Paste", "⌘V", "command", "v", "secondary-v"),
+    ("Edit > Paste Exactly", "⌥⌘V", "option command", "v", "alt-secondary-v"),
+    ("Edit > Select > Select All", "⌘A", "command", "a", "secondary-a"),
+    ("Edit > Select > Select Line", "⇧⌘A", "shift command", "A", "shift-secondary-a"),
+    ("Edit > Select > Select Word", "⌘D", "command", "d", "secondary-d"),
+    ("Edit > Select > Select Column Up", "⌃⇧↑", "control shift", "↑", "ctrl-shift-up"),
+    ("Edit > Select > Select Column Down", "⌃⇧↓", "control shift", "↓", "ctrl-shift-down"),
+    ("Edit > Select > Split Selection by Lines", "⌃⇧L", "control shift", "L", "ctrl-shift-l"),
+    ("Edit > Insert Backslash", "⌘¥", "command", "¥", "secondary-¥"),
+    ("Edit > Insert Yen Mark", "⌘Y", "command", "y", "secondary-y"),
+    ("Edit > Spelling and Grammar > Show Spelling and Grammar", "⇧⌘;", "shift command", ":", "shift-secondary-;"),
+    ("Edit > Spelling and Grammar > Check Document Now", "⌘;", "command", ";", "secondary-;"),
+    ("Format > Reset Syntax Analysis", "⌥⌘R", "option command", "r", "alt-secondary-r"),
+    ("Format > Font > Bigger", "⇧⌘=", "shift command", "+", "shift-secondary-="),
+    ("Format > Font > Smaller", "⌘-", "command", "-", "secondary--"),
+    ("Format > Font > Reset to Default", "⌘0", "command", "0", "secondary-0"),
+    ("View > Show Tab Bar", "⇧⌘T", "shift command", "T", "shift-secondary-t"),
+    ("View > Hide Toolbar", "⌥⌘T", "option command", "t", "alt-secondary-t"),
+    ("View > Show Quick Actions…", "⌘K", "command", "k", "secondary-k"),
+    ("View > Sidebar > File Browser", "⌃⌘1", "control command", "1", "ctrl-secondary-1"),
+    ("View > Sidebar > Folder Find", "⌃⌘2", "control command", "2", "ctrl-secondary-2"),
+    ("View > Sidebar > Show Sidebar", "⌃⌘S", "control command", "s", "ctrl-secondary-s"),
+    ("View > Inspector > Show Inspector", "⌘I", "command", "i", "secondary-i"),
+    ("View > Move Focus to Next Editor", "⌃`", "control", "`", "ctrl-`"),
+    ("View > Move Focus to Previous Editor", "⌃⇧`", "control shift", "`", "ctrl-shift-`"),
+    ("View > Enter Full Screen", "⌃⌘F", "control command", "f", "ctrl-secondary-f"),
+    ("Text > Comment > Toggle Comment", "⌘/", "command", "/", "secondary-/"),
+    ("Text > Indentation > Shift Right", "⌘]", "command", "]", "secondary-]"),
+    ("Text > Indentation > Shift Left", "⌘[", "command", "[", "secondary-["),
+    ("Text > Surround Selection With > Single Quotes", "⌘'", "command", "'", "secondary-'"),
+    ("Text > Surround Selection With > Double Quotes", "⇧⌘'", "shift command", "\"", "shift-secondary-'"),
+    ("Text > Surround Selection With > Parentheses", "⇧⌘9", "shift command", "(", "shift-secondary-9"),
+    ("Text > Surround Selection With > Custom…", "⇧⌘L", "shift command", "L", "shift-secondary-l"),
+    ("Text > Lines > Move Up", "⌃⌘↑", "control command", "↑", "ctrl-secondary-up"),
+    ("Text > Lines > Move Down", "⌃⌘↓", "control command", "↓", "ctrl-secondary-down"),
+    ("Text > Lines > Duplicate Line", "⇧⌘D", "shift command", "D", "shift-secondary-d"),
+    ("Text > Lines > Join Lines", "⇧⌘J", "shift command", "J", "shift-secondary-j"),
+    ("Text > Inspect Character", "⌥⌘I", "option command", "i", "alt-secondary-i"),
+    ("Text > Edit Color Code…", "⌃⌘H", "control command", "h", "ctrl-secondary-h"),
+    ("Find > Find…", "⌘F", "command", "f", "secondary-f"),
+    ("Find > Find Next", "⌘G", "command", "g", "secondary-g"),
+    ("Find > Find Previous", "⇧⌘G", "shift command", "G", "shift-secondary-g"),
+    ("Find > Find All", "⇧⌘F", "shift command", "F", "shift-secondary-f"),
+    ("Find > Use Selection for Find", "⌘E", "command", "e", "secondary-e"),
+    ("Find > Use Selection for Replace", "⇧⌘E", "shift command", "E", "shift-secondary-e"),
+    ("Find > Jump to Selection", "⌘J", "command", "j", "secondary-j"),
+    ("Find > Replace and Find Next", "⌥⌘G", "option command", "g", "alt-secondary-g"),
+    ("Find > Highlight All", "⇧⌘H", "shift command", "H", "shift-secondary-h"),
+    ("Find > Remove Highlights", "⌃⇧⌘H", "control shift command", "H", "ctrl-shift-secondary-h"),
+    ("Find > Select Previous Outline Item", "⌥⌘↑", "option command", "↑", "alt-secondary-up"),
+    ("Find > Select Next Outline Item", "⌥⌘↓", "option command", "↓", "alt-secondary-down"),
+    ("Find > Go to Line…", "⌘L", "command", "l", "secondary-l"),
+    ("Window > Minimize", "⌘M", "command", "m", "secondary-m"),
+    ("Help > CotEditor Help", "⇧⌘/", "shift command", "?", "shift-secondary-/"),
 ];
 
 /// Shortcuts CotEditor assigns twice, kept visible rather than silently
@@ -275,10 +284,9 @@ mod tests {
 
     /// Two commands on one keystroke is a bug unless it is CotEditor's bug.
     ///
-    /// The table is checked rather than the bindings, because a binding
-    /// does not hand its keystroke back — and the generator already
-    /// reports collisions in binding terms when it writes
-    /// [`KNOWN_COLLISIONS`].
+    /// The generator reports collisions in binding terms when it writes
+    /// [`KNOWN_COLLISIONS`]; this test is what fails when a regeneration
+    /// finds one that has not been acknowledged.
     #[test]
     fn collisions_are_the_ones_we_know_about() {
         assert_eq!(KNOWN_COLLISIONS.len(), 0);
@@ -292,6 +300,26 @@ mod tests {
         for row in SHORTCUTS {
             assert!(!row.0.is_empty(), "every shortcut belongs to a menu item");
             assert!(!row.1.is_empty(), "{} has no shortcut", row.0);
+        }
+    }
+
+    /// The table's last field is the keystroke the key map really binds.
+    ///
+    /// That is what makes it usable as the answer to "is this shortcut
+    /// taken?": a table row and a binding that disagreed would name one
+    /// command and reserve another, which is exactly the bug the Snippets
+    /// pane's shortcut field exists to prevent.
+    #[test]
+    fn the_table_holds_the_keystrokes_the_key_map_binds() {
+        for (binding, row) in default_bindings().iter().zip(SHORTCUTS) {
+            let typed = gpui_kit::Keystroke::parse(row.4).expect(row.4);
+            assert_eq!(
+                binding.match_keystrokes(&[typed]),
+                Some(false),
+                "{} binds {}",
+                row.0,
+                row.4
+            );
         }
     }
 }

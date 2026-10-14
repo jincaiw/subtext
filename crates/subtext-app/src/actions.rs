@@ -249,3 +249,23 @@ pub mod help {
         ReleaseNotes,
     ]);
 }
+
+pub mod snippet {
+    /// Run the snippet with this id.
+    ///
+    /// The one action here that carries a value, so it cannot come from
+    /// [`actions!`](gpui_kit::actions) — that macro only makes unit structs.
+    /// It has to carry one: snippets are the user's data, so their menu items
+    /// cannot be named at compile time, and naming one by its *position* would
+    /// make an item run the wrong snippet the moment a row is inserted above it
+    /// in the settings table.
+    ///
+    /// `no_json` because the action is built from the menu and the keymap,
+    /// never from a configuration file — the settings file names a snippet by
+    /// the snippet's own id, not by this action's JSON.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct InsertSnippet {
+        pub id: u64,
+    }
+}

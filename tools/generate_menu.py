@@ -446,8 +446,17 @@ class Renderer:
         lines.append("///")
         lines.append("/// The table comes from the same `resources/menu.json` the menu bar and the")
         lines.append("/// key map are generated from, so the three cannot drift apart. Each row is")
-        lines.append("/// (menu path, the shortcut as macOS draws it, its modifiers, the key).")
-        lines.append("pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[")
+        lines.append("/// (menu path, the shortcut as macOS draws it, its modifiers, the key, the")
+        lines.append("/// keystroke).")
+        lines.append("///")
+        lines.append("/// The last field is the very string [`default_bindings`] hands GPUI, which")
+        lines.append("/// is what lets anything asking \"does a command already answer to this key?\"")
+        lines.append("/// — the Snippets pane's shortcut field — get the same answer the key map")
+        lines.append("/// would give, and name the command in the message. It is kept here rather")
+        lines.append("/// than derived from the two fields before it because the translation from a")
+        lines.append("/// character to a key lives in the generator, and a second copy of it in Rust")
+        lines.append("/// would be a second thing to get wrong.")
+        lines.append("pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[")
         for entry in rows:
             label = f"{entry['path']} > {entry['title']}"
             lines.append(
@@ -455,7 +464,8 @@ class Renderer:
                 f"{rust_string(label)}, "
                 f"{rust_string(shortcut_label(entry['mods'], entry['key']))}, "
                 f"{rust_string(modifier_words(entry['mods'], entry['key']))}, "
-                f"{rust_string(KEY_GLYPHS.get(physical_key(entry['key'])[0], entry['key']))}"
+                f"{rust_string(KEY_GLYPHS.get(physical_key(entry['key'])[0], entry['key']))}, "
+                f"{rust_string(binding_string(entry['mods'], entry['key']))}"
                 "),"
             )
         lines.append("];")
@@ -485,10 +495,9 @@ class Renderer:
         lines.append("")
         lines.append("    /// Two commands on one keystroke is a bug unless it is CotEditor's bug.")
         lines.append("    ///")
-        lines.append("    /// The table is checked rather than the bindings, because a binding")
-        lines.append("    /// does not hand its keystroke back — and the generator already")
-        lines.append("    /// reports collisions in binding terms when it writes")
-        lines.append("    /// [`KNOWN_COLLISIONS`].")
+        lines.append("    /// The generator reports collisions in binding terms when it writes")
+        lines.append("    /// [`KNOWN_COLLISIONS`]; this test is what fails when a regeneration")
+        lines.append("    /// finds one that has not been acknowledged.")
         lines.append("    #[test]")
         lines.append("    fn collisions_are_the_ones_we_know_about() {")
         lines.append("        assert_eq!(KNOWN_COLLISIONS.len(), 0);")
@@ -502,6 +511,26 @@ class Renderer:
         lines.append("        for row in SHORTCUTS {")
         lines.append("            assert!(!row.0.is_empty(), \"every shortcut belongs to a menu item\");")
         lines.append("            assert!(!row.1.is_empty(), \"{} has no shortcut\", row.0);")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    /// The table's last field is the keystroke the key map really binds.")
+        lines.append("    ///")
+        lines.append("    /// That is what makes it usable as the answer to \"is this shortcut")
+        lines.append("    /// taken?\": a table row and a binding that disagreed would name one")
+        lines.append("    /// command and reserve another, which is exactly the bug the Snippets")
+        lines.append("    /// pane's shortcut field exists to prevent.")
+        lines.append("    #[test]")
+        lines.append("    fn the_table_holds_the_keystrokes_the_key_map_binds() {")
+        lines.append("        for (binding, row) in default_bindings().iter().zip(SHORTCUTS) {")
+        lines.append("            let typed = gpui_kit::Keystroke::parse(row.4).expect(row.4);")
+        lines.append("            assert_eq!(")
+        lines.append("                binding.match_keystrokes(&[typed]),")
+        lines.append("                Some(false),")
+        lines.append("                \"{} binds {}\",")
+        lines.append("                row.0,")
+        lines.append("                row.4")
+        lines.append("            );")
         lines.append("        }")
         lines.append("    }")
         lines.append("}")

@@ -12,7 +12,7 @@
 //! no registration would show up as a dead menu entry rather than as a
 //! command that reports its own absence.
 
-use gpui_kit::{App, BorrowAppContext as _, Global, WeakEntity};
+use gpui_kit::{App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
 use crate::actions;
 use crate::workspace::Workspace;
@@ -55,6 +55,30 @@ pub fn register(workspace: WeakEntity<Workspace>, cx: &mut App) {
 /// The command's name is the last segment of its action path, which is the
 /// vocabulary [`Workspace::dispatch`] speaks.
 pub fn dispatch(name: &'static str, cx: &mut App) {
+    run(cx, move |workspace, window, cx| workspace.dispatch(name, window, cx));
+}
+
+/// Run the snippet with this id in the active window's workspace.
+///
+/// A snippet cannot be reached by name the way the other commands are: it is
+/// the user's data, so its action carries the snippet's id and this is where
+/// that id is turned back into one. See [`crate::actions::snippet`].
+pub fn insert_snippet(id: u64, cx: &mut App) {
+    run(cx, move |workspace, window, cx| {
+        workspace.insert_snippet(id, window, cx)
+    });
+}
+
+/// Hand `command` to the first workspace that recognises it.
+///
+/// The windows are tried in the order they were opened, newest last, so the
+/// oldest one that can handle the command wins — which for every command here
+/// means the only window there is. A workspace that returns `false` says the
+/// command is not its business, and the search goes on.
+fn run(
+    cx: &mut App,
+    command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) -> bool,
+) {
     let Some(window) = cx.active_window() else {
         return;
     };
@@ -66,7 +90,7 @@ pub fn dispatch(name: &'static str, cx: &mut App) {
     for workspace in workspaces {
         let handled = window.update(cx, |_, window, cx| {
             workspace
-                .update(cx, |workspace, cx| workspace.dispatch(name, window, cx))
+                .update(cx, |workspace, cx| command(workspace, window, cx))
                 .is_ok()
         });
         if matches!(handled, Ok(true)) {
@@ -80,6 +104,11 @@ pub fn install(cx: &mut App) {
     if !cx.has_global::<Workspaces>() {
         cx.set_global(Workspaces::default());
     }
+    // The snippets' action carries an id, so it does not fit `bind_actions!`,
+    // which forwards an action's *name*; the id is what the handler needs.
+    cx.on_action(|action: &actions::snippet::InsertSnippet, cx: &mut App| {
+        insert_snippet(action.id, cx);
+    });
     bind_actions! { cx,
         actions::app::ShowAboutPanel => "ShowAboutPanel",
         actions::app::ShowDonationWindow => "ShowDonationWindow",
