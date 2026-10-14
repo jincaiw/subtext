@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
@@ -823,8 +823,8 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 | `Format ▸ Line Endings` | `AppDelegate.prepareMainMenu`，`LineEnding.allCases` | ✅ 8.9a |
 | `Format ▸ Syntax` | `AppDelegate.prepareMainMenu`，`SyntaxManager.settingNames` | ✅ 8.9a |
 | `Format ▸ Theme` | 同上，`ThemeManager.settingNames` | ✅ 8.9a |
-| `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ⏳ 8.9b |
-| `Text ▸ Unicode Normalizations` | `UnicodeNormalizationForm.standardForms + [nil] + modifiedForms` | ⏳ 8.9c |
+| `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ⏳ 8.9c |
+| `Text ▸ Unicode Normalizations` | `UnicodeNormalizationForm.standardForms + [nil] + modifiedForms` | ✅ 8.9b |
 | `CotEditor ▸ Services` | 系统（`SystemMenuType::Services`） | ✅ 8.9a |
 | `Script`（顶层） | `ScriptManager`，`~/Library/Application Scripts` | ⏳ 8.9d |
 | `Font ▸ Font Type`、`Writing Direction ▸ Orientation` / `Direction` | 上游是 `NSMenuItem.sectionHeader`，本表里已是置灰 `NoOp` 叶 | ✅（即上游形态） |
@@ -868,13 +868,33 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 个恒列——上游能选的这里
 都能选，其中 3 个少按一个键。
 
-**8.9b 文本编码子菜单**：`AppDelegate.updateEncodingMenu` 的形状（UTF-8 → 分组分隔符
-→ 各语系组 → 末尾分隔符 + `Customize Encodings List…`），当前编码勾选，当前编码不在
-列表里时插到最前；`SetEncoding` / `ReinterpretEncoding` 两个占位动作一并改造。
+**8.9b `Text ▸ Unicode Normalizations`**（`textops.rs` / `menus.rs`）
 
-**8.9c Unicode 规范化子菜单**：core 的 `Normalization` 只有 4 种，上游是 7 种
-（多 `NFKC Case-Fold`、`Modified NFD`、`Modified NFC`），补齐后按
-`standardForms + 分隔符 + modifiedForms` 铺。
+- core 的 `Normalization` 从 4 种补到上游的 **7 种**，并给出三个常量：
+  `ALL`（上游 `CaseIterable` 顺序）、`STANDARD`（前 5）、`MODIFIED`（后 2）——
+  菜单的「5 项 + 分隔符 + 2 项」直接由这三个常量铺出来，不是硬编码。
+- 每个形态带 `name()`（菜单标签）、`identifier()`（动作载荷）、`from_identifier()`、
+  `is_supported()`。
+- **后 3 种（NFKC Case-Fold / Modified NFD / Modified NFC）本构建做不了**，如实标注：
+  - `nfkcCaseFold` = 去默认可忽略码点 → NFKC → 全量 case fold → NFC → 再去。
+    「默认可忽略码点」是 `Default_Ignorable_Code_Point` 属性，「全量 case fold」是
+    `CaseFolding.txt`（`ß → ss` 这种，不是 `str::to_lowercase`）。`unicode-normalization`
+    0.1.25 **只有 nfd/nfkd/nfc/nfkc**，既没有 case fold 也没有这个属性。
+  - `modifiedNFD` 是 `CFStringGetFileSystemRepresentation`，即 Apple 冻结的 HFS+ 表；
+    `modifiedNFC` 走 `\P{Full_Composition_Exclusion}` 逐段重合成。两者都不是 Unicode
+    规范化形态，是 Apple 自己的表。
+  - 处理方式沿用本仓对「菜单项在、能力不在」的既有约定：**菜单照列、动作照发、
+    触发时在状态栏说实话**（`Workspace::normalize_unicode` 先问 `is_supported()`），
+    而不是悄悄退回一个「差不多」的结果——半规范化的文档用户分辨不出来。
+    `textops::normalize` 对这三种形态返回**原样**，文档注释写明这是拒绝不是兜底。
+- 动作 `NormalizeUnicode { form }` 取代 `NormalizeNfc/Nfd/Nfkc/Nfkd` 四个 unit 动作。
+- 偏差：上游把每个形态的说明挂在菜单项的 `toolTip` 上（`localizedDescription`），
+  GPUI 的菜单项没有 tooltip，所以那 7 段说明目前无处可放。
+
+**8.9c `Format ▸ Text Encoding` 子菜单**：`AppDelegate.updateEncodingMenu` 的形状
+（UTF-8 → 分组分隔符 → 各语系组 → 末尾分隔符 + `Customize Encodings List…`），
+当前编码勾选，当前编码不在列表里时插到最前；`SetEncoding` / `ReinterpretEncoding`
+两个占位动作一并改造。
 
 **8.9d `Script` 菜单**：上游从 `~/Library/Application Scripts/<bundle id>` 读脚本。
 平台相关，排在最后。
@@ -897,7 +917,8 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 
 | 缺口 | 说明 |
 | --- | --- |
-| `cargo fmt` 未接入 | 全仓 21 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` / `actions.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
+| `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
+| Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

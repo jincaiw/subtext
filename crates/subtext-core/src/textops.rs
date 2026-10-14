@@ -1128,6 +1128,23 @@ pub fn url_decode(text: &str, selection: &Range<usize>) -> Edit {
 }
 
 /// Which Unicode normalization form to apply.
+///
+/// Upstream's `UnicodeNormalizationForm`, all seven of them, in its order. The
+/// first four are Unicode's own, and the `unicode-normalization` crate provides
+/// them. The last three are Apple's:
+///
+/// * `NfkcCaseFold` is NFKC with a full case fold, and with the
+///   default-ignorable code points taken out before and after — upstream calls
+///   `removingDefaultIgnorableCodePoints`, which is a regular expression over
+///   the `Default_Ignorable_Code_Point` property.
+/// * `ModifiedNfd` / `ModifiedNfc` are the forms HFS+ used. They are not
+///   normalization forms at all: they are Apple's frozen tables, and the only
+///   way to produce them is `CFStringGetFileSystemRepresentation` and the
+///   composition-exclusion set behind `precomposedStringWithHFSPlusMapping`.
+///
+/// Both halves of that are Unicode data SubText does not carry, so
+/// [`is_supported`](Self::is_supported) answers for the last three — see the
+/// note on [`normalize`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Normalization {
     /// Canonical decomposition.
@@ -1138,8 +1155,98 @@ pub enum Normalization {
     Nfkd,
     /// Compatibility composition.
     Nfkc,
+    /// NFKC, case-folded, with the default-ignorable code points removed.
+    NfkcCaseFold,
+    /// The decomposition HFS+ used.
+    ModifiedNfd,
+    /// The composition HFS+ used.
+    ModifiedNfc,
 }
 
+impl Normalization {
+    /// Every form, in upstream's `CaseIterable` order.
+    pub const ALL: [Normalization; 7] = [
+        Normalization::Nfd,
+        Normalization::Nfc,
+        Normalization::Nfkd,
+        Normalization::Nfkc,
+        Normalization::NfkcCaseFold,
+        Normalization::ModifiedNfd,
+        Normalization::ModifiedNfc,
+    ];
+
+    /// The five upstream calls the standard forms, which its menu lists first.
+    pub const STANDARD: [Normalization; 5] = [
+        Normalization::Nfd,
+        Normalization::Nfc,
+        Normalization::Nfkd,
+        Normalization::Nfkc,
+        Normalization::NfkcCaseFold,
+    ];
+
+    /// The two upstream calls the modified forms, which its menu lists after a
+    /// separator.
+    pub const MODIFIED: [Normalization; 2] =
+        [Normalization::ModifiedNfd, Normalization::ModifiedNfc];
+
+    /// The label the Text ▸ Unicode Normalizations submenu shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            Normalization::Nfd => "NFD",
+            Normalization::Nfc => "NFC",
+            Normalization::Nfkd => "NFKD",
+            Normalization::Nfkc => "NFKC",
+            Normalization::NfkcCaseFold => "NFKC Case-Fold",
+            Normalization::ModifiedNfd => "Modified NFD",
+            Normalization::ModifiedNfc => "Modified NFC",
+        }
+    }
+
+    /// A stable identifier, used in an action's payload.
+    pub fn identifier(self) -> &'static str {
+        match self {
+            Normalization::Nfd => "nfd",
+            Normalization::Nfc => "nfc",
+            Normalization::Nfkd => "nfkd",
+            Normalization::Nfkc => "nfkc",
+            Normalization::NfkcCaseFold => "nfkc-case-fold",
+            Normalization::ModifiedNfd => "modified-nfd",
+            Normalization::ModifiedNfc => "modified-nfc",
+        }
+    }
+
+    pub fn from_identifier(identifier: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|form| form.identifier() == identifier)
+    }
+
+    /// Whether this build can actually apply the form.
+    ///
+    /// False for the three Apple forms — see the type. The menu still lists
+    /// them, because a form that exists upstream and is missing here is worth
+    /// naming rather than hiding; what a caller must not do is apply one and
+    /// report success.
+    pub fn is_supported(self) -> bool {
+        match self {
+            Normalization::Nfd
+            | Normalization::Nfc
+            | Normalization::Nfkd
+            | Normalization::Nfkc => true,
+            Normalization::NfkcCaseFold
+            | Normalization::ModifiedNfd
+            | Normalization::ModifiedNfc => false,
+        }
+    }
+}
+
+/// Apply `form` to the selection.
+///
+/// A form [`is_supported`](Normalization::is_supported) says no to leaves the
+/// selection exactly as it found it — the caller is expected to have asked, and
+/// to have said why in the status bar if the answer was no. Doing something
+/// *close* instead would be worse than doing nothing: a half-normalized document
+/// is one the user cannot tell from a normalized one.
 pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> Edit {
     let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
     let start = floor_char_boundary(text, start);
@@ -1153,6 +1260,10 @@ pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> E
         Normalization::Nfc => selected.nfc().collect(),
         Normalization::Nfkd => selected.nfkd().collect(),
         Normalization::Nfkc => selected.nfkc().collect(),
+        // See the note above: not a fallback, a refusal.
+        Normalization::NfkcCaseFold
+        | Normalization::ModifiedNfd
+        | Normalization::ModifiedNfc => selected.to_string(),
     };
     let mut out = String::with_capacity(text.len() + replaced.len());
     out.push_str(&text[..start]);
@@ -1787,6 +1898,64 @@ mod tests {
         let text = "e\u{301}";
         let nfc = normalize(text, &(0..text.len()), Normalization::Nfc);
         assert_eq!(nfc.text, "é");
+    }
+
+    /// Upstream's `standardForms + [nil] + modifiedForms`: five labels, a
+    /// separator, two more. The menu is built from these three constants, so
+    /// their order is user-visible.
+    #[test]
+    fn the_forms_are_upstream_s_seven_in_upstream_s_order() {
+        assert_eq!(
+            Normalization::ALL.map(Normalization::name),
+            [
+                "NFD",
+                "NFC",
+                "NFKD",
+                "NFKC",
+                "NFKC Case-Fold",
+                "Modified NFD",
+                "Modified NFC",
+            ]
+        );
+        assert_eq!(&Normalization::ALL[..5], Normalization::STANDARD);
+        assert_eq!(&Normalization::ALL[5..], Normalization::MODIFIED);
+    }
+
+    /// The identifiers are what an action's payload carries, so every form has
+    /// to have a distinct one and come back from it.
+    #[test]
+    fn every_form_round_trips_through_its_identifier() {
+        for form in Normalization::ALL {
+            assert_eq!(Normalization::from_identifier(form.identifier()), Some(form));
+        }
+        assert_eq!(Normalization::from_identifier("nfkccf"), None);
+    }
+
+    /// The four Unicode forms are the ones this build can apply. The three
+    /// Apple ones need tables it does not carry, and a form it cannot apply must
+    /// leave the text alone rather than approximate it.
+    #[test]
+    fn the_apple_forms_are_refused_rather_than_approximated() {
+        let supported: Vec<Normalization> = Normalization::ALL
+            .into_iter()
+            .filter(|form| form.is_supported())
+            .collect();
+        assert_eq!(
+            supported,
+            [
+                Normalization::Nfd,
+                Normalization::Nfc,
+                Normalization::Nfkd,
+                Normalization::Nfkc,
+            ]
+        );
+
+        // "ﬁ" is the ligature that NFKC decomposes to "fi" and NFD leaves be —
+        // so an approximation of NFKC Case-Fold would show up here.
+        let text = "ﬁ";
+        for form in Normalization::MODIFIED.into_iter().chain([Normalization::NfkcCaseFold]) {
+            assert_eq!(normalize(text, &(0..text.len()), form).text, text);
+        }
     }
 
     #[test]

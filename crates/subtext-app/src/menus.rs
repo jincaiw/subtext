@@ -55,7 +55,7 @@ use gpui_kit::{App, Menu, MenuItem};
 
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
 use subtext_core::snippets::Snippet;
-use subtext_core::{LineEnding, Sections, TextEncoding};
+use subtext_core::{LineEnding, Normalization, Sections, TextEncoding};
 
 use crate::actions;
 use crate::keymap;
@@ -70,6 +70,7 @@ use crate::snippets;
 const LINE_ENDINGS_MENU: &str = "Line Endings";
 const SYNTAX_MENU: &str = "Syntax";
 const THEME_MENU: &str = "Theme";
+const UNICODE_NORMALIZATIONS_MENU: &str = "Unicode Normalizations";
 const INSERT_SNIPPET_MENU: &str = "Insert Snippet";
 
 /// The syntax name that means "no highlighting".
@@ -177,6 +178,11 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
     replace(&mut menus, LINE_ENDINGS_MENU, line_endings(state));
     replace(&mut menus, SYNTAX_MENU, syntaxes(state));
     replace(&mut menus, THEME_MENU, themes(state));
+    replace(
+        &mut menus,
+        UNICODE_NORMALIZATIONS_MENU,
+        normalizations(),
+    );
 
     menus
 }
@@ -306,6 +312,32 @@ fn themes(state: &MenuState) -> Vec<MenuItem> {
         .collect()
 }
 
+/// Text ▸ Unicode Normalizations.
+///
+/// Upstream's `standardForms + [nil] + modifiedForms`: five labels, a separator,
+/// two more. The separator is what keeps the two HFS+ forms from reading as two
+/// more Unicode ones, which is exactly what they are not.
+///
+/// Nothing is checked and nothing is disabled. A normalization is an edit, not a
+/// setting the document is in, and upstream lets it run on an empty selection —
+/// where it does nothing, because there is nothing selected to normalize.
+fn normalizations() -> Vec<MenuItem> {
+    let mut items = Vec::with_capacity(Normalization::ALL.len() + 1);
+    items.extend(Normalization::STANDARD.into_iter().map(normalization));
+    items.push(MenuItem::separator());
+    items.extend(Normalization::MODIFIED.into_iter().map(normalization));
+    items
+}
+
+fn normalization(form: Normalization) -> MenuItem {
+    MenuItem::action(
+        form.name(),
+        actions::text::NormalizeUnicode {
+            form: form.identifier().to_string(),
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +429,7 @@ mod tests {
             LINE_ENDINGS_MENU,
             SYNTAX_MENU,
             THEME_MENU,
+            UNICODE_NORMALIZATIONS_MENU,
             INSERT_SNIPPET_MENU,
         ] {
             let menus = build(&state());
@@ -528,6 +561,69 @@ mod tests {
             })
             .collect();
         assert_eq!(named, ["None", "HTML", "Markdown", "Ruby"]);
+    }
+
+    // ---- the normalization submenu ----------------------------------------
+
+    /// Upstream's `standardForms + [nil] + modifiedForms`, which its menu
+    /// builder splices together.
+    #[test]
+    fn the_normalization_menu_is_five_then_a_separator_then_two() {
+        let menus = build(&state());
+        assert_eq!(
+            labels(&menus, UNICODE_NORMALIZATIONS_MENU),
+            [
+                "NFD",
+                "NFC",
+                "NFKD",
+                "NFKC",
+                "NFKC Case-Fold",
+                "―",
+                "Modified NFD",
+                "Modified NFC",
+            ]
+        );
+    }
+
+    /// Nothing is checked: a normalization is an edit, not a setting. Nothing is
+    /// greyed either — the three forms this build cannot apply say so when they
+    /// run, rather than looking unavailable.
+    #[test]
+    fn the_normalization_menu_has_no_checks_and_no_dead_items() {
+        let menus = build(&state());
+        let items = &submenu(&menus, UNICODE_NORMALIZATIONS_MENU).items;
+        assert!(!items.iter().any(MenuItem::is_checked));
+        assert!(!items.iter().any(MenuItem::is_disabled));
+    }
+
+    /// Each item carries its own form, and a form the runtime does not know is
+    /// dropped rather than run — which is what makes the identifiers matter.
+    #[test]
+    fn every_normalization_item_names_the_form_it_stands_for() {
+        let menus = build(&state());
+        let named: Vec<&str> = submenu(&menus, UNICODE_NORMALIZATIONS_MENU)
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { action, .. } => {
+                    let form = &action
+                        .as_any()
+                        .downcast_ref::<actions::text::NormalizeUnicode>()
+                        .expect("a normalization item runs NormalizeUnicode")
+                        .form;
+                    Some(
+                        Normalization::from_identifier(form)
+                            .expect("an item names a form the runtime knows")
+                            .name(),
+                    )
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            named,
+            ["NFD", "NFC", "NFKD", "NFKC", "NFKC Case-Fold", "Modified NFD", "Modified NFC"]
+        );
     }
 
     // ---- the snippet submenu ---------------------------------------------

@@ -55,8 +55,8 @@ use gpui_kit::{
 };
 
 use subtext_core::{
-    Document, DroppedFile, LineEnding, TextEncoding, charinfo, colorcode, encoding, finder,
-    imagesize, line_ending, multireplace, textops,
+    Document, DroppedFile, LineEnding, Normalization, TextEncoding, charinfo, colorcode, encoding,
+    finder, imagesize, line_ending, multireplace, textops,
 };
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
@@ -850,6 +850,31 @@ impl Workspace {
     }
 
     // ---- text operations -------------------------------------------------
+
+    /// Text ▸ Unicode Normalizations, for the form the menu named.
+    ///
+    /// Three of upstream's seven forms come from Apple's own Unicode tables,
+    /// which SubText does not carry — see
+    /// [`Normalization`](subtext_core::Normalization). The menu lists them
+    /// anyway, because a form that exists upstream and is missing here is worth
+    /// naming; what it must not do is look like it worked.
+    pub fn normalize_unicode(
+        &mut self,
+        form: Normalization,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !form.is_supported() {
+            self.set_status(
+                format!("{} needs Apple's own Unicode tables, which SubText does not carry", form.name()),
+                cx,
+            );
+            return;
+        }
+        self.text_op(window, cx, move |text, selection, _| {
+            textops::normalize(text, selection, form)
+        });
+    }
 
     /// Run a text operation over the active document's selection.
     ///

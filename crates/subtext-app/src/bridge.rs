@@ -14,7 +14,7 @@
 
 use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
-use subtext_core::LineEnding;
+use subtext_core::{LineEnding, Normalization};
 
 use crate::actions;
 use crate::workspace::Workspace;
@@ -158,6 +158,13 @@ pub fn install(cx: &mut App) {
             workspace.apply_theme_by_name(&name, cx)
         });
     });
+    cx.on_action(|action: &actions::text::NormalizeUnicode, cx: &mut App| {
+        if let Some(form) = Normalization::from_identifier(&action.form) {
+            tell(cx, move |workspace, window, cx| {
+                workspace.normalize_unicode(form, window, cx)
+            });
+        }
+    });
     bind_actions! { cx,
         actions::app::ShowAboutPanel => "ShowAboutPanel",
         actions::app::ShowDonationWindow => "ShowDonationWindow",
@@ -297,10 +304,6 @@ pub fn install(cx: &mut App) {
         actions::text::ExchangeHalfwidthRoman => "ExchangeHalfwidthRoman",
         actions::text::EncodeUrl => "EncodeUrl",
         actions::text::DecodeUrl => "DecodeUrl",
-        actions::text::NormalizeNfc => "NormalizeNfc",
-        actions::text::NormalizeNfd => "NormalizeNfd",
-        actions::text::NormalizeNfkc => "NormalizeNfkc",
-        actions::text::NormalizeNfkd => "NormalizeNfkd",
         actions::text::ShowSelectionInfo => "ShowSelectionInfo",
         actions::text::ToggleAdvancedCounter => "ToggleAdvancedCounter",
         actions::text::EditColorCode => "EditColorCode",

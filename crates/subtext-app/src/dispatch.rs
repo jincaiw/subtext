@@ -24,7 +24,7 @@ impl Workspace {
     /// reported rather than ignored, so a typo in the generated table shows up
     /// as a message instead of as a dead menu item.
     pub fn dispatch(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        use textops::{CaseTransform, Normalization, WidthTransform};
+        use textops::{CaseTransform, WidthTransform};
 
         match name {
             // ---- application ------------------------------------------
@@ -291,18 +291,6 @@ impl Workspace {
             }),
             "DecodeUrl" => self.text_op(window, cx, |text, selection, _| {
                 textops::url_decode(text, selection)
-            }),
-            "NormalizeNfc" => self.text_op(window, cx, |text, selection, _| {
-                textops::normalize(text, selection, Normalization::Nfc)
-            }),
-            "NormalizeNfd" => self.text_op(window, cx, |text, selection, _| {
-                textops::normalize(text, selection, Normalization::Nfd)
-            }),
-            "NormalizeNfkc" => self.text_op(window, cx, |text, selection, _| {
-                textops::normalize(text, selection, Normalization::Nfkc)
-            }),
-            "NormalizeNfkd" => self.text_op(window, cx, |text, selection, _| {
-                textops::normalize(text, selection, Normalization::Nfkd)
             }),
             "ShowSelectionInfo" => self.inspect_selection(window, cx),
             "ToggleAdvancedCounter" => self.inspect_document(window, cx),

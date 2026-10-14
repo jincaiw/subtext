@@ -222,14 +222,22 @@ pub mod text {
         ExchangeHalfwidthRoman,
         EncodeUrl,
         DecodeUrl,
-        NormalizeNfc,
-        NormalizeNfd,
-        NormalizeNfkc,
-        NormalizeNfkd,
         ShowSelectionInfo,
         ToggleAdvancedCounter,
         EditColorCode,
     ]);
+
+    /// Normalize the selection in `form`.
+    ///
+    /// The Text ▸ Unicode Normalizations submenu is built at runtime from
+    /// `Normalization::ALL`, so the form travels with the action. The payload is
+    /// the form's [`identifier`](subtext_core::Normalization::identifier) — a
+    /// name that does not move when the list above it does.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct NormalizeUnicode {
+        pub form: String,
+    }
 }
 
 pub mod find {
