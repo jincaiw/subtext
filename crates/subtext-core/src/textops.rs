@@ -928,6 +928,46 @@ fn capitalize_words(input: &str) -> String {
     out
 }
 
+/// Replace every curly quote in the selection with the straight one.
+///
+/// CotEditor's `straightenQuotesInSelection:`, which is its own
+/// `String.straighteningQuotes` applied to the selection. That property is two
+/// character classes and nothing more — the four single quotation marks of the
+/// U+2018 block fold to `'`, the four double ones of the U+201C block fold to
+/// `"` — so guillemets, primes, the fullwidth forms and the straight quotes
+/// themselves are all left alone.
+///
+/// Upstream greys this item out while the selection is empty, even though its
+/// command would work on the word under the cursor, and it says why in its own
+/// source: to keep the item's state the same as `Replace Quotes`, which does
+/// need a selection. The empty case here is therefore the no-op it is for every
+/// other transform in this module; the caller is what tells the user.
+pub fn straighten_quotes(text: &str, selection: &Range<usize>) -> Edit {
+    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let start = floor_char_boundary(text, start);
+    let end = floor_char_boundary(text, end);
+    if start == end {
+        return Edit::unchanged(text.to_string(), selection.clone());
+    }
+
+    let replaced: String = text[start..end]
+        .chars()
+        .map(|c| match c {
+            // U+2018 ‘, U+2019 ’, U+201A ‚, U+201B ‛
+            '\u{2018}'..='\u{201B}' => '\'',
+            // U+201C “, U+201D ”, U+201E „, U+201F ‟
+            '\u{201C}'..='\u{201F}' => '"',
+            other => other,
+        })
+        .collect();
+
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..start]);
+    out.push_str(&replaced);
+    out.push_str(&text[end..]);
+    Edit { text: out, selection: start..start + replaced.len() }
+}
+
 /// Which width conversion to apply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidthTransform {
@@ -1866,6 +1906,50 @@ mod tests {
             transform_case(text, &(0..11), CaseTransform::Capitalize).text,
             "Hello WORLD"
         );
+    }
+
+    /// The eight code points upstream folds, and the two it folds them to. The
+    /// mapping is written as upstream writes it — two character classes — so
+    /// the guillemets, the primes and the fullwidth forms that a reader might
+    /// expect to find here are the point of the test.
+    #[test]
+    fn straighten_quotes_folds_the_eight_curly_ones() {
+        let text = "‘a’‚b‛ “c”„d‟";
+        let edit = straighten_quotes(text, &all(text));
+        assert_eq!(edit.text, "'a''b' \"c\"\"d\"");
+        // Nothing else moved, and the selection covers what was replaced.
+        assert_eq!(edit.selection, 0..edit.text.len());
+    }
+
+    /// The characters that look like quotes and are *not* in the class:
+    /// guillemets, primes, the fullwidth forms, and the straight quotes the
+    /// fold produces — which is what makes it one-way rather than a toggle.
+    #[test]
+    fn straighten_quotes_leaves_every_other_quote_alone() {
+        let text = "«a» ‹b› ′c″ ＂d＂ 'e' \"f\"";
+        assert_eq!(straighten_quotes(text, &all(text)).text, text);
+    }
+
+    /// Only the selection is touched, and the multi-byte characters on either
+    /// side of it keep their offsets: 日 is 0..3, 本 3..6, ‘ 6..9, 語 9..12,
+    /// ’ 12..15 — so `6..15` is the quoted word and `6..11` is what it becomes.
+    #[test]
+    fn straighten_quotes_edits_only_the_selection() {
+        let text = "日本‘語’";
+        let edit = straighten_quotes(text, &(6..15));
+        assert_eq!(edit.text, "日本'語'");
+        assert_eq!(edit.selection, 6..11);
+    }
+
+    /// Upstream greys the item out with nothing selected, so this is the state
+    /// the command can never be reached in — but it is the same no-op every
+    /// other transform in this module is, rather than a panic or a surprise.
+    #[test]
+    fn straighten_quotes_with_nothing_selected_changes_nothing() {
+        let text = "‘a’";
+        let edit = straighten_quotes(text, &(3..3));
+        assert_eq!(edit.text, text);
+        assert_eq!(edit.selection, 3..3);
     }
 
     #[test]

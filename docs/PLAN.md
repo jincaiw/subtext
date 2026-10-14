@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9g |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9h |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1233,10 +1233,43 @@ SubText 的 `menus::commands` 里 `walk` 跳过 `disabled` 正是同一条规则
 冒烟：开两个文档存活 5 秒、stderr 0 字节、`Settings.json` 里 `recent_documents` 按最新优先
 记录了这两条。
 
+**8.9h `Edit ▸ Substitutions ▸ Straighten Quotes`**（`subtext-core/src/textops.rs` / `dispatch.rs` / `workspace.rs`）
+
+8.9g 的审计顺手把 Substitutions 组这四条重新过了一遍，结论是它们不是一类东西：
+
+| 菜单项 | 上游实现 | 结论 |
+| --- | --- | --- |
+| `Straighten Quotes` | `straightenQuotesInSelection:` 是 CotEditor **自己的**（`EditorTextView+Transformation.swift` → `String.straighteningQuotes`） | 纯变换，**可照搬** |
+| `Replace Quotes` / `Replace Dashes` / `Replace Text` | 三个 selector 都不在 AppKit 公开头文件里；探针实测「`NSTextView` 实例响应、类不响应」 | `NSTextView` 的私有实现（替换面板的系统服务），⚠️ 平台受限 |
+
+所以这一轮把 `Straighten Quotes` 实现掉，另外三条的措辞从「尚未实现」改成「系统替换服务仅
+macOS 可用」——与拼写/语音那一组同口径。
+
+实现：
+
+- `subtext-core/src/textops.rs` 新增 `straighten_quotes(text, selection) -> Edit`，与同模块的
+  `transform_case` / `transform_width` / `normalize` 同形：只改选区，返回替换后的缓冲区与
+  应当跟随的选区，空选区是不做任何事的 `Edit::unchanged`。
+- 映射严格照上游那两行：`U+2018..=U+201B`（‘ ’ ‚ ‛）→ `'`，`U+201C..=U+201F`（“ ” „ ‟）→ `"`。
+  这**不是** toggle：`«»`、`‹›`、`′″`、全角 `＂` 与直的 `'` / `"` 都不在类里（有测试盯着）。
+- `dispatch.rs` 把原来四条共用的一个臂拆开：`StraightenQuotesInSelection` 走真实现，
+  另外三条给平台受限的说明。
+
+**一处已知偏差**：上游 `validateUserInterfaceItem` 里 `straightenQuotesInSelection:` 有一条
+显式校验——`isEditable && !selectedRange.isEmpty`，注释还写明理由：「虽然它在空选区下也能
+工作（会作用在光标所在的词上），仍然禁用它，好让它的状态与 `replaceQuotesInSelection:` 一致」。
+GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选区重新问一次」的钩子；要让这一项
+跟着光标动，就得在每次选区变化时重建整条 258 项的菜单栏，这个代价不值得。所以这一项**保持可用**，
+空选区时在状态栏说 `Select something first`（与 `Use Selection for Find` 同口径），
+**两种情况都不改文本**——可观察到的结果与上游一致。这条记在缺口表里。
+
+验收：4 条新测试（八个码点各归位；`«»`/`‹›`/`′″`/全角/直引号一律不动；只改选区且多字节
+偏移正确；空选区是 no-op）。全工作区 **508** 项测试全绿（504 → 508），clippy 零自有警告。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（504 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（508 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
@@ -1256,6 +1289,7 @@ SubText 的 `menus::commands` 里 `walk` 跳过 `disabled` 正是同一条规则
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
+| `Straighten Quotes` 不随选区置灰 | 上游在空选区时禁用它（`validateUserInterfaceItem`，见 §8.9h）；GPUI 的菜单项只有固定 `disabled`，要跟着光标动就得每次选区变化重建 258 项菜单栏。SubText 保持可用、空选区时在状态栏说明，两种情况都不改文本。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

@@ -955,6 +955,26 @@ impl Workspace {
         });
     }
 
+    /// Edit ▸ Substitutions ▸ Straighten Quotes.
+    ///
+    /// Upstream greys this item out while the selection is empty, even though
+    /// its command would work on the word under the cursor, and it says why in
+    /// its own source: to keep the item's state the same as *Replace Quotes*,
+    /// which does need a selection. A GPUI menu item carries one fixed disabled
+    /// flag and no way to be re-asked per selection, and rebuilding the whole
+    /// bar on every caret move to keep one item in step is not a trade worth
+    /// making — so the item stays live and says what it needs instead. The text
+    /// is not touched either way.
+    pub fn straighten_quotes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_selection(cx).is_empty() {
+            self.set_status("Select something first", cx);
+            return;
+        }
+        self.text_op(window, cx, |text, selection, _| {
+            textops::straighten_quotes(text, selection)
+        });
+    }
+
     /// Wrap every selected line in `open`/`close`.
     pub fn surround(
         &mut self,

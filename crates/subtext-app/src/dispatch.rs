@@ -111,9 +111,14 @@ impl Workspace {
             | "OrderFrontSubstitutionsPanel" | "StartSpeaking" | "StopSpeaking" => {
                 self.notice("System spelling and speech services are macOS-only", cx)
             }
-            "StraightenQuotesInSelection" | "ReplaceQuotesInSelection"
-            | "ReplaceDashesInSelection" | "ReplaceTextInSelection" => {
-                self.notice("Substitutions are not implemented yet", cx)
+            "StraightenQuotesInSelection" => self.straighten_quotes(window, cx),
+            // The other three are NSTextView's own. They are not in AppKit's
+            // public headers — a probe finds an instance answering to them while
+            // the class does not — which makes them the Substitutions panel's
+            // system service rather than a transform anything can reimplement.
+            "ReplaceQuotesInSelection" | "ReplaceDashesInSelection"
+            | "ReplaceTextInSelection" => {
+                self.notice("System text substitution services are macOS-only", cx)
             }
 
             // ---- format ------------------------------------------------

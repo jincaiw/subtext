@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 32,172（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 32,289（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -84,11 +84,18 @@
 | 智能引号 / 破折号 / 文本替换 | ⚠️ |
 | 智能插入删除 | ⚠️ |
 | 开始朗读 / 停止朗读 | ⚠️ |
-| 引号拉直 / 引号替换 / 破折号替换 | ⏳ |
-| 替换文本 | ⏳ |
+| 引号拉直 | ✅ `textops::straighten_quotes`（`[‘’‚‛]`→`'`、`[“”„‟]`→`"`）；空选区时提示「Select something first」 |
+| 引号替换 / 破折号替换 / 替换文本 | ⚠️ macOS-only |
 
 > **保留策略**：这些菜单项**全部保留在菜单栏中**（保真度要求菜单一致），
 > 触发时在状态栏说明「系统拼写与语音服务仅 macOS 可用」。
+>
+> **引号拉直是这一组里唯一的例外**：它是 CotEditor 自己的纯变换
+> （`EditorTextView+Transformation.swift` 的 `straightenQuotesInSelection:` →
+> `String.straighteningQuotes`），与平台无关，已实现（见 `docs/PLAN.md` §8.9h）。
+> 另外三条 `replaceQuotesInSelection:` / `replaceDashesInSelection:` /
+> `replaceTextInSelection:` 不在 AppKit 公开头文件里，实测「实例响应、类不响应」，
+> 即 `NSTextView` 的私有实现（替换面板的系统服务），GPUI 无对应能力。
 
 ## 5. 格式菜单
 
@@ -288,10 +295,10 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 125 | 63% |
+| ✅ 完整实现 | 约 126 | 63% |
 | 🔁 等价实现（委托或改写） | 约 24 | 12% |
-| ⚠️ 平台受限（菜单保留） | 约 19 | 9% |
-| ⏳ 未实现（菜单保留 + 提示） | 约 32 | 16% |
+| ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
+| ⏳ 未实现（菜单保留 + 提示） | 约 30 | 15% |
 | **合计** | **200** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。
