@@ -606,6 +606,16 @@ pub struct Settings {
     pub folder_find_includes_hidden_files: bool,
     pub folder_find_includes_other_file_types: bool,
 
+    /// Whether the split editors sit side by side rather than one above the
+    /// other.
+    ///
+    /// CotEditor's `splitViewVertical`, which names the *divider*: a vertical
+    /// divider separates panes that sit left and right. Like upstream's, it is
+    /// not in the Settings window — the View menu's *Stack Editors …* item and
+    /// the navigation bar's button are the only way to change it, and the
+    /// choice is remembered for the next launch.
+    pub split_view_vertical: bool,
+
     /// The unnamed file scope the *File Scope* menu last held.
     pub folder_find_scope: Option<FileScope>,
     /// Named scopes, keyed by name — upstream's `folderFindSavedScopes`.
@@ -650,6 +660,9 @@ impl Default for Settings {
             folder_find_ignores_case: false,
             folder_find_includes_hidden_files: false,
             folder_find_includes_other_file_types: false,
+            // CotEditor's `splitViewVertical` default is `false`: a fresh
+            // window stacks its editors one above the other.
+            split_view_vertical: false,
             folder_find_scope: None,
             folder_find_saved_scopes: BTreeMap::new(),
         }

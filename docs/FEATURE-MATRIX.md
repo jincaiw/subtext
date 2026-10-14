@@ -136,7 +136,7 @@
 | 行号 | `update_editor_options` | ✅ |
 | 状态栏 | `update_window_options` | ✅ |
 | 下一个 / 上一个编辑器 | `next_tab(±)` | ✅ |
-| 分屏 / 关闭分屏 / 切换方向 | — | ⏳ |
+| 分屏 / 关闭分屏 / 切换方向 | `open_split_editor` / `close_split_editor` / `toggle_split_orientation` | ✅ |
 | 全屏 | `toggle_fullscreen` | ✅ |
 | 保持在最前 | `update_window_options` | ✅ |
 

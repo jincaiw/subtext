@@ -31,16 +31,18 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::{DialogClose, DialogFooter},
-    h_flex,
+    h_flex, h_resizable,
     input::{Editor, Input, InputState},
+    resizable_panel,
     tab::{Tab, TabBar},
-    v_flex,
+    v_flex, v_resizable,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, WeakEntity, Window, WindowOptions, div, px,
+    IntoElement, MouseButton, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, WindowOptions,
+    div, px,
 };
 
 use subtext_core::{
@@ -62,6 +64,12 @@ use crate::sort_sheet::SortSheet;
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
 
+/// How many editors one document may be split into.
+///
+/// CotEditor's `DocumentViewController.maximumNumberOfSplitEditors`. Past it
+/// upstream beeps; SubText has no beep and says so in the status bar instead.
+const MAXIMUM_SPLIT_EDITORS: usize = 4;
+
 /// Stable identity for an open document.
 ///
 /// A document's element identity must not be its position in `documents`.
@@ -81,18 +89,66 @@ impl DocumentId {
     fn tab_close(self) -> ElementId {
         ElementId::NamedInteger("tab-close".into(), self.0)
     }
+
+    /// The element ID for the group that holds this document's split panes.
+    ///
+    /// Keyed by document so each one keeps its own divider positions, the way
+    /// each CotEditor window keeps its own `NSSplitView` autosave.
+    fn split_group(self) -> ElementId {
+        ElementId::NamedInteger("editor-split".into(), self.0)
+    }
 }
 
-/// One open document and its editor.
+/// One editor pane of an open document.
+///
+/// The subscription is owned by the pane rather than by the document so that
+/// closing one pane of a split drops exactly its subscription and leaves the
+/// others alone.
+struct Pane {
+    editor: Entity<gpui_kit::base::input::EditorState>,
+    _subscription: Subscription,
+}
+
+/// One open document and its editors.
 pub struct OpenDocument {
     /// Stable identity, independent of the tab's position.
     pub id: DocumentId,
     pub document: Document,
-    pub editor: Entity<gpui_kit::base::input::EditorState>,
+    /// One editor per split pane, in visual order. Never empty.
+    ///
+    /// CotEditor shares a single `NSTextStorage` between its split text views,
+    /// so an edit in one is instantly visible in the rest. Each SubText pane
+    /// owns its own buffer, so the workspace copies the text across — see
+    /// [`Workspace::sync_panes`].
+    panes: Vec<Pane>,
+    /// The pane the commands act on, which is the one the user last typed in
+    /// or clicked. CotEditor tracks the same thing in `focusedTextView`.
+    active_pane: usize,
     pub syntax: SharedString,
     /// Set when the file changed underneath us since it was last read.
     pub modified_on_disk: bool,
-    _subscriptions: Vec<Subscription>,
+}
+
+impl OpenDocument {
+    /// The pane that has the focus.
+    pub fn editor(&self) -> &Entity<gpui_kit::base::input::EditorState> {
+        &self.panes[self.active_pane].editor
+    }
+
+    /// Every pane, in visual order.
+    pub fn editors(&self) -> impl Iterator<Item = &Entity<gpui_kit::base::input::EditorState>> {
+        self.panes.iter().map(|pane| &pane.editor)
+    }
+
+    /// How many editors the document is split into.
+    pub fn pane_count(&self) -> usize {
+        self.panes.len()
+    }
+
+    /// The index of the pane that has the focus.
+    pub fn active_pane(&self) -> usize {
+        self.active_pane
+    }
 }
 
 impl OpenDocument {
@@ -235,41 +291,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let syntax = self
-            .syntaxes
-            .by_name(&syntax_name)
-            .cloned()
-            .unwrap_or_else(|| self.syntaxes.plain_text().clone());
-
         let text = document.text().to_string();
-        let style = highlighter::editor_style(&self.theme);
-        let language = syntax.name.clone();
-
-        let editor = cx.new(|cx| {
-            let mut state = gpui_kit::base::input::EditorState::new(window, cx);
-            state.set_editor_style(style);
-            if let Some(factory) = highlighter::current_factory() {
-                state.set_highlighter_factory(factory, cx);
-            }
-            state.set_value(text, window, cx);
-            state.set_highlighter(language, cx);
-            state.set_line_number(self.settings.editor.show_line_numbers, window, cx);
-            state.set_soft_wrap(self.settings.editor.wrap_lines, window, cx);
-            state.set_show_whitespaces(self.settings.editor.show_invisibles, window, cx);
-            state.set_indent_guides(self.settings.editor.show_indent_guides, window, cx);
-            state.set_readonly(!self.settings.editor.editable, cx);
-            state
-        });
-
-        let subscription = cx.subscribe_in(
-            &editor,
-            window,
-            |this: &mut Self, _editor, event: &gpui_kit::base::input::InputEvent, window, cx| {
-                if matches!(event, gpui_kit::base::input::InputEvent::Change) && !this.loading {
-                    this.on_buffer_changed(window, cx);
-                }
-            },
-        );
+        let editor = self.new_editor(text, &syntax_name, window, cx);
+        let subscription = self.subscribe_pane(&editor, window, cx);
 
         let id = DocumentId(self.next_document_id);
         self.next_document_id += 1;
@@ -277,46 +301,175 @@ impl Workspace {
         self.documents.push(OpenDocument {
             id,
             document,
-            editor,
+            panes: vec![Pane { editor, _subscription: subscription }],
+            active_pane: 0,
             syntax: SharedString::from(syntax_name),
             modified_on_disk: false,
-            _subscriptions: vec![subscription],
         });
         self.active = self.documents.len() - 1;
         cx.notify();
     }
 
-    /// Mirror the editor buffer into the document model.
-    fn on_buffer_changed(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(document) = self.documents.get_mut(self.active) else {
+    /// Build one editor pane showing `text`.
+    ///
+    /// Split panes differ only in their buffer, their caret and their scroll
+    /// position; everything else — font, size, line numbers, soft wrap,
+    /// whitespace, indent guides, syntax and theme — comes from the same
+    /// settings, which is why a pane is built from settings rather than
+    /// copied from a sibling.
+    fn new_editor(
+        &self,
+        text: String,
+        syntax_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<gpui_kit::base::input::EditorState> {
+        let style = highlighter::editor_style(&self.theme);
+        let language = syntax_name.to_string();
+        let options = self.settings.editor;
+
+        cx.new(|cx| {
+            let mut state = gpui_kit::base::input::EditorState::new(window, cx);
+            state.set_editor_style(style);
+            if let Some(factory) = highlighter::current_factory() {
+                state.set_highlighter_factory(factory, cx);
+            }
+            state.set_value(text, window, cx);
+            state.set_highlighter(language, cx);
+            state.set_line_number(options.show_line_numbers, window, cx);
+            state.set_soft_wrap(options.wrap_lines, window, cx);
+            state.set_show_whitespaces(options.show_invisibles, window, cx);
+            state.set_indent_guides(options.show_indent_guides, window, cx);
+            state.set_readonly(!options.editable, cx);
+            state
+        })
+    }
+
+    /// Follow one pane's buffer back into the document model.
+    fn subscribe_pane(
+        &mut self,
+        editor: &Entity<gpui_kit::base::input::EditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            editor,
+            window,
+            |this: &mut Self, editor, event: &gpui_kit::base::input::InputEvent, window, cx| {
+                if matches!(event, gpui_kit::base::input::InputEvent::Change) && !this.loading {
+                    this.on_pane_changed(editor, window, cx);
+                }
+            },
+        )
+    }
+
+    /// Mirror one pane's buffer into the document model and its siblings.
+    fn on_pane_changed(
+        &mut self,
+        editor: &Entity<gpui_kit::base::input::EditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self
+            .documents
+            .iter()
+            .position(|document| document.editors().any(|pane| pane == editor))
+        else {
             return;
         };
-        let text = document.editor.read(cx).value().to_string();
-        let current_line_ending = document.document.line_ending();
-        document.document.set_text(text.clone(), true);
+        let pane = self.documents[index]
+            .editors()
+            .position(|candidate| candidate == editor)
+            .unwrap_or(0);
+        self.documents[index].active_pane = pane;
+
+        let text = editor.read(cx).value().to_string();
+        // Bringing a sibling up to date emits `Change` as well. Its text is
+        // already what the document holds, so there is nothing to mirror and
+        // nothing further to copy — which is what keeps the round trip from
+        // repeating.
+        if self.documents[index].document.text() == text {
+            return;
+        }
+
+        let current_line_ending = self.documents[index].document.line_ending();
+        self.documents[index].document.set_text(text.clone(), true);
         // A document whose buffer no longer uses its declared ending has been
         // retyped; keep the model honest rather than lying in the status bar.
         let detected = subtext_core::line_ending::detect(&text);
         if detected != current_line_ending && !text.is_empty() {
-            document.document.set_line_ending(detected);
+            self.documents[index].document.set_line_ending(detected);
         }
         self.find.matches.clear();
         self.find.current = None;
+        self.sync_panes(index, pane, text, window, cx);
         cx.notify();
     }
 
-    /// The buffer of the active document, straight from the editor.
+    /// Copy `text` into every pane of `index` but `source`.
+    ///
+    /// Deferred for the same reason every other programmatic text write is:
+    /// `replace_all` emits `Change`, and this runs inside the workspace update
+    /// that the source pane's own change started. Each target pane's caret and
+    /// scroll position are put back afterwards, because replacing the whole
+    /// text resets both — CotEditor's panes share one text storage and keep
+    /// their own selections, so a pane the user is not typing in must not jump
+    /// to the top of the document on every keystroke elsewhere.
+    fn sync_panes(
+        &mut self,
+        index: usize,
+        source: usize,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let targets: Vec<_> = self.documents[index]
+            .panes
+            .iter()
+            .enumerate()
+            .filter(|(pane, _)| *pane != source)
+            .map(|(_, pane)| pane.editor.clone())
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+
+        window.defer(cx, move |window, cx| {
+            for editor in targets {
+                editor.update(cx, |state, cx| {
+                    if state.value().as_ref() == text.as_str() {
+                        return;
+                    }
+                    let caret = state.selected_range();
+                    let scroll = state.scroll_offset();
+                    state.replace_all(text.clone(), window, cx);
+                    state.set_selected_range(caret, cx);
+                    state.set_scroll_offset(scroll, cx);
+                });
+            }
+        });
+    }
+
+    /// The buffer of the active document, straight from the focused editor.
     fn active_text(&self, cx: &App) -> Option<String> {
         let document = self.documents.get(self.active)?;
-        Some(document.editor.read(cx).value().to_string())
+        Some(document.editor().read(cx).value().to_string())
     }
 
     /// The active document's selection, in byte offsets.
     fn active_selection(&self, cx: &App) -> Range<usize> {
         self.documents
             .get(self.active)
-            .map(|document| document.editor.read(cx).selected_range())
+            .map(|document| document.editor().read(cx).selected_range())
             .unwrap_or(0..0)
+    }
+
+    /// Every pane of every open document.
+    fn all_panes(&self) -> Vec<Entity<gpui_kit::base::input::EditorState>> {
+        self.documents
+            .iter()
+            .flat_map(|document| document.editors().cloned())
+            .collect()
     }
 
     pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -395,7 +548,7 @@ impl Workspace {
         };
 
         // Pull the buffer back out of the editor before writing.
-        let text = self.documents[index].editor.read(cx).value().to_string();
+        let text = self.documents[index].editor().read(cx).value().to_string();
         self.documents[index].document.set_text(text, true);
 
         if as_new_path || self.documents[index].document.is_untitled() {
@@ -433,7 +586,7 @@ impl Workspace {
         let Some(index) = self.documents.get(self.active).map(|_| self.active) else {
             return;
         };
-        let text = self.documents[index].editor.read(cx).value().to_string();
+        let text = self.documents[index].editor().read(cx).value().to_string();
         self.documents[index].document.set_text(text, true);
 
         match self.documents[index].document.save(target) {
@@ -466,10 +619,11 @@ impl Workspace {
         }
         match document.document.revert() {
             Ok(()) => {
-                let editor = document.editor.clone();
                 let text = document.document.text().to_string();
                 self.loading = true;
-                editor.update(cx, |state, cx| state.set_value(text, window, cx));
+                for editor in document.editors() {
+                    editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+                }
                 self.loading = false;
                 document.modified_on_disk = false;
                 self.set_status("Reverted to the saved version", cx);
@@ -580,7 +734,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
+        let editor = document.editor().clone();
         let delimiters = self
             .syntaxes
             .by_name(&document.syntax)
@@ -734,7 +888,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
+        let editor = document.editor().clone();
         let code = code.to_string();
         // Deferred for the same reason every other text change is: `replace`
         // emits `Change`, and the subscription that follows the buffer back
@@ -808,7 +962,7 @@ impl Workspace {
             return Some(0);
         }
 
-        let editor = self.documents.get(self.active)?.editor.clone();
+        let editor = self.documents.get(self.active)?.editor().clone();
         // Deferred for the same reason every other text change is: `replace_all`
         // emits `Change`, and the subscription that follows the buffer back into
         // the document model must not run inside this update.
@@ -928,7 +1082,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        document.editor.update(cx, |state, cx| {
+        document.editor().update(cx, |state, cx| {
             state.set_selected_range(first, cx);
             for range in rest {
                 state.add_selection(range, cx);
@@ -946,7 +1100,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
+        let editor = document.editor().clone();
         let text = text.to_string();
         // Deferred for the same reason the text operations are: `replace`
         // emits `Change`, and the subscription that follows the buffer back
@@ -961,7 +1115,7 @@ impl Workspace {
             return;
         };
         document
-            .editor
+            .editor()
             .update(cx, |state, cx| state.set_selected_range(range, cx));
         cx.notify();
     }
@@ -1215,7 +1369,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
+        let editor = document.editor().clone();
         window.defer(cx, move |window, cx| {
             editor.update(cx, |state, cx| {
                 state.replace_all(replaced, window, cx);
@@ -1257,7 +1411,7 @@ impl Workspace {
         let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
+        let editor = document.editor().clone();
         window.defer(cx, move |window, cx| {
             editor.update(cx, |state, cx| state.replace_all(replaced, window, cx));
         });
@@ -1285,7 +1439,7 @@ impl Workspace {
     /// makes the change visible without a restart.
     pub fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let options = self.settings.editor;
-        let editors: Vec<_> = self.documents.iter().map(|d| d.editor.clone()).collect();
+        let editors = self.all_panes();
         for editor in editors {
             editor.update(cx, |state, cx| {
                 state.set_line_number(options.show_line_numbers, window, cx);
@@ -1339,6 +1493,115 @@ impl Workspace {
         cx.notify();
     }
 
+    // ---- split editors ---------------------------------------------------
+
+    /// Split the active document's editor in two, after the pane in focus.
+    ///
+    /// CotEditor's `openSplitTextView`: the new pane opens *below* (or right
+    /// of) the current one, starts on the same selection, and takes the focus.
+    /// The cap is four, as upstream's is.
+    pub fn open_split_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.active;
+        let Some(document) = self.documents.get(index) else {
+            return;
+        };
+        if document.pane_count() >= MAXIMUM_SPLIT_EDITORS {
+            self.set_status("An editor can be split into four at most", cx);
+            return;
+        }
+
+        let pane = document.active_pane();
+        let syntax = document.syntax.to_string();
+        let text = document.editor().read(cx).value().to_string();
+        let caret = document.editor().read(cx).selected_range();
+
+        let editor = self.new_editor(text, &syntax, window, cx);
+        let subscription = self.subscribe_pane(&editor, window, cx);
+        // CotEditor copies the current selection into the new pane and scrolls
+        // both to it, so the split starts where the user was looking.
+        editor.update(cx, |state, cx| state.set_selected_range(caret, cx));
+
+        let document = &mut self.documents[index];
+        document.panes.insert(pane + 1, Pane { editor, _subscription: subscription });
+        document.active_pane = pane + 1;
+        cx.notify();
+    }
+
+    /// Close the pane in focus, keeping one editor per document.
+    ///
+    /// CotEditor's `closeSplitTextView`: focus goes to the pane before the one
+    /// that closed, or to the last pane when the first one closed.
+    pub fn close_split_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.active;
+        let Some(document) = self.documents.get_mut(index) else {
+            return;
+        };
+        let closing = document.active_pane;
+        let count = document.pane_count();
+        if count < 2 {
+            return;
+        }
+
+        document.panes.remove(closing);
+        let successor = successor_pane(closing, count);
+        document.active_pane = successor;
+        let successor = document.panes[successor].editor.clone();
+
+        successor.update(cx, |state, cx| state.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Stack the split editors the other way round.
+    ///
+    /// CotEditor's `toggleSplitOrientation`, which persists the choice in
+    /// `UserDefaults`; here it goes into the settings file, so the next launch
+    /// opens the same way.
+    pub fn toggle_split_orientation(&mut self, cx: &mut Context<Self>) {
+        self.settings.split_view_vertical = !self.settings.split_view_vertical;
+        let _ = self.settings.save();
+        let message = if self.settings.split_view_vertical {
+            "Editors now sit side by side"
+        } else {
+            "Editors now stack one above the other"
+        };
+        self.set_status(message, cx);
+    }
+
+    /// Make `pane` the one the commands act on, and put the caret in it.
+    fn focus_pane(&mut self, pane: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        let Some(editor) = document.editors().nth(pane).cloned() else {
+            return;
+        };
+        document.active_pane = pane;
+        editor.update(cx, |state, cx| state.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Move the focus to the next or previous editor.
+    ///
+    /// CotEditor's ⌃\` and ⇧⌃\`, which cycle the panes of the window with
+    /// wraparound and do nothing when the editor is not split. SubText's tabs
+    /// are its windows, though, and those keys would otherwise be dead on an
+    /// unsplit document — so there they fall back to switching documents,
+    /// which is what they did before the editor could be split at all.
+    pub fn focus_next_editor(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.active;
+        let Some(document) = self.documents.get(index) else {
+            return;
+        };
+        let count = document.pane_count();
+        if count < 2 {
+            self.next_tab(forward, cx);
+            return;
+        }
+
+        let current = document.active_pane();
+        self.focus_pane(cycled_pane(current, count, forward), window, cx);
+    }
+
     // ---- format ----------------------------------------------------------
 
     pub fn set_line_ending(
@@ -1350,11 +1613,12 @@ impl Workspace {
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
         document.document.set_line_ending(ending);
         let text = document.document.text().to_string();
         self.loading = true;
-        editor.update(cx, |state, cx| state.set_value(text, window, cx));
+        for editor in document.editors() {
+            editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        }
         self.loading = false;
         self.set_status(format!("Line endings: {}", ending.abbreviation()), cx);
     }
@@ -1368,11 +1632,12 @@ impl Workspace {
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
         document.document.convert_encoding(encoding, encoding::Bom::None);
         let text = document.document.text().to_string();
         self.loading = true;
-        editor.update(cx, |state, cx| state.set_value(text, window, cx));
+        for editor in document.editors() {
+            editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        }
         self.loading = false;
         let _ = window;
         self.set_status(format!("Encoding: {}", encoding.name), cx);
@@ -1390,10 +1655,11 @@ impl Workspace {
         };
         match document.document.reinterpret(encoding) {
             Ok(()) => {
-                let editor = document.editor.clone();
                 let text = document.document.text().to_string();
                 self.loading = true;
-                editor.update(cx, |state, cx| state.set_value(text, window, cx));
+                for editor in document.editors() {
+                    editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+                }
                 self.loading = false;
                 self.set_status(
                     format!("Reinterpreted as {}", encoding.name),
@@ -1408,9 +1674,10 @@ impl Workspace {
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
-        let editor = document.editor.clone();
         document.syntax = SharedString::from(name.to_string());
-        editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
+        for editor in document.editors() {
+            editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
+        }
         self.set_status(format!("Syntax: {name}"), cx);
     }
 
@@ -1421,11 +1688,12 @@ impl Workspace {
             return;
         };
         let name = document.syntax.to_string();
-        let editor = document.editor.clone();
-        editor.update(cx, |state, cx| {
-            state.set_highlighter(name, cx);
-            cx.notify();
-        });
+        for editor in document.editors() {
+            editor.update(cx, |state, cx| {
+                state.set_highlighter(name.clone(), cx);
+                cx.notify();
+            });
+        }
         cx.notify();
     }
 
@@ -1496,7 +1764,7 @@ impl Workspace {
         gpui_kit::component::Theme::change(mode, None, cx);
 
         let style = highlighter::editor_style(&theme);
-        let editors: Vec<_> = self.documents.iter().map(|d| d.editor.clone()).collect();
+        let editors = self.all_panes();
         for editor in editors {
             editor.update(cx, |state, cx| {
                 state.set_editor_style(style.clone());
@@ -1968,7 +2236,7 @@ impl Workspace {
             return v_flex().into_any_element();
         };
         let model = &document.document;
-        let text = document.editor.read(cx).value().to_string();
+        let text = document.editor().read(cx).value().to_string();
         let count = charinfo::CharacterCount::of(&text, model.encoding());
 
         let rows: Vec<(&str, String)> = vec![
@@ -2008,7 +2276,7 @@ impl Workspace {
         let Some(syntax) = self.syntaxes.by_name(&document.syntax) else {
             return v_flex().into_any_element();
         };
-        let text = document.editor.read(cx).value().to_string();
+        let text = document.editor().read(cx).value().to_string();
         let items = crate::outline::extract(&text, &syntax.outlines);
 
         if items.is_empty() {
@@ -2097,7 +2365,7 @@ impl Workspace {
         let document = self.active_document();
         let position = document
             .map(|document| {
-                let state = document.editor.read(cx);
+                let state = document.editor().read(cx);
                 let offset = state.selected_range().start;
                 let text = state.value().to_string();
                 textops::line_and_column(&text, offset)
@@ -2129,6 +2397,84 @@ impl Workspace {
             .when(count > 0, |this| {
                 this.child(div().text_xs().child(format!("{count} matches")))
             })
+    }
+
+    /// The editor panes of the active document.
+    ///
+    /// One pane is the document itself. Two or more are stacked inside a
+    /// resizable group — vertically by default, side by side when
+    /// *Stack Editors …* has been used — with a draggable divider between
+    /// each pair, which is what `NSSplitViewController` gives CotEditor.
+    ///
+    /// Every pane is a wrapper `div` around the editor so that a click can
+    /// name the pane it landed in: the editor handles its own caret placement,
+    /// and the wrapper's listener does not stop the event, so the click both
+    /// focuses the editor and tells the workspace which pane commands now act
+    /// on.
+    fn render_editor_area(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(document) = self.active_document() else {
+            return div().flex_1().into_any_element();
+        };
+
+        let font_family = self
+            .settings
+            .font_family
+            .clone()
+            .unwrap_or_else(|| cx.theme().mono_font_family.to_string());
+        // The document's own type size is user data, not application zoom: it
+        // is what Format ▸ Bigger Font changes, and it must not move when the
+        // interface scale does.
+        let text_size = px(self.settings.font_size);
+        let document_id = document.id;
+
+        let panes: Vec<gpui_kit::AnyElement> = document
+            .editors()
+            .enumerate()
+            .map(|(pane, editor)| {
+                let editor = editor.clone();
+                div()
+                    .id(ElementId::NamedInteger("editor-pane".into(), (document_id.0 << 8) | pane as u64))
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .h_full()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| this.focus_pane(pane, window, cx)),
+                    )
+                    .child(
+                        // `Editor`, not `Input`: the styled code editor, whose
+                        // state carries line numbers, folding and the
+                        // highlighter. `Input` only takes an `InputState`.
+                        Editor::new(&editor)
+                            .bordered(false)
+                            .p_2()
+                            .h_full()
+                            .font_family(font_family.clone())
+                            .text_size(text_size)
+                            .into_any_element(),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+
+        if panes.len() < 2 {
+            return v_flex()
+                .flex_1()
+                .h_full()
+                .min_w_0()
+                .children(panes)
+                .into_any_element();
+        }
+
+        let group = if self.settings.split_view_vertical {
+            h_resizable(document_id.split_group())
+        } else {
+            v_resizable(document_id.split_group())
+        };
+        group
+            .children(panes.into_iter().map(|pane| resizable_panel().child(pane)))
+            .into_any_element()
     }
 
     fn render_find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2242,38 +2588,7 @@ impl Render for Workspace {
             root = root.child(self.render_find_bar(cx));
         }
 
-        let editor_area = match self.active_document() {
-            Some(document) => {
-                let editor = document.editor.clone();
-                let font_family = self
-                    .settings
-                    .font_family
-                    .clone()
-                    .unwrap_or_else(|| cx.theme().mono_font_family.to_string());
-                v_flex()
-                    .flex_1()
-                    .h_full()
-                    .min_w_0()
-                    .child(
-                        // `Editor`, not `Input`: the styled code editor, whose
-                        // state carries line numbers, folding and the
-                        // highlighter. `Input` only takes an `InputState`.
-                        Editor::new(&editor)
-                            .bordered(false)
-                            .p_2()
-                            .h_full()
-                            .font_family(font_family)
-                            // The document's own type size is user data, not
-                            // application zoom: it is what Format ▸ Bigger
-                            // Font changes, and it must not move when the
-                            // interface scale does.
-                            .text_size(px(self.settings.font_size))
-                            .into_any_element(),
-                    )
-                    .into_any_element()
-            }
-            None => div().flex_1().into_any_element(),
-        };
+        let editor_area = self.render_editor_area(cx);
 
         let mut middle = h_flex().flex_1().min_h_0();
         if self.settings.window.show_sidebar {
@@ -2396,4 +2711,86 @@ pub fn load_themes(resources: Option<&crate::resources::Resources>) -> ThemeMana
         return ThemeManager::builtin();
     }
     ThemeManager::from_themes(themes)
+}
+
+/// Which pane takes the focus once `closing` is removed from a split of
+/// `count` panes.
+///
+/// CotEditor's rule, from `closeSplitTextView`: the pane *before* the one that
+/// closed, or the last pane when the first one closed. The answer indexes the
+/// panes that are left, which is what makes the two cases asymmetric — closing
+/// the first pane of four hands the focus to the fourth, which slides down to
+/// third place.
+///
+/// `count` is the pane count *before* the removal, so it must be at least 2;
+/// anything less keeps the single pane there is.
+fn successor_pane(closing: usize, count: usize) -> usize {
+    if count < 2 {
+        return 0;
+    }
+    if closing == 0 { count - 2 } else { closing - 1 }
+}
+
+/// The pane the focus moves to when cycling a split of `count` panes.
+///
+/// CotEditor's `focusNextSplitEditor` wraps in both directions, so ⇧⌃` from the
+/// first pane lands on the last.
+fn cycled_pane(current: usize, count: usize, forward: bool) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    if forward {
+        (current + 1) % count
+    } else {
+        (current + count - 1) % count
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Closing the first pane is the case upstream gets wrong-looking on
+    /// purpose: the focus lands on the *last* pane, not the second.
+    #[test]
+    fn closing_the_first_pane_hands_the_focus_to_the_last() {
+        assert_eq!(successor_pane(0, 4), 2);
+        assert_eq!(successor_pane(0, 3), 1);
+        assert_eq!(successor_pane(0, 2), 0);
+    }
+
+    /// Any other pane hands the focus to the one before it, whose index does
+    /// not move when the closed pane is removed.
+    #[test]
+    fn closing_another_pane_hands_the_focus_to_the_one_before_it() {
+        assert_eq!(successor_pane(1, 4), 0);
+        assert_eq!(successor_pane(2, 4), 1);
+        assert_eq!(successor_pane(3, 4), 2);
+    }
+
+    /// There is nothing to hand the focus to below two panes; the caller
+    /// refuses to close in that case, and the rule must not underflow if it
+    /// ever did.
+    #[test]
+    fn a_single_pane_keeps_the_focus() {
+        assert_eq!(successor_pane(0, 1), 0);
+        assert_eq!(successor_pane(0, 0), 0);
+    }
+
+    /// Cycling wraps at both ends, so neither key is a dead end.
+    #[test]
+    fn cycling_editors_wraps_around() {
+        assert_eq!(cycled_pane(0, 3, true), 1);
+        assert_eq!(cycled_pane(2, 3, true), 0);
+        assert_eq!(cycled_pane(0, 3, false), 2);
+        assert_eq!(cycled_pane(2, 3, false), 1);
+    }
+
+    /// Cycling is only reached with a real split, but a zero count must not
+    /// divide by zero if the rule is ever reused elsewhere.
+    #[test]
+    fn cycling_no_editors_is_harmless() {
+        assert_eq!(cycled_pane(0, 0, true), 0);
+        assert_eq!(cycled_pane(0, 0, false), 0);
+    }
 }

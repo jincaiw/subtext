@@ -195,7 +195,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 顺序 | 功能 | 理由 | 状态 |
 | --- | --- | --- | --- |
 | 8.0 | 大纲改 `Tree` | 阶段 7.7 顺延；`Tree` / `TreeState` 已提供 | ⏳ |
-| 8.1 | 分屏编辑器 | 菜单里 3 项，`h_resizable`/`v_resizable` 已提供 | ⏳ |
+| 8.1 | 分屏编辑器 | 菜单里 3 项，`h_resizable`/`v_resizable` 已提供 | ✅ |
 | 8.2 | 文件夹查找 | 侧栏面板已在，缺查找逻辑 | ✅ |
 | 8.3 | 多重替换 | 需要一张可编辑的规则表 | ✅ |
 | 8.4 | 颜色代码编辑 | `ColorPicker` 组件已提供 | ✅ |
@@ -206,6 +206,85 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
+
+### 8.1 分屏编辑器 ✅
+
+上游 *View* 菜单里三条命令此前都只回一句「未实现」：*Split Editor*、*Close Split Editor*、
+*Stack Editors Vertically*（三者都无快捷键），外加 *Move Focus to Next / Previous Editor*
+（⌃\` / ⇧⌃\`）。
+
+CotEditor 的实现是 `DocumentViewController`（一个 `NSSplitViewController`）：每个窗口最多
+**4** 个编辑器，全部共享同一个 `NSTextStorage`，因此一处输入立刻出现在所有分屏里；
+每个 `EditorTextView` 各有自己的选区、滚动位置、字体、抗锯齿、连字、主题、tab 宽度与
+自动展开开关，新建分屏时从基准视图**复制**一份，并把它已经算好的语法高亮结果也拷过去，
+省掉一次重新解析。`openSplitTextView` 把新分屏插在当前分屏**之后**、继承选区、把两边都
+滚到该选区、把焦点交给新分屏；`closeSplitTextView` 把焦点交给**前一个**分屏，关掉第一个
+时交给**最后一个**（上游用 `textViews[safe: deleteIndex - 1] ?? textViews.last!`，
+在删除前的数组上取，所以关掉第 0 个时拿到的是原数组的末位）。`toggleSplitOrientation`
+翻转 `splitView.isVertical` 并把结果写进 `UserDefaults.splitViewVertical`（默认 `false`，
+即上下堆叠）。
+
+SubText 的模型不同：一个窗口装多个标签页，每个 `OpenDocument` 原本只有**一个**
+`Entity<EditorState>`。所以这轮先把「一个文档一个编辑器」改成「一个文档一组编辑器」：
+
+1. **`OpenDocument` 从 `editor` 变成 `panes: Vec<Pane>` + `active_pane: usize`**，
+   并给出 `editor()`（当前焦点分屏）、`editors()`（全部，按视觉顺序）、`pane_count()`、
+   `active_pane()`、`is_split()`。`Pane` 把编辑器与**它自己的**订阅绑在一起，
+   于是关掉一个分屏会精确地释放它那一条订阅，其余不受影响。
+   原先的 `_subscriptions: Vec<Subscription>` 随之取消。
+2. **文本同步**：GPUI 的每个 `EditorState` 各持一份 `Rope`，没有共享文本存储，
+   所以由工作区自己把文本铺开 —— `sync_panes()`。一个分屏的 `Change` 到达订阅后，
+   `on_pane_changed()` 先判断这条 `Change` 是不是「同步的回声」：如果该分屏的文本
+   已经等于文档模型的文本，就直接返回。这一条判断是**唯一**的终止条件，也是整个
+   同步不会来回震荡的原因。真正的改动才写回文档模型、重探行尾、清掉查找结果，
+   然后把新文本**延迟**（`window.defer`）写进其余分屏 —— 与其它所有程序化写入同样的
+   理由（`replace_all` 会发 `Change`，而这个函数正跑在由源分屏的 `Change` 起头的
+   工作区更新里）。
+3. **选区与滚动位置**：`replace_all` 会把选区重置到 `0..0` 并把滚动条拉回顶部，
+   而 CotEditor 的分屏各有各的选区，不该因为别人打字就跳走。所以写之前记下
+   `selected_range()` 与 `scroll_offset()`，写完立刻放回去（`set_selected_range`
+   自己会做边界裁剪，文本变短也不会越界）。
+4. **渲染**：`render_editor_area()`。单分屏时就是一个编辑器；多分屏时套进
+   `v_resizable` / `h_resizable`（按 `split_view_vertical` 选轴），每个分屏是一个
+   `resizable_panel()`，分隔条可拖动。分组用 `ElementId::NamedInteger("editor-split", 文档 id)`
+   作键，于是每个文档各记各的分隔位置 —— 对应上游每个窗口各自 autosave 的 `NSSplitView`。
+   每个分屏外面包一层带 id 的 `div`，挂一个 `on_mouse_down` 把它标成当前分屏并聚焦，
+   这就是「点击决定命令作用于哪一半」。
+5. **编辑器级设置广播**：`apply_settings()` 与 `set_theme()` 从「每个文档的编辑器」
+   改成「每个文档的每个分屏」；`set_line_ending` / `change_encoding` /
+   `reinterpret_encoding` / `revert` / `set_syntax` / `rehighlight` 改成遍历**当前文档
+   的全部**分屏 —— 与上游那几个 `for textView in self.textViews` 循环一一对应。
+   这些走 `set_value`，它不发 `Change`，所以同步通道不会被误触发。
+6. **落库**：`Settings::split_view_vertical`（默认 `false`）。上游放在 `UserDefaults`
+   且**没有设置界面**，SubText 同样不给开关，只由菜单项与导航栏按钮改。
+
+**接线**：`FocusNextEditor` / `FocusPreviousEditor` / `OpenSplitTextView` /
+`CloseSplitTextView` / `ToggleSplitOrientation` 从「提示未实现」改成调用真方法。
+
+**已知偏差（记账）**：
+
+1. **撤销栈按分屏而非按文档**。上游共享一个 `NSTextStorage`，撤销天然是文档级的；
+   SubText 每个 `EditorState` 有自己的撤销栈，同步写入经 `replace_all` 记录进目标分屏的
+   栈里，所以在任一分屏按 ⌘Z 都会产生一次改动、再同步回其余分屏。行为自洽，但
+   「撤销是文档的」这一点不再成立。改用 `set_value` 可以避免栈里多出条目，代价是目标
+   分屏的撤销历史被清空（`set_value` 会 `undo_manager.clear()`），那更糟。
+2. **光标按绝对偏移保留，而不是按编辑增量平移**。共享文本存储会自动把其它视图的
+   插入点往后推；SubText 是整篇替换后恢复原偏移，所以在一处插入字符时，另一分屏里
+   位于其后的光标不会跟着 +1。视觉上不可见（另一分屏的光标通常不在视野里），
+   但严格说与上游不同。
+3. **⌃\` / ⇧⌃\` 在未分屏时退化为切换标签页**。上游此时是空操作（重新聚焦同一个编辑器）。
+   SubText 的标签页就是它的窗口，而那两条键原本就是切标签页用的，改成空操作等于
+   删掉一个已有功能，所以保留：分屏了就轮换分屏，没分屏就切标签页。
+4. **没有 ⌃⇥ 之类的分屏快捷入口**。上游分屏只能从菜单或导航栏按钮发起，SubText 相同；
+   导航栏上的 *Split Editor* / *Close Split Editor* / *Stack Editors* 三个按钮本轮未加
+   （SubText 的导航栏目前只有面包屑与大纲菜单），菜单项已可用。
+5. **分隔条位置不落盘**。上游 `NSSplitView` 用 autosave 记住每个窗口的分隔比例；
+   SubText 的 `ResizableState` 活在窗口的 keyed state 里，同一次运行内切换标签页会保留，
+   重启后回到等分。
+6. **`test-support` 未启用**，分屏的 UI 无法无头驱动。可测的两条规则被抽成纯函数
+   （`successor_pane()`、`cycled_pane()`）并各有测试；同步通道用一次临时冒烟验证覆盖：
+   启动时强制分屏，向第 0 个分屏写入 `"hello world"`，两秒后读出两个分屏与文档模型 ——
+   三者一致且文档被标脏，随后已还原该补丁。
 
 ### 8.6 选区扩展命令 ✅
 
@@ -474,7 +553,7 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（257 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（262 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |

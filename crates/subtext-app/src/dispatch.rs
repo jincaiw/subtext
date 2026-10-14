@@ -178,11 +178,11 @@ impl Workspace {
             "ToggleStatusBar" => {
                 self.update_window_options(cx, |window| window.show_status_bar = !window.show_status_bar)
             }
-            "FocusNextEditor" => self.next_tab(true, cx),
-            "FocusPreviousEditor" => self.next_tab(false, cx),
-            "OpenSplitTextView" | "CloseSplitTextView" | "ToggleSplitOrientation" => {
-                self.notice("Split editors are not implemented yet", cx)
-            }
+            "FocusNextEditor" => self.focus_next_editor(true, window, cx),
+            "FocusPreviousEditor" => self.focus_next_editor(false, window, cx),
+            "OpenSplitTextView" => self.open_split_editor(window, cx),
+            "CloseSplitTextView" => self.close_split_editor(window, cx),
+            "ToggleSplitOrientation" => self.toggle_split_orientation(cx),
             "ToggleFullScreen" => window.toggle_fullscreen(),
             "ToggleKeepOnTop" => {
                 self.update_window_options(cx, |window| window.keep_on_top = !window.keep_on_top)

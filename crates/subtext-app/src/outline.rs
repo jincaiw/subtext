@@ -206,7 +206,7 @@ pub fn document_warnings(
     document: &crate::workspace::OpenDocument,
     cx: &mut gpui_kit::App,
 ) -> Vec<String> {
-    let text = document.editor.read(cx).value().to_string();
+    let text = document.editor().read(cx).value().to_string();
     let mut warnings = Vec::new();
 
     // Mixed line endings.
