@@ -28,17 +28,18 @@ use std::path::PathBuf;
 
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Editor, Input, InputState},
+    tab::{Tab, TabBar},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, WeakEntity, Window, WindowOptions, div, px,
+    App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, WeakEntity, Window, WindowOptions, div, px,
 };
 
 use subtext_core::{Document, LineEnding, TextEncoding, charinfo, encoding, finder, textops};
@@ -53,8 +54,31 @@ use crate::settings_window::SettingsWindow;
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
 
+/// Stable identity for an open document.
+///
+/// A document's element identity must not be its position in `documents`.
+/// Tabs are closed, and reordering is on the way; keying a tab by its index
+/// means closing the first one hands every remaining tab a different
+/// `ElementId`, which resets the hover, scroll and transition state of tabs the
+/// user never touched. The counter is monotonic for the life of the workspace.
+///
+/// `TabBar` assigns each of its children a positional id of its own, so this
+/// identity is carried by the parts the strip does not own — the close
+/// affordance in each tab's suffix slot, and the document's editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DocumentId(u64);
+
+impl DocumentId {
+    /// The element ID for the close affordance inside this document's tab.
+    fn tab_close(self) -> ElementId {
+        ElementId::NamedInteger("tab-close".into(), self.0)
+    }
+}
+
 /// One open document and its editor.
 pub struct OpenDocument {
+    /// Stable identity, independent of the tab's position.
+    pub id: DocumentId,
     pub document: Document,
     pub editor: Entity<gpui_kit::base::input::EditorState>,
     pub syntax: SharedString,
@@ -105,6 +129,9 @@ pub struct Workspace {
     theme: Theme,
     documents: Vec<OpenDocument>,
     active: usize,
+    /// Hands out [`DocumentId`]s. Monotonic, never reused, so a closed
+    /// document's identity is never inherited by a new one.
+    next_document_id: u64,
     find: FindState,
     find_query: Entity<InputState>,
     find_replacement: Entity<InputState>,
@@ -141,6 +168,7 @@ impl Workspace {
             theme,
             documents: Vec::new(),
             active: 0,
+            next_document_id: 1,
             find: FindState::default(),
             find_query,
             find_replacement,
@@ -215,7 +243,11 @@ impl Workspace {
             },
         );
 
+        let id = DocumentId(self.next_document_id);
+        self.next_document_id += 1;
+
         self.documents.push(OpenDocument {
+            id,
             document,
             editor,
             syntax: SharedString::from(syntax_name),
@@ -420,13 +452,38 @@ impl Workspace {
 
     /// Close the active document, keeping one open so the window stays usable.
     pub fn close_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.active_document() {
+            Some(document) => {
+                let id = document.id;
+                self.close_document(id, window, cx);
+            }
+            None => self.new_document(window, cx),
+        }
+    }
+
+    /// Close one document by identity.
+    ///
+    /// Closing by identity rather than by position is what lets a tab's close
+    /// affordance be wired to the tab it belongs to: the active index is not
+    /// the clicked tab, and by the time the click runs the list may have moved.
+    pub fn close_document(
+        &mut self,
+        id: DocumentId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.documents.iter().position(|document| document.id == id) else {
+            return;
+        };
         if self.documents.len() <= 1 {
             // CotEditor closes the window with the last document; SubText keeps
             // one document open so the application stays usable.
             self.new_document(window, cx);
             return;
         }
-        self.documents.remove(self.active);
+        self.documents.remove(index);
+        // Keep the selection on the same document where possible, and on the
+        // neighbour that took its place when the closed one was selected.
         self.active = self.active.min(self.documents.len() - 1);
         cx.notify();
     }
@@ -602,7 +659,9 @@ impl Workspace {
             let input_value = input.clone();
             dialog
                 .title("Go to Line")
-                .w(px(320.))
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 20.)
                 .child(Input::new(&input))
                 .button_props(
                     gpui_kit::component::dialog::DialogButtonProps::default()
@@ -1051,22 +1110,24 @@ impl Workspace {
 
     /// Step through the tab widths CotEditor offers: 2, 4, 8.
     pub fn cycle_tab_width(&mut self, cx: &mut Context<Self>) {
-        self.settings.tab_width = match self.settings.tab_width {
+        let width = match self.settings.tab_width {
             2 => 4,
             4 => 8,
             _ => 2,
         };
+        let uses_spaces = self.settings.uses_spaces_for_indentation;
+        self.settings.set_indentation(uses_spaces, width);
         let _ = self.settings.save();
         self.set_status(format!("Tab width: {}", self.settings.tab_width), cx);
     }
 
     pub fn toggle_auto_expand_tabs(&mut self, cx: &mut Context<Self>) {
-        self.settings.auto_expand_tabs = !self.settings.auto_expand_tabs;
-        self.settings.uses_spaces_for_indentation = self.settings.auto_expand_tabs;
+        let uses_spaces = !self.settings.uses_spaces_for_indentation;
+        let width = self.settings.tab_width;
+        self.settings.set_indentation(uses_spaces, width);
         let _ = self.settings.save();
-        let on = self.settings.auto_expand_tabs;
         self.set_status(
-            if on { "Tabs expand to spaces" } else { "Tabs insert tab characters" },
+            if uses_spaces { "Tabs expand to spaces" } else { "Tabs insert tab characters" },
             cx,
         );
     }
@@ -1155,7 +1216,7 @@ impl Workspace {
             ("HTML Entity", info.html_entity.clone()),
             ("Width", info.width.to_string()),
         ];
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             let mut body = v_flex().gap_1().p_1();
             for (label, value) in &rows {
                 body = body.child(
@@ -1166,7 +1227,8 @@ impl Workspace {
                         .child(div().text_xs().child(value.clone())),
                 );
             }
-            dialog.title("Inspect Character").w(px(360.)).child(body)
+            // `Dialog::w` takes pixels; scale by hand, as above.
+            dialog.title("Inspect Character").w(window.rem_size() * 22.).child(body)
         });
     }
 
@@ -1191,7 +1253,7 @@ impl Workspace {
             ("Words", count.words.to_string()),
             ("Paragraphs", count.paragraphs.to_string()),
         ];
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             let mut body = v_flex().gap_1().p_1();
             for (label, value) in &rows {
                 body = body.child(
@@ -1202,7 +1264,8 @@ impl Workspace {
                         .child(div().text_xs().child(value.clone())),
                 );
             }
-            dialog.title("Document Statistics").w(px(360.)).child(body)
+            // `Dialog::w` takes pixels; scale by hand, as above.
+            dialog.title("Document Statistics").w(window.rem_size() * 22.).child(body)
         });
     }
 
@@ -1219,6 +1282,8 @@ impl Workspace {
 
         let workspace = cx.entity().downgrade();
         let options = WindowOptions {
+            // Platform window geometry, not design scale: a minimum window size
+            // is a constraint on the OS window, so it stays in pixels.
             window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
             ..Default::default()
         };
@@ -1238,6 +1303,7 @@ impl Workspace {
             self.about_window = None;
         }
         let options = WindowOptions {
+            // As above: an OS window constraint, not a design measurement.
             window_min_size: Some(gpui_kit::size(px(420.), px(300.))),
             is_resizable: false,
             ..Default::default()
@@ -1254,6 +1320,9 @@ impl Workspace {
         let document = self.active_document();
         let title = document.map_or_else(|| "SubText".to_string(), OpenDocument::title);
 
+        // Every button here is icon-only, so each one carries both an
+        // accessible name (for the accessibility tree) and a tooltip (for the
+        // pointer). A glyph on its own is not a label.
         h_flex()
             .w_full()
             .px_3()
@@ -1266,6 +1335,8 @@ impl Workspace {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::Plus)
+                    .accessibility_label("New document")
+                    .tooltip("New document")
                     .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
             )
             .child(
@@ -1273,6 +1344,8 @@ impl Workspace {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::FolderOpen)
+                    .accessibility_label("Open document")
+                    .tooltip("Open document")
                     .on_click(cx.listener(|this, _, window, cx| this.open_dialog(window, cx))),
             )
             .child(
@@ -1280,6 +1353,8 @@ impl Workspace {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::HardDrive)
+                    .accessibility_label("Save document")
+                    .tooltip("Save document")
                     .on_click(cx.listener(|this, _, window, cx| this.save(false, window, cx))),
             )
             .child(
@@ -1291,10 +1366,15 @@ impl Workspace {
                     .child(title),
             )
             .child(
+                // The sidebar and inspector toggles show their state the way a
+                // toolbar toggle should: pressed when the region is visible.
                 Button::new("sidebar")
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::PanelLeft)
+                    .selected(self.settings.window.show_sidebar)
+                    .accessibility_label("Show sidebar")
+                    .tooltip("Show sidebar")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.update_window_options(cx, |window| {
                             window.show_sidebar = !window.show_sidebar
@@ -1306,6 +1386,9 @@ impl Workspace {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::PanelRight)
+                    .selected(self.settings.window.show_inspector)
+                    .accessibility_label("Show inspector")
+                    .tooltip("Show inspector")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.update_window_options(cx, |window| {
                             window.show_inspector = !window.show_inspector
@@ -1314,44 +1397,39 @@ impl Workspace {
             )
     }
 
+    /// The open-document tab strip.
+    ///
+    /// Built from `TabBar` rather than clickable `div`s so the strip gets the
+    /// component's keyboard navigation, focus ring, selection indicator and
+    /// accessibility contract for free. Each tab's close affordance rides in
+    /// the tab's `suffix` slot.
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tabs = self
             .documents
             .iter()
-            .enumerate()
-            .map(|(index, document)| {
-                let is_active = index == self.active;
-                h_flex()
-                    .id(SharedString::from(format!("tab-{index}")))
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .rounded_t_md()
-                    .when(is_active, |this| this.bg(cx.theme().background))
-                    .when(!is_active, |this| this.text_color(cx.theme().muted_foreground))
-                    .cursor_pointer()
-                    .child(div().text_sm().child(document.document.display_name()))
-                    .when(document.document.is_dirty(), |this| this.child("•"))
-                    .child(
-                        // The close glyph is its own hit target, so it is
-                        // wrapped rather than made clickable: `Icon` paints a
-                        // glyph and has no interactivity of its own.
-                        div()
-                            .id(SharedString::from(format!("tab-close-{index}")))
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.active = index;
-                                this.close_active(window, cx);
-                            }))
-                            .child(Icon::new(gpui_kit::assets::IconName::Close).xsmall()),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.active = index;
-                        cx.notify();
-                    }))
-                    .into_any_element()
+            .map(|document| {
+                let id = document.id;
+                let mut label = document.document.display_name();
+                if document.document.is_dirty() {
+                    label.push_str(" — Edited");
+                }
+                // A `Button`, not a clickable `div`: the close affordance needs
+                // focus, a hit area and an accessible name, and the component
+                // already supplies all three.
+                let close = Button::new(id.tab_close())
+                    .ghost()
+                    .xsmall()
+                    .icon(gpui_kit::assets::IconName::Close)
+                    .accessibility_label(format!("Close {label}"))
+                    .tooltip("Close tab")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.close_document(id, window, cx);
+                    }));
+                Tab::new().label(label).suffix(close)
             })
             .collect::<Vec<_>>();
+
+        let active = self.active.min(tabs.len().saturating_sub(1));
 
         h_flex()
             .w_full()
@@ -1359,7 +1437,17 @@ impl Workspace {
             .bg(cx.theme().secondary)
             .border_b_1()
             .border_color(cx.theme().border)
-            .children(tabs)
+            .child(
+                TabBar::new("document-tabs")
+                    .children(tabs)
+                    .selected_index(active)
+                    .on_click(cx.listener(|this, index, _, cx| {
+                        if *index < this.documents.len() {
+                            this.active = *index;
+                            cx.notify();
+                        }
+                    })),
+            )
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1367,22 +1455,16 @@ impl Workspace {
             (SidebarPane::FileBrowser, "File Browser", gpui_kit::assets::IconName::Folder),
             (SidebarPane::FolderFind, "Folder Find", gpui_kit::assets::IconName::Search),
         ];
-        let buttons = panes
-            .into_iter()
-            .map(|(pane, label, icon)| {
-                let selected = self.settings.sidebar_pane == pane;
-                Button::new(label)
-                    .small()
-                    .when(selected, |this| this.primary())
-                    .when(!selected, |this| this.ghost())
-                    .icon(icon)
-                    .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.sidebar_pane = pane;
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
+        // A segmented TabBar, not two Buttons with `primary()` on the selected
+        // one: this is one control with a current value, so it gets one
+        // silhouette, arrow-key navigation and a focus ring.
+        let selected = panes
+            .iter()
+            .position(|(pane, _, _)| *pane == self.settings.sidebar_pane)
+            .unwrap_or(0);
+        let tabs = panes
+            .iter()
+            .map(|(_, label, icon)| Tab::new().label(*label).icon(*icon))
             .collect::<Vec<_>>();
 
         let body = match self.settings.sidebar_pane {
@@ -1391,14 +1473,43 @@ impl Workspace {
         };
 
         v_flex()
-            .w(px(240.))
+            // A navigation sidebar gets a minimum, a preferred and a maximum
+            // width, so a long label cannot squeeze it and a short one cannot
+            // leave a gap.
+            .w(gpui_kit::rems(15.))
+            .min_w(gpui_kit::rems(11.))
+            .max_w(gpui_kit::rems(24.))
             .h_full()
             .gap_2()
             .p_2()
             .border_r_1()
             .border_color(cx.theme().border)
-            .child(v_flex().gap_1().children(buttons))
-            .child(div().flex_1().overflow_hidden().child(body))
+            .child(
+                TabBar::new("sidebar-panes")
+                    .segmented()
+                    .small()
+                    .children(tabs)
+                    .selected_index(selected)
+                    .on_click(cx.listener(|this, index, _, cx| {
+                        let pane = match index {
+                            1 => SidebarPane::FolderFind,
+                            _ => SidebarPane::FileBrowser,
+                        };
+                        this.settings.sidebar_pane = pane;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                // The body is the scroll owner for this panel: the content can
+                // outgrow the pane, and without this the overflow would simply
+                // be unreachable.
+                div()
+                    .id("sidebar-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
     }
 
     fn render_file_browser(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -1408,15 +1519,19 @@ impl Workspace {
                 div().text_sm().text_color(cx.theme().muted_foreground).child("No recent files"),
             );
         }
-        for (index, path) in self.settings.recent_documents.iter().take(30).enumerate() {
+        for path in self.settings.recent_documents.iter().take(30) {
             let label = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let path = path.clone();
+            // The path is the row's identity: it is what the user recognises
+            // the row by, and it survives the list being reordered by a new
+            // document being opened or the history being cleared.
+            let id = SharedString::from(format!("recent:{}", path.display()));
+            let target = path.clone();
             list = list.child(
                 h_flex()
-                    .id(SharedString::from(format!("recent-{index}")))
+                    .id(id)
                     .px_2()
                     .py_1()
                     .gap_2()
@@ -1426,7 +1541,7 @@ impl Workspace {
                     .child(Icon::new(gpui_kit::assets::IconName::File).xsmall())
                     .child(div().text_sm().truncate().child(label))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_path(path.clone(), window, cx)
+                        this.open_path(target.clone(), window, cx)
                     })),
             );
         }
@@ -1459,21 +1574,13 @@ impl Workspace {
             (InspectorPane::Outline, "Outline"),
             (InspectorPane::Warnings, "Warnings"),
         ];
+        let selected = panes
+            .iter()
+            .position(|(pane, _)| *pane == self.settings.inspector_pane)
+            .unwrap_or(0);
         let tabs = panes
-            .into_iter()
-            .map(|(pane, label)| {
-                let selected = self.settings.inspector_pane == pane;
-                Button::new(label)
-                    .xsmall()
-                    .when(selected, |this| this.primary())
-                    .when(!selected, |this| this.ghost())
-                    .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.inspector_pane = pane;
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
+            .iter()
+            .map(|(_, label)| Tab::new().label(*label))
             .collect::<Vec<_>>();
 
         let body = match self.settings.inspector_pane {
@@ -1483,14 +1590,37 @@ impl Workspace {
         };
 
         v_flex()
-            .w(px(260.))
+            .w(gpui_kit::rems(16.))
+            .min_w(gpui_kit::rems(12.))
+            .max_w(gpui_kit::rems(26.))
             .h_full()
             .gap_2()
             .p_2()
             .border_l_1()
             .border_color(cx.theme().border)
-            .child(h_flex().gap_1().children(tabs))
-            .child(div().flex_1().overflow_hidden().child(body))
+            .child(
+                TabBar::new("inspector-panes")
+                    .segmented()
+                    .small()
+                    .children(tabs)
+                    .selected_index(selected)
+                    .on_click(cx.listener(|this, index, _, cx| {
+                        this.settings.inspector_pane = match index {
+                            1 => InspectorPane::Outline,
+                            2 => InspectorPane::Warnings,
+                            _ => InspectorPane::Document,
+                        };
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("inspector-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
     }
 
     fn render_document_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -1553,23 +1683,32 @@ impl Workspace {
         }
 
         let mut list = v_flex().gap_0p5();
-        for (index, item) in items.into_iter().enumerate() {
+        for item in items {
             if item.separator {
+                // A hairline divider: one physical pixel is the intent, so this
+                // is one of the places a raw `px` value is correct.
                 list = list.child(div().my_1().h(px(1.)).bg(cx.theme().border));
                 continue;
             }
-            let indent = item.level as f32 * 10.0;
+            // The entry's line number is its identity: it is stable for as long
+            // as the entry exists, and it is what the entry is *about*.
+            let id = ElementId::NamedInteger("outline".into(), item.line as u64);
+            // Nesting is expressed in rem so it tracks the base font with the
+            // rest of the interface.
+            let indent = gpui_kit::rems(item.level as f32 * 0.75);
             let line = item.line;
+            let title = item.title.clone();
             list = list.child(
                 div()
-                    .id(SharedString::from(format!("outline-{index}")))
-                    .pl(px(indent))
+                    .id(id)
+                    .pl(indent)
                     .py_0p5()
+                    .rounded_sm()
                     .text_sm()
                     .truncate()
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().accent))
-                    .child(item.title)
+                    .child(title)
                     .on_click(cx.listener(move |this, _, _, cx| this.goto_line(line, cx))),
             );
         }
@@ -1665,9 +1804,9 @@ impl Workspace {
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().secondary)
-            .child(div().w(px(220.)).child(Input::new(&self.find_query).small()))
+            .child(div().w(gpui_kit::rems(14.)).child(Input::new(&self.find_query).small()))
             .when(self.find.show_replace, |this| {
-                this.child(div().w(px(220.)).child(Input::new(&self.find_replacement).small()))
+                this.child(div().w(gpui_kit::rems(14.)).child(Input::new(&self.find_replacement).small()))
             })
             .child(
                 div()
@@ -1713,6 +1852,8 @@ impl Workspace {
                     .xsmall()
                     .ghost()
                     .icon(gpui_kit::assets::IconName::Close)
+                    .accessibility_label("Close the find bar")
+                    .tooltip("Close the find bar")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.find.visible = false;
                         this.find.matches.clear();
@@ -1780,8 +1921,12 @@ impl Render for Workspace {
                         Editor::new(&editor)
                             .bordered(false)
                             .p_2()
-                            .h(gpui_kit::relative(1.))
+                            .h_full()
                             .font_family(font_family)
+                            // The document's own type size is user data, not
+                            // application zoom: it is what Format ▸ Bigger
+                            // Font changes, and it must not move when the
+                            // interface scale does.
                             .text_size(px(self.settings.font_size))
                             .into_any_element(),
                     )

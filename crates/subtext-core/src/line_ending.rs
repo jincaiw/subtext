@@ -60,6 +60,32 @@ impl LineEnding {
         }
     }
 
+    /// The system a line ending is characteristic of.
+    ///
+    /// This is the parenthesised second half of CotEditor's Format ▸ Default
+    /// line endings picker, kept verbatim so the two pickers read alike.
+    pub fn platform_description(self) -> &'static str {
+        match self {
+            LineEnding::LF => "macOS / Unix",
+            LineEnding::CR => "Classic Mac OS",
+            LineEnding::CRLF => "Windows",
+            LineEnding::NEL => "Unix Next Line",
+            LineEnding::LS => "Unix Line Separator",
+            LineEnding::PS => "Unix Paragraph Separator",
+        }
+    }
+
+    /// Whether this is one of the three endings the Format pane offers.
+    ///
+    /// CotEditor hides NEL, LS and PS from that picker: they are readable and
+    /// convertible but nobody creates a document with them.
+    pub fn is_basic(self) -> bool {
+        matches!(self, LineEnding::LF | LineEnding::CR | LineEnding::CRLF)
+    }
+
+    /// The three endings the Format pane's picker lists, in its order.
+    pub const BASIC: [LineEnding; 3] = [LineEnding::LF, LineEnding::CR, LineEnding::CRLF];
+
     /// The Unicode scalar value of a single-character ending.
     pub fn as_char(self) -> Option<char> {
         match self {
@@ -240,5 +266,29 @@ mod tests {
         let converted = convert("a\r\nb\rc\u{85}d", LineEnding::LF);
         assert_eq!(converted, "a\nb\nc\nd");
         assert_eq!(convert(&converted, LineEnding::LF), converted);
+    }
+
+    #[test]
+    fn the_basic_set_is_what_the_format_pane_offers() {
+        assert_eq!(LineEnding::BASIC, [LineEnding::LF, LineEnding::CR, LineEnding::CRLF]);
+        for ending in LineEnding::BASIC {
+            assert!(ending.is_basic(), "{ending:?} should be basic");
+        }
+        for ending in [LineEnding::NEL, LineEnding::LS, LineEnding::PS] {
+            assert!(!ending.is_basic(), "{ending:?} should not be basic");
+        }
+    }
+
+    #[test]
+    fn every_ending_has_a_platform_description() {
+        for ending in ALL {
+            assert!(
+                !ending.platform_description().is_empty(),
+                "{ending:?} has no platform description"
+            );
+        }
+        assert_eq!(LineEnding::LF.platform_description(), "macOS / Unix");
+        assert_eq!(LineEnding::CR.platform_description(), "Classic Mac OS");
+        assert_eq!(LineEnding::CRLF.platform_description(), "Windows");
     }
 }

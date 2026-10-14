@@ -26,7 +26,7 @@
 | 功能 | CotEditor 实现 | SubText | 状态 |
 | --- | --- | --- | --- |
 | 关于面板 | `orderFrontStandardAboutPanel:` | `AboutView`（`dialogs.rs`） | 🔁 |
-| 设置窗口 | `NSWindowController` | `SettingsWindow`（5 面板） | 🔁 |
+| 设置窗口 | `SettingsWindowController`（9 面板） | `SettingsWindow`（9 面板，标签 / 顺序 / 分组逐项对齐） | ✅ |
 | 服务 | `NSMenu` Services | 保留菜单项（置灰） | ⚠️ |
 | 隐藏 / 隐藏其他 / 全部显示 | `NSApplication` | 交窗口系统处理 | 🔁 |
 | 退出 | `terminate:` | `cx.quit()` | ✅ |
