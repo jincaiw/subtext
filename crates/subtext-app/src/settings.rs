@@ -543,6 +543,12 @@ pub enum InspectorPane {
     Warnings,
 }
 
+/// The Outline inspector's row font size before the user changes it.
+///
+/// CotEditor's `NSFont.smallSystemFontSize`, which is 11 points on macOS and is
+/// also the floor its *Smaller* command stops at.
+pub const DEFAULT_OUTLINE_FONT_SIZE: f32 = 11.0;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -616,6 +622,19 @@ pub struct Settings {
     /// choice is remembered for the next launch.
     pub split_view_vertical: bool,
 
+    /// Whether the Outline inspector wraps long labels.
+    ///
+    /// CotEditor's `outlineViewWrapsLines`. Kept, and shown in the pane's
+    /// Options menu, but it has no effect here: the inspector is a virtualized
+    /// list, and every row of one must be the same height. See the Outline
+    /// section of `docs/PLAN.md` for the deviation.
+    pub outline_wraps_lines: bool,
+    /// The Outline inspector's row font size, in points.
+    ///
+    /// CotEditor's `outlineViewFontSize`, whose default is
+    /// `NSFont.smallSystemFontSize` — 11 points on macOS.
+    pub outline_font_size: f32,
+
     /// The unnamed file scope the *File Scope* menu last held.
     pub folder_find_scope: Option<FileScope>,
     /// Named scopes, keyed by name — upstream's `folderFindSavedScopes`.
@@ -663,6 +682,10 @@ impl Default for Settings {
             // CotEditor's `splitViewVertical` default is `false`: a fresh
             // window stacks its editors one above the other.
             split_view_vertical: false,
+            // CotEditor's `outlineViewWrapsLines` is `false`, and its
+            // `outlineViewFontSize` is `NSFont.smallSystemFontSize`.
+            outline_wraps_lines: false,
+            outline_font_size: DEFAULT_OUTLINE_FONT_SIZE,
             folder_find_scope: None,
             folder_find_saved_scopes: BTreeMap::new(),
         }

@@ -23,26 +23,35 @@
 //! than `set_value`, so ⌘Z undoes a Shift Right the same way it undoes a
 //! keystroke.
 
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash as _, Hasher as _};
 use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gpui_kit::AnyWindowHandle;
+use gpui_kit::assets::IconName;
+use gpui_kit::base::input::InputEvent;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::{DialogClose, DialogFooter},
     h_flex, h_resizable,
     input::{Editor, Input, InputState},
+    list::ListItem,
+    menu::{DropdownMenu as _, PopupMenuItem},
     resizable_panel,
     tab::{Tab, TabBar},
+    tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex, v_resizable,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Render, SharedString,
+    Anchor, App, AppContext as _, Context, ElementId, Entity, Focusable as _, FontWeight,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, WindowOptions,
-    div, px,
+    div, hsla, px,
 };
 
 use subtext_core::{
@@ -57,7 +66,10 @@ use crate::dialogs::AboutView;
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
-use crate::settings::{InspectorPane, Settings, SidebarPane};
+use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
+use crate::settings::{
+    DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SidebarPane,
+};
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
 
@@ -186,6 +198,23 @@ struct Status {
     at: std::time::Instant,
 }
 
+/// What the Outline inspector's tree was last built from.
+///
+/// The inspector is a virtualized list, so its items have to be *pushed* into
+/// it rather than computed while rendering — and pushing them is a mutation,
+/// which a render cannot do. It therefore refreshes from a deferred callback,
+/// and this is what tells that callback whether anything it cares about has
+/// changed. The buffer is reduced to a hash rather than kept: the point is only
+/// to notice an edit, and a second copy of the document is a lot to hold for
+/// that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutlineSource {
+    document: DocumentId,
+    syntax: SharedString,
+    text: u64,
+    filter: String,
+}
+
 pub struct Workspace {
     pub settings: Settings,
     syntaxes: SyntaxManager,
@@ -215,6 +244,41 @@ pub struct Workspace {
     /// length of a session; SubText has no shared panel, so the workspace holds
     /// the last colour inserted instead. Like upstream's, it is not persisted.
     last_color_code_color: colorcode::Color,
+    /// The Outline inspector's tree. See [`OutlineSource`] for why it is held
+    /// rather than built while rendering.
+    outline_tree: Entity<TreeState>,
+    /// The Outline inspector's filter field, in CotEditor's bottom-of-pane slot.
+    outline_filter: Entity<InputState>,
+    /// The tree's nodes, as the last refresh left them.
+    outline_nodes: Vec<FilteredNode>,
+    /// What that tree was built from, so a stale one can be noticed.
+    outline_built_from: Option<OutlineSource>,
+    /// The flat entries behind `outline_nodes`, kept so that moving the caret
+    /// can find the row it sits in without re-parsing the document.
+    outline_entries: Vec<OutlineEntry>,
+    /// Per-row drawing data, keyed by entry id: the tree hands its renderer an
+    /// id and a label, and nothing else.
+    outline_rows: Rc<HashMap<String, OutlineRow>>,
+    /// The ids the user has opened. The tree owns the expansion state of the
+    /// items it was handed, but every refresh hands it fresh ones, so the set is
+    /// mirrored here and re-applied.
+    outline_expanded: HashSet<String>,
+    /// The ids of the tree the last refresh built, for the "which ids are new"
+    /// comparison that decides what opens by itself.
+    outline_ids: Vec<String>,
+    /// The entry the caret sits in, so that a caret move can be noticed.
+    outline_selected: Option<String>,
+    /// Set while a refresh is queued, so that a frame which runs before the
+    /// queue drains does not queue a second one.
+    outline_refresh_queued: Cell<bool>,
+    /// Kept alive for as long as the workspace lives: dropping a subscription
+    /// unsubscribes, and the tree's expansion state is mirrored through this
+    /// one.
+    _outline_expansion: Subscription,
+    /// The tree's row-selection observer.
+    _outline_selection: Subscription,
+    /// The filter field's `Change` subscription.
+    _outline_filter_changes: Subscription,
 }
 
 impl Workspace {
@@ -243,6 +307,44 @@ impl Workspace {
             cx.new(|cx| FolderFindPane::new(workspace, &settings, window, cx))
         };
 
+        // The Outline inspector's tree and its filter field. Both need wiring
+        // before they are stored, so they are created here rather than inline.
+        let outline_tree = cx.new(|cx| TreeState::new(cx).items(Vec::<TreeItem>::new()));
+        let outline_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+
+        // Opening and closing a row is the tree's own business — it keeps the
+        // state on the item it was handed — but a refresh hands it fresh items,
+        // so the state has to be mirrored into the workspace and re-applied.
+        let outline_expansion = cx.subscribe(
+            &outline_tree,
+            |this: &mut Self, _tree, event: &TreeEvent, _cx| match event {
+                TreeEvent::Expanded(id) => {
+                    this.outline_expanded.insert(id.to_string());
+                }
+                TreeEvent::Collapsed(id) => {
+                    this.outline_expanded.remove(id.as_ref());
+                }
+            },
+        );
+
+        // Selecting a row in the tree — by click or by arrow key — is what
+        // moves the caret, which is CotEditor's `selectItem(id:)`.
+        let outline_selection = cx.observe(&outline_tree, |this: &mut Self, tree, cx| {
+            this.on_outline_row_selected(tree, cx);
+        });
+
+        // Typing in the filter changes nothing but the filter, and the refresh
+        // that follows is what notices it; the repaint has to be asked for.
+        let outline_filter_changes = cx.subscribe_in(
+            &outline_filter,
+            window,
+            |_this: &mut Self, _input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        );
+
         let mut this = Self {
             settings,
             syntaxes,
@@ -260,6 +362,19 @@ impl Workspace {
             settings_window: None,
             about_window: None,
             last_color_code_color: colorcode::Color::BLACK,
+            outline_tree,
+            outline_filter,
+            outline_nodes: Vec::new(),
+            outline_built_from: None,
+            outline_entries: Vec::new(),
+            outline_rows: Rc::new(HashMap::new()),
+            outline_expanded: HashSet::new(),
+            outline_ids: Vec::new(),
+            outline_selected: None,
+            outline_refresh_queued: Cell::new(false),
+            _outline_expansion: outline_expansion,
+            _outline_selection: outline_selection,
+            _outline_filter_changes: outline_filter_changes,
         };
         this.new_document(window, cx);
         this
@@ -2176,7 +2291,7 @@ impl Workspace {
         self.folder_find.clone().into_any_element()
     }
 
-    fn render_inspector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_inspector(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let panes = [
             (InspectorPane::Document, "Document"),
             (InspectorPane::Outline, "Outline"),
@@ -2191,9 +2306,10 @@ impl Workspace {
             .map(|(_, label)| Tab::new().label(*label))
             .collect::<Vec<_>>();
 
+        let is_outline = self.settings.inspector_pane == InspectorPane::Outline;
         let body = match self.settings.inspector_pane {
             InspectorPane::Document => self.render_document_inspector(cx),
-            InspectorPane::Outline => self.render_outline(cx),
+            InspectorPane::Outline => self.render_outline(window, cx),
             InspectorPane::Warnings => self.render_warnings(cx),
         };
 
@@ -2226,7 +2342,10 @@ impl Workspace {
                     .id("inspector-body")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
+                    // The outline is a virtualized list and scrolls itself;
+                    // wrapping it in a second scroller would leave the two
+                    // fighting over the wheel.
+                    .when(!is_outline, |this| this.overflow_y_scroll())
                     .child(body),
             )
     }
@@ -2269,58 +2388,432 @@ impl Workspace {
         list.into_any_element()
     }
 
-    fn render_outline(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let Some(document) = self.active_document() else {
-            return v_flex().into_any_element();
-        };
-        let Some(syntax) = self.syntaxes.by_name(&document.syntax) else {
-            return v_flex().into_any_element();
-        };
-        let text = document.editor().read(cx).value().to_string();
-        let items = crate::outline::extract(&text, &syntax.outlines);
+    // ---- the Outline inspector -------------------------------------------
 
-        if items.is_empty() {
-            return v_flex()
+    /// The active document's buffer and where its caret is, in one read.
+    ///
+    /// The buffer is copied out because the caret's line is counted over it and
+    /// the tree's staleness is hashed from it, and both want the same copy.
+    fn outline_input(&self, cx: &App) -> Option<(String, usize)> {
+        let document = self.documents.get(self.active)?;
+        let editor = document.editor().read(cx);
+        let text = editor.value().to_string();
+        let caret = editor.selected_range().start;
+        Some((text, caret))
+    }
+
+    /// What a tree built right now would be built from.
+    fn outline_source(&self, cx: &App, text: &str) -> Option<OutlineSource> {
+        let document = self.documents.get(self.active)?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        Some(OutlineSource {
+            document: document.id,
+            syntax: document.syntax.clone(),
+            text: hasher.finish(),
+            filter: self.outline_filter.read(cx).value().to_string(),
+        })
+    }
+
+    /// Whether the tree on screen is out of step with the document.
+    ///
+    /// This is what lets the inspector refresh itself instead of every place
+    /// that can change a buffer having to remember to say so — a keystroke, a
+    /// new tab, a re-read from disk, a syntax change and a filter edit all
+    /// arrive here as the same answer.
+    fn outline_is_stale(&self, cx: &App) -> bool {
+        match self.outline_input(cx) {
+            Some((text, _)) => match self.outline_source(cx, &text) {
+                Some(source) => self.outline_built_from.as_ref() != Some(&source),
+                None => self.outline_built_from.is_some(),
+            },
+            None => self.outline_built_from.is_some(),
+        }
+    }
+
+    /// The id of the row the caret sits in, if any.
+    ///
+    /// Both directions of the caret/row link go through here, so they cannot
+    /// disagree about which row the caret is in.
+    fn outline_caret_target<'a>(&'a self, text: &str, caret: usize) -> Option<&'a str> {
+        crate::outline::entry_at_line(&self.outline_entries, line_of_offset(text, caret))
+            .map(|entry| entry.id.as_str())
+    }
+
+    /// Whether a rebuild or a selection move is due.
+    ///
+    /// One read of the buffer answers both, because `EditorState::value()`
+    /// materialises the whole rope on every call — checking the two questions
+    /// separately would copy the document twice per keystroke.
+    fn outline_needs_refresh(&self, cx: &App) -> bool {
+        let Some((text, caret)) = self.outline_input(cx) else {
+            return self.outline_built_from.is_some();
+        };
+        let stale = match self.outline_source(cx, &text) {
+            Some(source) => self.outline_built_from.as_ref() != Some(&source),
+            None => self.outline_built_from.is_some(),
+        };
+        stale || self.outline_caret_target(&text, caret) != self.outline_selected.as_deref()
+    }
+
+    /// Queue a rebuild, if one is due.
+    ///
+    /// The inspector is a virtualized list, and its items can only be replaced
+    /// by an update — which a render must not do. The work is therefore handed
+    /// to the end of the effect cycle, and the flag stops a frame that runs
+    /// before that queue drains from queueing a second one.
+    fn queue_outline_refresh(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.outline_refresh_queued.get() || !self.outline_needs_refresh(cx) {
+            return;
+        }
+        self.outline_refresh_queued.set(true);
+        cx.defer_in(window, |this, _window, cx| {
+            this.outline_refresh_queued.set(false);
+            if this.outline_is_stale(cx) {
+                this.refresh_outline(cx);
+            }
+            this.sync_outline_selection(cx);
+        });
+    }
+
+    /// Rebuild the tree from the active document, the filter and the expansion
+    /// state.
+    ///
+    /// Upstream's `rebuildOutline` and `rebuildSnapshot`, plus the `onChange`
+    /// that follows them and decides what opens by itself, in one pass.
+    fn refresh_outline(&mut self, cx: &mut Context<Self>) {
+        let Some((text, _)) = self.outline_input(cx) else {
+            self.outline_entries.clear();
+            self.outline_nodes.clear();
+            self.outline_rows = Rc::new(HashMap::new());
+            self.outline_built_from = None;
+            self.outline_ids.clear();
+            self.outline_selected = None;
+            self.outline_tree
+                .update(cx, |state, cx| state.set_items(Vec::new(), cx));
+            return;
+        };
+        let Some(source) = self.outline_source(cx, &text) else {
+            return;
+        };
+
+        let entries = match self.syntaxes.by_name(&source.syntax) {
+            Some(syntax) => crate::outline::extract(&text, &syntax.outlines),
+            None => Vec::new(),
+        };
+        let nodes = crate::outline::build_tree(&entries);
+        let all_ids = crate::outline::collect_ids(&nodes);
+        let filtered = crate::outline::filtered_tree(&nodes, &source.filter);
+
+        // Which rows open by themselves. Upstream: with no filter, keep the
+        // rows that are still there and open the ones that are new; with a
+        // filter, open everything that *can* open, because a collapsed match
+        // would be invisible.
+        if source.filter.is_empty() {
+            let current: HashSet<&String> = all_ids.iter().collect();
+            self.outline_expanded.retain(|id| current.contains(id));
+            for id in &all_ids {
+                if !self.outline_ids.contains(id) {
+                    self.outline_expanded.insert(id.clone());
+                }
+            }
+        } else {
+            self.outline_expanded = crate::outline::expandable_ids(&filtered);
+        }
+
+        self.outline_rows = Rc::new(crate::outline::row_map(&filtered));
+        self.outline_entries = entries;
+        self.outline_nodes = filtered;
+        self.outline_ids = all_ids;
+        self.outline_built_from = Some(source);
+        self.push_outline_items(cx);
+        self.sync_outline_selection(cx);
+    }
+
+    /// Hand the tree its items, with the expansion state applied.
+    fn push_outline_items(&mut self, cx: &mut Context<Self>) {
+        let items = outline_items(&self.outline_nodes, &self.outline_expanded);
+        self.outline_tree
+            .update(cx, |state, cx| state.set_items(items, cx));
+        self.restore_outline_selection(cx);
+    }
+
+    /// Put the tree's selection where the caret says it should be.
+    ///
+    /// Replacing the items clears the selection, so every rebuild has to
+    /// restore it — which is also what upstream does, by calling
+    /// `invalidateCurrentItem` straight after the outline is rebuilt.
+    fn restore_outline_selection(&mut self, cx: &mut Context<Self>) {
+        let index = self.outline_selected.as_ref().and_then(|id| {
+            let id: SharedString = id.clone().into();
+            self.outline_tree.read(cx).index_of(&id)
+        });
+        self.outline_tree
+            .update(cx, |state, cx| state.set_selected_index(index, cx));
+    }
+
+    /// Follow the caret: the row the caret is in becomes the tree's selection.
+    ///
+    /// CotEditor's `invalidateCurrentItem`. A row inside a collapsed parent has
+    /// no entry to select, so nothing happens — upstream does not open the path
+    /// to the caret either.
+    fn sync_outline_selection(&mut self, cx: &mut Context<Self>) {
+        let Some((text, caret)) = self.outline_input(cx) else {
+            return;
+        };
+        let target = self
+            .outline_caret_target(&text, caret)
+            .map(str::to_string);
+        if target == self.outline_selected {
+            return;
+        }
+        self.outline_selected = target;
+        self.restore_outline_selection(cx);
+    }
+
+    /// Move the caret to the row the tree just selected.
+    ///
+    /// CotEditor's `selectItem(id:)`: selecting an outline row puts the
+    /// editor's selection on the range the entry describes and scrolls it into
+    /// view. A row the caret already sits in is left alone, which is what keeps
+    /// the two directions — caret to row, row to caret — from ping-ponging.
+    fn on_outline_row_selected(&mut self, tree: Entity<TreeState>, cx: &mut Context<Self>) {
+        let selected = tree
+            .read(cx)
+            .selected_entry()
+            .map(|entry| entry.item().id.to_string());
+        let Some(id) = selected else {
+            return;
+        };
+        if self.outline_selected.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        let Some(line) = self
+            .outline_entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.line)
+        else {
+            return;
+        };
+        self.outline_selected = Some(id);
+        self.goto_line(line, cx);
+    }
+
+    /// The pane's title row, with CotEditor's Options menu at its trailing edge.
+    fn render_outline_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // A menu item's handler runs on the popup's context, not the
+        // workspace's, so it reaches the workspace through a weak handle rather
+        // than through `cx.listener`.
+        let workspace = cx.entity().downgrade();
+
+        h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Outline"),
+            )
+            .child(
+                Button::new("outline-options")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Ellipsis)
+                    .accessibility_label("Options")
+                    .tooltip("Options")
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+                        let bigger = workspace.clone();
+                        let smaller = workspace.clone();
+                        let reset = workspace.clone();
+                        menu
+                            // Upstream's *Wrap Lines* toggle. It is shown, so the
+                            // menu reads the same, but it cannot be honoured: the
+                            // rows of a virtualized list are all one height. See
+                            // the Outline section of `docs/PLAN.md`.
+                            .item(PopupMenuItem::new("Wrap Lines").disabled(true))
+                            .separator()
+                            .label("Text Size")
+                            .item(PopupMenuItem::new("Bigger").on_click(
+                                move |_, _window, cx| {
+                                    bigger
+                                        .update(cx, |this, cx| this.bump_outline_font(1.0, cx))
+                                        .ok();
+                                },
+                            ))
+                            .item(PopupMenuItem::new("Smaller").on_click(
+                                move |_, _window, cx| {
+                                    smaller
+                                        .update(cx, |this, cx| this.bump_outline_font(-1.0, cx))
+                                        .ok();
+                                },
+                            ))
+                            .item(PopupMenuItem::new("Reset to Default").on_click(
+                                move |_, _window, cx| {
+                                    reset
+                                        .update(cx, |this, cx| {
+                                            this.settings.outline_font_size =
+                                                DEFAULT_OUTLINE_FONT_SIZE;
+                                            let _ = this.settings.save();
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                },
+                            ))
+                    }),
+            )
+    }
+
+    /// Change the outline's row font size.
+    ///
+    /// CotEditor's `biggerFont` / `smallerFont`, including the floor: the
+    /// smaller size never goes below the small system font size, which is the
+    /// default and what *Reset to Default* returns to.
+    fn bump_outline_font(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.settings.outline_font_size =
+            (self.settings.outline_font_size + delta).max(DEFAULT_OUTLINE_FONT_SIZE);
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    /// The outline itself: a virtualized tree, one row per entry.
+    fn render_outline_tree(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let rows = self.outline_rows.clone();
+        let font_size = self.settings.outline_font_size;
+        let highlight = cx.theme().yellow;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+
+        tree(&self.outline_tree, move |_ix, entry, selected, _window, _cx| {
+            let id = entry.item().id.clone();
+            let label = entry.item().label.clone();
+            let row = rows.get(id.as_ref()).cloned();
+            let base = ListItem::new(id)
+                .selected(selected)
+                .w_full()
+                .py_0p5()
+                .px_1()
+                .text_size(px(font_size));
+
+            let Some(row) = row else {
+                return base.child(div().truncate().child(label));
+            };
+
+            // A separator is a hairline rather than a label. Upstream draws a
+            // thin `Divider`; the rows of a virtualized list are all one height,
+            // so the line sits in the middle of a full row instead.
+            if row.kind == Some(OutlineKind::Separator) {
+                return base.child(div().w_full().h(px(1.)).bg(border));
+            }
+
+            let mut line = h_flex()
+                .w_full()
+                .min_w(px(0.))
+                .items_center()
+                .gap_1()
+                .pl(px(entry.depth() as f32 * 12.))
+                // The disclosure control. The tree opens and closes a row on a
+                // click anywhere along it, so this shows the state rather than
+                // being the only way to change it — the one place SubText's
+                // outline behaves differently from upstream's.
                 .child(
                     div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No outline items"),
-                )
-                .into_any_element();
-        }
+                        .w(px(12.))
+                        .flex_shrink_0()
+                        .when(entry.is_folder(), |this| {
+                            this.child(
+                                Icon::new(if entry.is_expanded() {
+                                    IconName::ChevronDown
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .xsmall()
+                                .text_color(muted),
+                            )
+                        }),
+                );
 
-        let mut list = v_flex().gap_0p5();
-        for item in items {
-            if item.separator {
-                // A hairline divider: one physical pixel is the intent, so this
-                // is one of the places a raw `px` value is correct.
-                list = list.child(div().my_1().h(px(1.)).bg(cx.theme().border));
-                continue;
+            // A whitespace indent is drawn as it was captured, which is what
+            // upstream's `Text(indent)` does.
+            if let Some(indent) = row.indent.as_ref() {
+                line = line.child(div().whitespace_nowrap().child(indent.clone()));
             }
-            // The entry's line number is its identity: it is stable for as long
-            // as the entry exists, and it is what the entry is *about*.
-            let id = ElementId::NamedInteger("outline".into(), item.line as u64);
-            // Nesting is expressed in rem so it tracks the base font with the
-            // rest of the interface.
-            let indent = gpui_kit::rems(item.level as f32 * 0.75);
-            let line = item.line;
-            let title = item.title.clone();
-            list = list.child(
-                div()
-                    .id(id)
-                    .pl(indent)
-                    .py_0p5()
-                    .rounded_sm()
-                    .text_sm()
-                    .truncate()
-                    .cursor_pointer()
-                    .hover(|this| this.bg(cx.theme().accent))
-                    .child(title)
-                    .on_click(cx.listener(move |this, _, _, cx| this.goto_line(line, cx))),
-            );
-        }
-        list.into_any_element()
+
+            if let Some(icon) = row.icon() {
+                line = line.child(
+                    Icon::new(icon)
+                        .xsmall()
+                        .flex_shrink_0()
+                        .text_color(row.icon_color()),
+                );
+            }
+
+            line = line.child(if row.matches.is_empty() {
+                // One element, so a long label truncates with an ellipsis.
+                div().flex_1().min_w(px(0.)).truncate().child(label.clone())
+            } else {
+                let mut runs = h_flex()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap();
+                for (range, is_match) in crate::outline::highlight_segments(&label, &row.matches) {
+                    let text = label.get(range).unwrap_or_default().to_string();
+                    runs = runs.child(if is_match {
+                        // Upstream's find-highlight: a bright fill with dark
+                        // text, which stays legible in either appearance.
+                        div()
+                            .bg(highlight)
+                            .text_color(hsla(0., 0., 0.1, 0.9))
+                            .child(text)
+                    } else {
+                        div().child(text)
+                    });
+                }
+                runs
+            });
+
+            if row.kind.is_some_and(OutlineKind::is_bold) {
+                line = line.font_weight(FontWeight::SEMIBOLD);
+            }
+
+            base.child(line)
+        })
+        .into_any_element()
+    }
+
+    /// The Outline pane: title row, tree, filter field.
+    fn render_outline(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        self.queue_outline_refresh(window, cx);
+
+        let filter = self.outline_filter.read(cx).value().to_string();
+        let body = if self.outline_nodes.is_empty() {
+            let message = if filter.is_empty() {
+                // Not upstream: CotEditor shows a plain empty list here.
+                // SubText's placeholder predates this pane's tree and is kept.
+                "No outline items"
+            } else {
+                "No Filter Results"
+            };
+            v_flex()
+                .p_2()
+                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(message))
+                .into_any_element()
+        } else {
+            self.render_outline_tree(cx)
+        };
+
+        v_flex()
+            .h_full()
+            .min_h_0()
+            .gap_2()
+            .child(self.render_outline_header(cx))
+            .child(div().flex_1().min_h_0().child(body))
+            .child(Input::new(&self.outline_filter).small().cleanable(true))
+            .into_any_element()
     }
 
     fn render_warnings(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -2596,7 +3089,7 @@ impl Render for Workspace {
         }
         middle = middle.child(editor_area);
         if self.settings.window.show_inspector {
-            middle = middle.child(self.render_inspector(cx));
+            middle = middle.child(self.render_inspector(window, cx));
         }
         root = root.child(middle);
 
@@ -2667,6 +3160,46 @@ impl Workspace {
             self.set_selection(range, cx);
         }
     }
+}
+
+/// Turn the filtered tree into the items the `Tree` component renders.
+///
+/// The tree keeps its expansion state in the items themselves, and the
+/// workspace mirrors it from the `Expanded` / `Collapsed` events. A rebuild
+/// therefore has to hand the state back with the items, or replacing them would
+/// close the whole outline every time a keystroke lands.
+fn outline_items(nodes: &[FilteredNode], expanded: &HashSet<String>) -> Vec<TreeItem> {
+    nodes
+        .iter()
+        .map(|node| outline_item(node, expanded))
+        .collect()
+}
+
+fn outline_item(node: &FilteredNode, expanded: &HashSet<String>) -> TreeItem {
+    // A separator carries its id like any other row, so it can be scrolled to
+    // and reasoned about by id; its label is empty because it is drawn as a
+    // hairline rather than as text.
+    TreeItem::new(node.entry.id.clone(), node.entry.title.clone())
+        .children(
+            node.children
+                .iter()
+                .map(|child| outline_item(child, expanded)),
+        )
+        .expanded(expanded.contains(&node.entry.id))
+}
+
+/// The 1-based line an offset falls on.
+///
+/// The caret is always on a character boundary, but a refresh can be queued
+/// from a frame that ran before the buffer settled, so the offset is walked
+/// back to a boundary rather than indexed — the worst case is the last line,
+/// which is where a stale caret was anyway.
+fn line_of_offset(text: &str, offset: usize) -> usize {
+    let mut end = offset.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].matches('\n').count() + 1
 }
 
 /// Load every `.cotsyntax` bundle the resource directory offers.
@@ -2792,5 +3325,84 @@ mod tests {
     fn cycling_no_editors_is_harmless() {
         assert_eq!(cycled_pane(0, 0, true), 0);
         assert_eq!(cycled_pane(0, 0, false), 0);
+    }
+
+    // ---- the outline's bridge to the tree --------------------------------
+
+    fn node(id: &str, title: &str, children: Vec<FilteredNode>) -> FilteredNode {
+        FilteredNode {
+            entry: OutlineEntry {
+                id: id.to_string(),
+                title: title.to_string(),
+                line: 1,
+                indent: crate::outline::Indent::Level(0),
+                kind: Some(OutlineKind::Function),
+            },
+            children,
+            matches: Vec::new(),
+        }
+    }
+
+    /// The items carry the ids the workspace looks rows up by, and the
+    /// expansion state the mirror holds. A rebuild that dropped the latter
+    /// would close the whole outline on every keystroke.
+    #[test]
+    fn outline_items_carry_the_expansion_state() {
+        let nodes = vec![node(
+            "parent",
+            "Parent",
+            vec![node("child", "Child", Vec::new())],
+        )];
+        let expanded = HashSet::from(["parent".to_string()]);
+
+        let items = outline_items(&nodes, &expanded);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id.as_ref(), "parent");
+        assert_eq!(items[0].label.as_ref(), "Parent");
+        assert!(items[0].is_folder());
+        assert!(items[0].is_expanded());
+        assert_eq!(items[0].children[0].id.as_ref(), "child");
+        assert!(!items[0].children[0].is_expanded());
+    }
+
+    /// An id the mirror does not know is closed — which is what makes a row
+    /// the user just closed stay closed across the next rebuild.
+    #[test]
+    fn a_folder_outside_the_mirror_is_collapsed() {
+        let nodes = vec![node(
+            "parent",
+            "Parent",
+            vec![node("child", "Child", Vec::new())],
+        )];
+        let items = outline_items(&nodes, &HashSet::new());
+        assert!(items[0].is_folder());
+        assert!(!items[0].is_expanded());
+    }
+
+    /// A leaf has nothing to expand, so the mirror's opinion of it does not
+    /// change how it is handed over.
+    #[test]
+    fn a_leaf_is_never_a_folder() {
+        let items = outline_items(&[node("leaf", "Leaf", Vec::new())], &HashSet::new());
+        assert!(!items[0].is_folder());
+    }
+
+    #[test]
+    fn a_line_number_counts_the_newlines_before_the_offset() {
+        let text = "one\ntwo\nthree";
+        assert_eq!(line_of_offset(text, 0), 1);
+        assert_eq!(line_of_offset(text, 3), 1);
+        assert_eq!(line_of_offset(text, 4), 2);
+        assert_eq!(line_of_offset(text, 12), 3);
+        assert_eq!(line_of_offset(text, 13), 3);
+    }
+
+    /// The offset can be past the end, or inside a character, on the frame
+    /// after a buffer shrank under a queued refresh. Neither may panic.
+    #[test]
+    fn an_offset_past_the_end_or_inside_a_character_is_clamped() {
+        let text = "é\nx";
+        assert_eq!(line_of_offset(text, 99), 2);
+        assert_eq!(line_of_offset(text, 1), 1);
     }
 }

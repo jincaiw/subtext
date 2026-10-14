@@ -130,7 +130,7 @@
 | 侧边栏 | `update_window_options` | ✅ |
 | 检查器 | `update_window_options` | ✅ |
 | 文稿检查器 | `show_inspector(Document)` | ✅ |
-| 大纲检查器 | `show_inspector(Outline)` | ✅ |
+| 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
 | 警告检查器 | `show_inspector(Warnings)` | ✅ |
 | 导航栏 | `update_window_options` | ✅ |
 | 行号 | `update_editor_options` | ✅ |

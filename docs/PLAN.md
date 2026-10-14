@@ -159,7 +159,7 @@ v0.2 因此分成两条线：**先按规范纠正 UI，再补功能**。
 | 7.4 选中语义改用语义组件 | 多选一控件改 `RadioGroup` / `TabBar::segmented()` | P1 | ✅ |
 | 7.5 可点击 `div` 改语义组件 | 标签栏 / 侧栏 / 检查器 / Snippets 页签 | P1 | ✅ |
 | 7.6 `px()` 字面量改 rem 档位 | 全部改 `rems()`；保留 3 类合法例外并注释 | P2 | ✅ |
-| 7.7 大纲改用 `Tree` | 层级不再用缩进模拟 | P3 | ⏳ 推迟到阶段 8 |
+| 7.7 大纲改用 `Tree` | 层级不再用缩进模拟 | P3 | ✅ 见 §8.0 |
 | 7.8 设置窗口对齐上游 9 面板 | 见 §7.8 下方 | P0 | ✅ |
 
 **验收标准**：
@@ -194,7 +194,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 
 | 顺序 | 功能 | 理由 | 状态 |
 | --- | --- | --- | --- |
-| 8.0 | 大纲改 `Tree` | 阶段 7.7 顺延；`Tree` / `TreeState` 已提供 | ⏳ |
+| 8.0 | 大纲改 `Tree` | 阶段 7.7 顺延；`Tree` / `TreeState` 已提供 | ✅ |
 | 8.1 | 分屏编辑器 | 菜单里 3 项，`h_resizable`/`v_resizable` 已提供 | ✅ |
 | 8.2 | 文件夹查找 | 侧栏面板已在，缺查找逻辑 | ✅ |
 | 8.3 | 多重替换 | 需要一张可编辑的规则表 | ✅ |
@@ -206,6 +206,93 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
+
+### 8.0 大纲改用 `Tree` 组件 ✅
+
+阶段 7.7 顺延下来的那条：大纲此前是**自己拿缩进模拟层级**的一列 `ListItem`，
+既不能折叠，也没有 CotEditor 的过滤与光标跟随。本轮把它换成 gpui-kit 的
+`Tree` / `TreeState`（`uniform_list` 虚拟化），并按上游 `OutlineInspectorView`
+补齐整条数据通路。
+
+**上游模型**（`OutlineInspectorView.swift`、`OutlineItem.swift`、
+`OutlineExtractor.swift`、`String+Match.swift`）：大纲是一棵 `OutlineItem` 树，
+每个条目带一个 `Indent`，而 `Indent` 是**两态**的 —— `.level(n)`（`title` 规则与
+`heading.N` 规则）或 `.string(捕获到的空白)`（其余规则）。这个区分不是装饰：
+`.string` 会把嵌套层级**清空**并把该条强制为根，所以按缩进排的键值对是一排根
+节点，而 Markdown 的 `##` 是 `#` 的子节点。`NSOutlineView` 负责折叠，
+`rebuildOutline` 重建、`onChange` 决定哪些新条目**默认展开**，过滤走
+`abbreviatedMatchedRanges` —— 是**子序列**匹配而非子串，`gt` 能找到 "Guten Tag"。
+内置的 107 条规则里 container 49 / function 33 / value 8 / heading.1–6 各 1 /
+heading 2 / title 2 / mark 3 / separator 1 / 无 kind 3。
+
+**三处改动**：
+
+1. **`crates/subtext-app/src/outline.rs`**（1296 行，40 项测试）：从「扁平的
+   `level: usize`」重写成「`Indent::{Level, String}` + `kind: Option<OutlineKind>`
+   + 稳定 `id`」。新增的全是纯函数，因此都能直接测：
+
+   | 函数 | 对应上游 |
+   | --- | --- |
+   | `build_tree()` | `OutlineBuildNode.build(from:)`，含 `.string` 清空层级 |
+   | `filtered_tree()` | `FilteredItem.filter(_:keyPath:)`，保留通往命中的那条路径 |
+   | `expandable_ids()` | `expandableIDs` |
+   | `abbreviated_matched_ranges()` | `abbreviatedMatchedRanges(with:)` |
+   | `entry_at_line()` | `item(at:)`，取光标所在行**之上最后一个**条目、跳过 separator |
+   | `row_map()` / `highlight_segments()` | 绘制用（图标、配色、命中分段） |
+
+   `assign_ids()` 用「kind + 标签」派生身份（上游是存 UUID 再按标签 diff），
+   于是重新解析后展开状态还在。
+
+2. **`crates/subtext-app/src/settings.rs`**：`DEFAULT_OUTLINE_FONT_SIZE`（11.0，
+   即 macOS 的 `NSFont.smallSystemFontSize`）与 `outline_wraps_lines` /
+   `outline_font_size` 两个持久化字段。
+
+3. **`crates/subtext-app/src/workspace.rs`**：`Workspace` 多出一个
+   `Entity<TreeState>`、一个过滤框 `Entity<InputState>`、一棵
+   `Vec<FilteredNode>`、一份 `HashMap<String, OutlineRow>`（树只把 id 与标签交给
+   渲染器，图标与缩进得按 id 反查）、以及展开态镜像 `HashSet<String>`。
+   检查器的 body 在大纲页**不再套外层滚动** —— 虚拟化列表自己滚，两层滚动会抢滚轮。
+
+**刷新是怎么被触发的**：上游是「谁改了谁去调 `rebuildOutline`」，SubText 反过来
+——渲染时**自查是否过期**。`OutlineSource{document, syntax, 文本哈希, filter}`
+记录「当前这棵树是从什么建出来的」，`outline_is_stale()` 拿它和现算的一份比；
+`outline_caret_moved()` 比光标所在条目与树当前选中项。任一为真就 `cx.defer_in`
+把重建推到效果周期末尾 —— 渲染里不能改 `TreeState`（`set_items` 会 `notify`，
+而订阅回调不允许在发射实体的 update 里跑）。于是键入、切标签、从磁盘重读、
+换语法、改过滤，五条路径都不必各自记得通知大纲。代价是每次工作区重绘要读一遍
+全文（`EditorState::value()` 每次都把整条 rope 物化成 `SharedString`），所以这一遍
+读被**共用**给「是否过期」与「光标是否换行」两个判断；而且只在大纲页可见时才发生
+——`queue_outline_refresh()` 只从 `render_outline()` 调用。这与文稿检查器现状一致。
+
+**展开策略**（照搬上游 `onChange`）：无过滤时 `retain` 仍存在的 id，并把**新** id
+加进展开集（新条目默认展开）；有过滤时整个 `expandable_ids` 展开，否则命中项可能
+藏在折叠的父节点里。
+
+**接线**：`TreeEvent::{Expanded, Collapsed}` → 镜像展开态（`set_items` 会清空选中
+但不发事件，所以镜像必须自己记）；`cx.observe(tree)` → 行被选中时 `goto_line()`
+（上游 `selectItem(id:)`），并用 `outline_selected` 做双向去抖，避免「光标 → 行」
+与「行 → 光标」来回弹；过滤框 `InputEvent::Change` → `cx.notify()`。Options 菜单
+（`Ellipsis` 按钮 + `DropdownMenu`，锚在右上角）给出 *Text Size* 的
+Bigger / Smaller / Reset to Default，字号有下限（不低于默认的 11pt，与上游
+`smallerFont` 一致）。
+
+**已知偏差（记账）**：
+
+1. **Options 菜单的 *Wrap Lines* 只显示、不生效**。虚拟化列表的行高必须一致，
+   一行折成两行会让 `uniform_list` 的定位算错。菜单项保留是为了让菜单读起来与
+   上游一样，但禁用。
+2. **点击行内任意位置即折叠/展开**，而非只有折叠控件可点 —— `Tree` 组件的
+   `on_entry_click` 行为。折叠控件仍画出来显示状态。
+3. **separator 画成整行中间的一根细线**。上游画一个更矮的 `Divider`，但虚拟化
+   列表的行高一致，只能把线放进一个整行里。
+4. **heading 的图标是 Lucide 近似**。上游用 SF Symbols 的 `N.square.fill`，
+   Lucide 没有带编号的方块，所以分级 heading 用 `Hash`，无级别 heading 用
+   `SquareMenu`。其余六种 kind 一一对应。
+5. **空态保留了 "No outline items"**。上游此时就是一张空列表；SubText 的占位文案
+   早于这棵树，留着比空着好读。过滤无结果时用上游的 "No Filter Results"。
+6. **光标 → 行同步不会展开祖先**。光标移进折叠节点内部时，那一行没有可选的条目，
+   于是不动 —— 上游也不展开。`TreeState::reveal_item()` 能做到，本轮没用，因为
+   那会把大纲滚到用户没在看的地方。
 
 ### 8.1 分屏编辑器 ✅
 
@@ -553,7 +640,7 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（262 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（296 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
@@ -565,7 +652,6 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 | 缺口 | 说明 |
 | --- | --- |
 | `cargo fmt` 未接入 | 全仓 21 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` / `actions.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
-| 大纲未用 `Tree` | 见阶段 8.0。 |
 | Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
