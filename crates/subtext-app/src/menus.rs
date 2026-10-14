@@ -1002,25 +1002,25 @@ mod tests {
         assert_eq!(
             item_labels(&missing),
             [
-                "Unicode (UTF-16 Little-Endian)",
+                "Unicode (UTF-16LE)",
                 "―",
                 "Unicode (UTF-8)",
                 "―",
-                "Japanese (EUC-JP)",
+                "Japanese (EUC)",
                 "―",
                 CUSTOMIZE_ENCODINGS,
             ]
         );
         assert_eq!(
             checked_label(&missing).as_deref(),
-            Some("Unicode (UTF-16 Little-Endian)")
+            Some("Unicode (UTF-16LE)")
         );
 
         // The other half: when the list already holds it, it stays where it is.
         let listed = encoding_items(&groups, Some(FileEncoding::of(TextEncoding::UTF8)));
         assert_eq!(
             item_labels(&listed),
-            ["Unicode (UTF-8)", "―", "Japanese (EUC-JP)", "―", CUSTOMIZE_ENCODINGS]
+            ["Unicode (UTF-8)", "―", "Japanese (EUC)", "―", CUSTOMIZE_ENCODINGS]
         );
     }
 

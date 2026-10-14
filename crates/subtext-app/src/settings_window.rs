@@ -1034,9 +1034,18 @@ impl SettingsWindow {
                 cx,
             ));
 
-        let encodings: &[TextEncoding] = &encoding::ALL;
-        let current_encoding = settings.encoding().identifier();
-        let encoding_index = encodings.iter().position(|e| e.identifier() == current_encoding);
+        // The picker offers the menu's list, which is upstream's encoding list.
+        // A settings file can hold a spelling the list does not, though — one of
+        // the encodings upstream can add but does not list by default, picked in
+        // an earlier build — and it still decodes with it, so the picker has to
+        // show it rather than come up blank. Same rule as the encoding menu's:
+        // the encoding in force goes to the top when the list lacks it.
+        let mut encodings: Vec<TextEncoding> = encoding::MENU.clone();
+        let current = settings.encoding();
+        if !encodings.contains(&current) {
+            encodings.insert(0, current);
+        }
+        let encoding_index = encodings.iter().position(|e| *e == current);
         let encoding_items = encodings.iter().map(|e| SharedString::from(e.name)).collect::<Vec<_>>();
         let default_encoding = pick_list(
             "default-encoding",

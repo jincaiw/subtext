@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ 8.9d ✅ 8.9e ✅ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ 8.9b ✅ 8.9c ✅ 8.9d ✅ 8.9e ✅ 8.9f ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -898,13 +898,13 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 
 - **注册表每个条目一个显式标识符。** 此前标识符由 codec 派生（`e.name().to_lowercase()`），
   而这个注册表里有多对条目**共用同一个 codec** —— `encoding_rs` 实现的是 WHATWG
-  Encoding Standard，不是 Apple 的 codec 集合：`BIG5` 同时是 "Chinese (Big5)" 与
-  "Chinese (Big5-HKSCS)"，`GBK` 同时是 "Chinese (GB 2312)" 与 "Chinese (GBK)"，
+  Encoding Standard，不是 Apple 的 codec 集合：`BIG5` 同时是 "Traditional Chinese (Big 5)"
+  与 "Traditional Chinese (Big 5 HKSCS)"，`SHIFT_JIS` 同时是两条日文 Shift JIS，
   `WINDOWS_1252` 同时是 "Western (ISO Latin 1)" 与 "Western (Windows Latin 1)"……
   派生出来的标识符重复，于是菜单项无法区分彼此：两项跑同一条命令，勾选同时落在两项上。
   现在 id 由条目自带，`identifier()` 返回它；`from_identifier()` 先按 id 精确匹配，
   再退回 WHATWG label —— 老设置文件里的拼写仍然解析到**同一个 codec**（不是同一条目，
-  重复的那些做不到，也没有必要）。
+  重复的那些做不到，也没有必要）。条目名与分组的逐条对齐见 §8.9f。
 - **`FileEncoding { encoding, with_utf8_bom }`**，上游的模型。BOM 是**文件**的属性而不是
   UTF-8 的属性，所以它不能做成一条与 codec 并列的注册表条目 —— 那会让注册表声称有两种
   编码而其实只有一种。原先那条 `"Unicode (UTF-8 with BOM)" => UTF_8` 是**死条目**
@@ -932,10 +932,11 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 - 偏差：上游把每个编码的 IANA charset 名等信息挂在菜单项的 `toolTip` 上，GPUI 的菜单项
   没有 tooltip，与 8.9b 同样无处可放。
 
-**已知偏差（记账）**：ISO Latin 1–10 这一组仍是近似 —— `encoding_rs` 没有 ISO 8859-1、
-也没有 ISO 8859-9，编码标准把这两个 label 解析到 Windows 代码页，所以 "Western (ISO Latin 1)"
-实际以 windows-1252 解、"Turkish (ISO Latin 5)" 实际以 windows-1254 解。两者都是超集，
-名字与实现却是两回事；注册表对齐见下方「已知缺口」。
+**当时的偏差（已被 §8.9f 收掉）**：ISO Latin 1–10 这一组当时仍是近似 —— `encoding_rs` 没有
+ISO 8859-1、也没有 ISO 8859-9，编码标准把这两个 label 解析到 Windows 代码页，所以
+"Western (ISO Latin 1)" 实际以 windows-1252 解、"Turkish (ISO Latin 5)" 实际以 windows-1254 解。
+两者都是超集，名字与实现却是两回事。§8.9f 把整张表与上游默认列表逐条对齐时确认了这仍是
+**唯一可行的选择**（实现一张自己的 ISO 8859-1/9 表会让可编码字符集变窄），于是保留并记账。
 
 **8.9d `Script` 菜单**（`subtext-core/src/scripts.rs`、`subtext-app/src/scripts.rs`）
 
@@ -1033,10 +1034,146 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
   已安装的菜单，而是把同一根菜单栏**重建**一遍再走，不需要平台支持。生成器的注释已改，
   `menu.rs` 重新生成（`keymap.rs` 未变，两次生成 sha256 一致）。
 
+**8.9f 编码注册表与上游默认列表逐条对齐**（`encoding.rs` / `menus.rs` / `settings_window.rs`）
+
+8.9c 只修了会被菜单直接暴露的错（ISO Latin 5–10 的 codec、Latin 2/4 的名字）。这一节把
+上游 `DefaultSettings+Encodings.swift` 的默认列表**逐条**过一遍，改掉能改的、合并掉重复的、
+把该如实记账的记清楚。
+
+**先把名字的事实拿准，再动手。** 上游那份列表里每一条都挂着一条注释，看起来就是
+`String.localizedName(of:)` 的结果；但注释是手抄的，第 109 行把 `UTF32LE` 写成了
+「Unicode (UTF-16LE)」。所以没有照抄注释，而是用系统 SDK 写了个小程序把 60 条的
+`CFStringConvertEncodingToIANACharSetName` / `localizedNameOfStringEncoding` **实测**了一遍。
+实测推翻了两处：
+
+- `GB_18030_2000` 的注释写「Chinese (GB18030)」，Foundation 实际是 **「Chinese (GB 18030)」**
+  （带空格）——SubText 原来的名字本来就是对的，不动。
+- 反过来，`ISO_2022_JP` 是「Japanese (ISO 2022-JP)」（无连字符）、`EUC_JP` 是
+  「Japanese (EUC)」、`EUC_KR` 是「Korean (EUC)」、`dosThai` 是「Thai (Windows, DOS)」、
+  `KOI8_U` 是「Ukrainian (KOI8-U)」（不是 Cyrillic）、`windowsLatin5` 是
+  「Turkish (Windows Latin 5)」——这些原来都写错了。
+
+**60 条的去向：38 条进菜单，22 条如实缺席，另有 6 条从菜单降级、1 条补进降级层。**
+
+| 上游组 | 上游条目 | 处置 | 说明 |
+| --- | --- | --- | --- |
+| Unicode | Unicode (UTF-8) | ✅ 照搬 | |
+| Japanese | Japanese (Shift JIS) | ≈ 近似 | codec 是 cp932（Windows-31J），JIS X 0208 Shift JIS 的超集 |
+| Japanese | Japanese (EUC) | 🔤 改名 | 原「Japanese (EUC-JP)」 |
+| Japanese | Japanese (Windows, DOS) | ❌ 缺席 | cp932，就是上一条的 codec；同一 codec 第二个名字只加菜单项、不加能力 |
+| Japanese | Japanese (Shift JIS X0213) | ≈ 近似 | 同上 codec，没有 JIS X 0213 plane 2 |
+| Japanese | Japanese (Mac OS) | ❌ 缺席 | `encoding_rs` 没有任何 Mac 日文 codec |
+| Japanese | Japanese (ISO 2022-JP) | 🔤 改名 | 原「Japanese (ISO-2022-JP)」 |
+| Western | Western (Mac OS Roman) | ✅ 照搬 | |
+| Western | Western (Windows Latin 1) | ✅ 照搬 | |
+| Chinese | Chinese (GB 18030) | ✅ 照搬 | 注释写成 GB18030，实测带空格，SubText 原本就对 |
+| Chinese | Traditional Chinese (Big 5 HKSCS) | 🔤 改名 + ≈ | 原「Chinese (Big5-HKSCS)」；WHATWG Big 5 表含 HKSCS，但映射到真实码点而非 PUA |
+| Chinese | Traditional Chinese (Big 5-E) | ❌ 缺席 | Big 5-E 的扩展也在 WHATWG Big 5 表里，同上 |
+| Chinese | Traditional Chinese (Big 5) | 🔤 改名 | 原「Chinese (Big5)」 |
+| Chinese | Traditional Chinese (Mac OS) | ❌ 缺席 | 无 Mac 中文 codec |
+| Chinese | Simplified Chinese (Mac OS) | ❌ 缺席 | 同上 |
+| Chinese | Traditional Chinese (EUC) | ❌ 缺席 | 无 EUC-TW codec |
+| Chinese | Simplified Chinese (GB 2312) | 🔤 改名 + ≈ | 原「Chinese (GB 2312)」；codec 是 GBK（超集） |
+| Chinese | Traditional Chinese (Windows, DOS) | ❌ 缺席 | cp950，就是 Big 5 那条的 codec |
+| Chinese | Simplified Chinese (Windows, DOS) | ❌ 缺席 | cp936，就是 GB 2312 那条的 codec |
+| Korean | Korean (Mac OS) | ❌ 缺席 | 无 Mac 韩文 codec |
+| Korean | Korean (EUC) | 🔤 改名 + ≈ | 原「Korean (EUC-KR)」；codec 实为 cp949 |
+| Korean | Korean (Windows, DOS) | ❌ 缺席 | cp949，就是上一条的 codec |
+| Thai | Thai (Windows, DOS) | 🔤 改名 | 原「Thai (Windows)」 |
+| Thai | Thai (ISO 8859-11) | ≈ 近似 | codec 是 windows-874，只差 `0x80`–`0x9F` |
+| Arabic | Arabic (Mac OS) | ❌ 缺席 | 无 Mac 阿拉伯文 codec |
+| Arabic | Arabic (ISO 8859-6) | ✅ 照搬 | |
+| Arabic | Arabic (Windows) | ✅ 照搬 | |
+| Greek | Greek (Mac OS) | ❌ 缺席 | 无 Mac 希腊文 codec |
+| Greek | Greek (ISO 8859-7) | ✅ 照搬 | |
+| Greek | Greek (Windows) | ✅ 照搬 | |
+| Hebrew | Hebrew (Mac OS) | ❌ 缺席 | 无 Mac 希伯来文 codec |
+| Hebrew | Hebrew (ISO 8859-8) | ✅ 照搬 | |
+| Hebrew | Hebrew (Windows) | ✅ 照搬 | |
+| Cyrillic | Cyrillic (Mac OS) | ❌ 缺席 | **见下方「Mac Cyrillic 的坑」** |
+| Cyrillic | Cyrillic (ISO 8859-5) | ✅ 照搬 | |
+| Cyrillic | Cyrillic (Windows) | ✅ 照搬 | |
+| Cyrillic | Russian (DOS) | ➕ 新补 | cp866，`encoding_rs` 有 `IBM866`，此前漏了 |
+| 杂项组 | Central European (Mac OS) | ❌ 缺席 | 无 Mac 中欧 codec |
+| 杂项组 | Turkish (Mac OS) | ❌ 缺席 | 无 Mac 土耳其文 codec |
+| 杂项组 | Icelandic (Mac OS) | ❌ 缺席 | 无 Mac 冰岛文 codec |
+| ISO Latin | Western (ISO Latin 1) | ≈ 近似 | 编码标准把 label 解析到 windows-1252 |
+| ISO Latin | Central European (ISO Latin 2) | ✅ 照搬 | |
+| ISO Latin | Western (ISO Latin 3) | ✅ 照搬 | |
+| ISO Latin | Central European (ISO Latin 4) | ✅ 照搬 | |
+| ISO Latin | Turkish (ISO Latin 5) | ≈ 近似 | label 解析到 windows-1254 |
+| ISO Latin | Nordic (ISO Latin 6) | ✅ 照搬 | |
+| ISO Latin | Baltic (ISO Latin 7) | ✅ 照搬 | |
+| ISO Latin | Celtic (ISO Latin 8) | ✅ 照搬 | |
+| ISO Latin | Western (ISO Latin 9) | ✅ 照搬 | |
+| ISO Latin | Romanian (ISO Latin 10) | ✅ 照搬 | |
+| 中欧 Windows | Latin-US (DOS) | ❌ 缺席 | cp437，`encoding_rs` 没有 |
+| 中欧 Windows | Central European (Windows Latin 2) | 🔤 改名 + 合并 | 原「Western (Windows Latin 2)」与「Central European (Windows)」两条同 codec，合并成这一条 |
+| 中欧 Windows | Western (NextStep) | ❌ 缺席 | NextStep Latin 无 codec |
+| 中欧 Windows | Western (ASCII) | ❌ 缺席 | 无 ASCII codec；`encoding_rs` 的 `ascii` label 解析到 windows-1252，那会接受 ASCII 该拒绝的字节 |
+| Unicode | Unicode (UTF-16) | ❌ 缺席 | 见下方「缺的两条宽 Unicode」 |
+| Unicode | Unicode (UTF-16BE) | 🔤 改名 | 原「Unicode (UTF-16 Big-Endian)」 |
+| Unicode | Unicode (UTF-16LE) | 🔤 改名 | 原「Unicode (UTF-16 Little-Endian)」 |
+| Unicode | Unicode (UTF-32) | ❌ 缺席 | 同 UTF-16 |
+| Unicode | Unicode (UTF-32BE) | 🔤 改名 | 原「Unicode (UTF-32 Big-Endian)」 |
+| Unicode | Unicode (UTF-32LE) | 🔤 改名 | 原「Unicode (UTF-32 Little-Endian)」 |
+
+**Mac Cyrillic 的坑（一条值得单独记的发现）。** 上游列的是 `macCyrillic`，Foundation 给它的
+IANA 名就是 `x-mac-cyrillic`，而 `encoding_rs` 的 `X_MAC_CYRILLIC` 正带着这个名字——看起来是
+完美对应。但 `encoding_rs` 自己的文档写着「This is the MacUkrainian encoding from Mac OS
+Classic... This encoding matches the Windows code page 10017」，而 Apple 的 `macCyrillic`
+是 cp10007、`macUkrainian` 是 cp10017（Foundation 名「Cyrillic (Mac OS Ukrainian)」）。
+也就是说 WHATWG 的 `x-mac-cyrillic` 用的是**乌克兰文**那张表，却挂着西里尔文的名字。
+把这条 codec 命名为「Cyrillic (Mac OS)」会犯「名字说一张表、解码用另一张表」的错，
+所以：菜单里**如实缺席**，codec 以 Foundation 给它的真名「Cyrillic (Mac OS Ukrainian)」
+放进降级层。这是实测 + 读 crate 文档才发现的，不是能从上游源码推出来的。
+
+**缺的两条宽 Unicode。** 上游的 Unicode 组是 6 条：`UTF-16`、两个字节序、`UTF-32`、两个字节序。
+`UTF-16` / `UTF-32` 的意思是「让 BOM 决定字节序」。SubText 的 `FileEncoding` 恰恰相反——
+它把字节序做成显式的（`utf-16le` / `utf-16be`），`Bom` 是**文件**的属性。要支持
+「未指定字节序」就得先决定写出时用哪个字节序，而上游是从 Foundation 继承的（跟平台原生
+字节序走，不跨平台可复现）。所以这两条如实缺席，留给「`FileEncoding` 支持未指定字节序」
+这个独立缺口，不在这里猜一个定义。
+
+**降级层 `UNLISTED`：SubText 认得、但菜单不列。** 上游的编码列表是
+`String.availableStringEncodings` 的**子集**（设置面板可以从全集里加，默认列表是精选的 60 条）。
+SubText 之前把这两层混成一层，于是菜单里多了 6 条上游默认列表没有的。现在拆开：
+
+- `MENU_GROUPS` = 菜单，38 条，与上游默认列表能覆盖的部分逐条对齐；
+- `UNLISTED` = 7 条，`AVAILABLE` = 两者相接 = 45 条；
+- `from_identifier` 搜 `AVAILABLE`，菜单 / 探测器 / 设置选择器一律用 `MENU`——
+  与上游一致（它的 `fileEncodingCandidates` 和编码列表编辑器都基于列表本身）。
+
+降级的 6 条：`Cyrillic (KOI8-R)`、`Ukrainian (KOI8-U)`、`Turkish (Windows Latin 5)`、
+`Baltic (Windows)`、`Vietnamese (Windows)`、`Chinese (GBK)`；第 7 条是上面那个
+`Cyrillic (Mac OS Ukrainian)`。**不删它们**的理由有两条：老设置文件里的拼写还能解析
+（`koi8-r` 这些是 `id`），以及缺口表里那个「列表编辑器」将来要有东西可加。
+
+**合并掉 4 对重复条目。** 上游把 windows-1250 只列一次，SubText 列了两次；ISO 8859-2、
+8859-4、8859-9 也各有一条在两组里各出现一次。合并后：`windows-latin-2` 与
+`iso-8859-2` / `iso-8859-4` / `iso-8859-9` 这四个旧 id 仍要能解析，前三个是 WHATWG label
+（回落就能找到同 codec 的存活条目），只有 `windows-latin-2` 不是 label，进了
+`LEGACY_IDENTIFIERS` 别名表。有一个测试专门盯这四个。
+
+**顺带修掉一处自己引入的回退。** 设置窗口的「默认编码」选择器此前用 `ALL`（现在叫 `MENU`）
+填选项，降级之后如果用户的设置里存着 `koi8-r`，选择器会显示空白（文档仍能按它解码）。
+按编码菜单既有的「当前值不在列表则提到最前」规则补上：不在列表时把当前值插到选项最前。
+
+**验收方式是把对账写成测试。** `UPSTREAM_DEFAULT_LIST`（60 条）与 `UPSTREAM_LISTED`（38 条）
+两张常量表进测试模块，断言：60 = 38 + 22、`MENU` 的名字序列**恰好**等于 `UPSTREAM_LISTED`、
+`UPSTREAM_LISTED` 是 `UPSTREAM_DEFAULT_LIST` 的子序列、22 条缺席的**不在** `AVAILABLE` 里、
+降级层恰好是那 7 条 id。于是任何一次改名、增删、或「把缺席的悄悄加回来」都会让测试红。
+命名与上游不一致这件事从「靠人记得」变成了「编译期+运行期都拦得住」。
+
+**残余近似（记账）**：38 条里有 8 条是超集近似 —— ISO Latin 1 → windows-1252、
+ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、
+GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点）。
+都是「解码不会漏、只会多接受几个字节序列」的方向，名字与实现不一致这点在缺口表里。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（385 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（498 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
@@ -1049,7 +1186,9 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
 | --- | --- |
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
 | Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
-| 编码注册表与上游默认列表尚未逐条对齐 | `encoding_rs` 实现的是 WHATWG Encoding Standard（一个以 Windows 为中心的**子集**），不是 Apple 的 codec 集合。上游 `DefaultSettings+Encodings.swift` 的默认菜单列表有 60 条，SubText 只能提供其中约 40 条：Mac OS 系列（MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic）、Big5-E、EUC-TW、DOS 系列（DOSJapanese、DOSChineseTrad、DOSLatinUS、DOSRussian）、NextStep Latin、ASCII 都没有对应 codec；反过来 SubText 多出四条上游默认列表里没有的（KOI8-R、KOI8-U、Vietnamese Windows、Baltic Windows）。注册表里还有几对**共用 codec 的条目**（GBK / GB 2312、Big5 / Big5-HKSCS、Windows Latin 2 / Central European (Windows)、Turkish 两条、Baltic 两条、Shift JIS / Shift JIS X0213），名字与标识符都不同、各自可解析，但选任意一条效果相同。**本轮（8.9c）只修了会被菜单直接暴露的错**：ISO Latin 5–10 此前映射到完全不同的字母表（Latin 5 → ISO-8859-5 西里尔、6 → ISO-8859-6 阿拉伯、7 → ISO-8859-7 希腊、8 → ISO-8859-8 希伯来、9 → ISO-8859-10、10 → ISO-8859-13），现在按上游的名字与 Apple `CFStringEncodings` 的对应关系改成 windows-1254 / ISO-8859-10 / ISO-8859-13 / ISO-8859-14 / ISO-8859-15 / ISO-8859-16，Latin 2 与 4 的名字也对齐成上游的 "Central European (ISO Latin 2/4)"。剩下的一次性对齐见任务 #37。 |
+| 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **38 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；以及 Unicode (UTF-16)/(UTF-32)）。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
+| 缺 `Unicode (UTF-16)` 与 `Unicode (UTF-32)` 两条菜单项 | 上游这两条的意思是「让 BOM 决定字节序」，写出时用哪个字节序由 Foundation 决定（跟平台原生字节序，不跨平台可复现）。SubText 的 `FileEncoding` 把字节序做成显式的（`utf-16le` / `utf-16be`），`Bom` 是文件的属性。要补这两条，先得给 `FileEncoding` 一个「未指定字节序」态并定义写出规则，是一个独立改动，不在 §8.9f 里猜。 |
+| 编码列表不可编辑 | 上游的设置面板可以从 `String.availableStringEncodings` 里增删、拖拽排序，那份列表既决定 `Format ▸ Text Encoding` 菜单，也决定打开文件时的探测优先级。SubText 的「Edit List…」是置灰的，菜单就是 `MENU`、探测候选也是 `MENU`。`UNLISTED` 那 7 条正是为这个编辑器留的存货（见 §8.9f）。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |

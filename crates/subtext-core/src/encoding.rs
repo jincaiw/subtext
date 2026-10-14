@@ -96,11 +96,11 @@ pub fn detect_bom(bytes: &[u8]) -> Bom {
 /// An encoding's identifier is *not* derived from its codec. It cannot be:
 /// several of the encodings CotEditor lists share a codec here, because
 /// `encoding_rs` implements the WHATWG Encoding Standard rather than Apple's
-/// codec set. `encoding_rs::BIG5` is what both "Chinese (Big5)" and
-/// "Chinese (Big5-HKSCS)" decode with; `encoding_rs::GBK` is what all three
-/// Chinese Simplified entries use. Deriving the identifier from the codec
-/// would give those pairs the same one, and an encoding the user cannot name
-/// is an encoding they cannot choose — the menu item would run whichever of
+/// codec set. `encoding_rs::BIG5` is what both "Traditional Chinese (Big 5)"
+/// and "Traditional Chinese (Big 5 HKSCS)" decode with; `encoding_rs::SHIFT_JIS`
+/// is what both Japanese Shift JIS entries use. Deriving the identifier from the
+/// codec would give those pairs the same one, and an encoding the user cannot
+/// name is an encoding they cannot choose — the menu item would run whichever of
 /// the two happened to come first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextEncoding {
@@ -126,14 +126,17 @@ impl TextEncoding {
     }
 
     pub const UTF8: Self = Self::rs("Unicode (UTF-8)", "utf-8", UTF_8);
+    // The four wide forms are named the way Foundation names them — "Unicode
+    // (UTF-16BE)", not "Unicode (UTF-16 Big-Endian)" — because that is the string
+    // upstream's menu shows, and the whole registry is spelled that way.
     pub const UTF16_LE: Self =
-        Self { name: "Unicode (UTF-16 Little-Endian)", id: "utf-16le", kind: Kind::Utf16Le };
+        Self { name: "Unicode (UTF-16LE)", id: "utf-16le", kind: Kind::Utf16Le };
     pub const UTF16_BE: Self =
-        Self { name: "Unicode (UTF-16 Big-Endian)", id: "utf-16be", kind: Kind::Utf16Be };
+        Self { name: "Unicode (UTF-16BE)", id: "utf-16be", kind: Kind::Utf16Be };
     pub const UTF32_LE: Self =
-        Self { name: "Unicode (UTF-32 Little-Endian)", id: "utf-32le", kind: Kind::Utf32Le };
+        Self { name: "Unicode (UTF-32LE)", id: "utf-32le", kind: Kind::Utf32Le };
     pub const UTF32_BE: Self =
-        Self { name: "Unicode (UTF-32 Big-Endian)", id: "utf-32be", kind: Kind::Utf32Be };
+        Self { name: "Unicode (UTF-32BE)", id: "utf-32be", kind: Kind::Utf32Be };
 
     /// Whether a byte-order mark is meaningful for this encoding.
     ///
@@ -175,11 +178,18 @@ impl TextEncoding {
 
     /// Look an encoding up by its identifier.
     ///
-    /// Also accepts the WHATWG label for an encoding — `"shift_jis"`,
-    /// `"euc-jp"` — which is what a settings file written before the
-    /// identifiers were made unique holds. Those are not quite the same set:
-    /// the label for GB 2312 is `"gbk"`, and both spellings land on
-    /// `encoding_rs`'s one GBK codec either way.
+    /// Three spellings resolve, in this order: the identifier itself, one of the
+    /// spellings in [`LEGACY_IDENTIFIERS`], and a WHATWG label — `"shift_jis"`,
+    /// `"euc-jp"`, `"windows-1252"`. The label route is what a settings file
+    /// written before the identifiers were made unique holds, and it is why the
+    /// identifiers here are labels wherever a label exists.
+    ///
+    /// The label route answers with the first entry in [`AVAILABLE`] that uses
+    /// the codec, not with the entry the label is named after: several entries
+    /// share a codec, and a label can only name the codec. `"iso-8859-9"` is the
+    /// Turkish standard, whose label the Encoding Standard resolves to
+    /// windows-1254, so it lands on "Turkish (ISO Latin 5)" rather than on the
+    /// unlisted "Turkish (Windows Latin 5)" — the same codec either way.
     pub fn from_identifier(name: &str) -> Option<Self> {
         let lowered = name.trim().to_ascii_lowercase();
         match lowered.as_str() {
@@ -189,11 +199,14 @@ impl TextEncoding {
             "utf-32be" | "utf-32-be" => return Some(Self::UTF32_BE),
             _ => {}
         }
-        if let Some(found) = ALL.iter().copied().find(|e| e.id == lowered) {
+        if let Some(found) = AVAILABLE.iter().copied().find(|e| e.id == lowered) {
             return Some(found);
         }
+        if let Some((_, id)) = LEGACY_IDENTIFIERS.iter().find(|(old, _)| *old == lowered) {
+            return AVAILABLE.iter().copied().find(|e| e.id == *id);
+        }
         let encoding = Encoding::for_label(lowered.as_bytes())?;
-        ALL.iter().copied().find(|e| matches!(e.kind, Kind::Rs(x) if x == encoding))
+        AVAILABLE.iter().copied().find(|e| matches!(e.kind, Kind::Rs(x) if x == encoding))
     }
 
     /// Decode `bytes` (a BOM, if present, is expected to be already stripped).
@@ -295,64 +308,127 @@ fn encode_utf32(text: &str, little_endian: bool) -> Vec<u8> {
     out
 }
 
-/// The encoding registry, cut into the groups CotEditor's default encoding list
-/// cuts it into.
+/// The encodings the `Format ▸ Text Encoding` menu lists, cut into the groups
+/// CotEditor's default encoding list cuts them into.
 ///
-/// The groups are the table. [`ALL`] is derived from them, so the flat list and
+/// The groups are the table. [`MENU`] is derived from them, so the flat list and
 /// the menu cannot drift apart: the menu is the registry, separated in the same
 /// places upstream separates its own. Nothing here is generated — the registry
 /// is code, and only the menu *bar* comes out of `tools/`.
 ///
-/// Each group's comment names what upstream's group holds and, where the two
-/// differ, which entries `encoding_rs` cannot honour. It implements the WHATWG
-/// Encoding Standard, which is a Windows-centric subset of Apple's codec set,
-/// so about a third of upstream's sixty default entries have no counterpart
-/// here at all.
+/// # The names are upstream's, not `encoding_rs`'s
+///
+/// Every name here is what `String.localizedName(of:)` answers for the
+/// `CFStringEncoding` upstream lists, because that is the string upstream's menu
+/// shows. It is not the name of the codec standing behind it: the menu item
+/// "Traditional Chinese (Big 5 HKSCS)" is drawn by `encoding_rs`'s `Big5`.
+/// Where upstream's source comment disagrees with Foundation — it writes
+/// "Chinese (GB18030)" where Foundation says "Chinese (GB 18030)" — the code
+/// follows Foundation.
+///
+/// # Why this is not upstream's list entry for entry
+///
+/// `encoding_rs` implements the WHATWG Encoding Standard, a Windows-centric
+/// subset of Apple's codec set, so upstream's sixty default entries split three
+/// ways.
+///
+/// **Listed**, under upstream's name. Every entry whose codec `encoding_rs` has.
+///
+/// **Moved to [`UNLISTED`]**, six entries SubText used to list here and upstream
+/// can add from its full set but does not list by default. The menu has to agree
+/// with upstream's, so they left it; they stayed in the registry.
+///
+/// **Absent**, twenty-two entries, each named with its reason in the gaps table
+/// of `docs/PLAN.md`:
+///
+/// - eleven Mac OS codecs — `macJapanese`, `macChineseTrad`, `macChineseSimp`,
+///   `macKorean`, `macArabic`, `macGreek`, `macHebrew`, `macCyrillic`,
+///   `macCentralEurRoman`, `macTurkish`, `macIcelandic`. `encoding_rs` has one
+///   Mac codec of any kind, and it is not Mac Cyrillic — see [`UNLISTED`].
+/// - `NextStep Latin`, `ASCII`, and `Latin-US (DOS)` (code page 437), which no
+///   codec here covers.
+/// - `DOS Japanese` (cp932), `DOS Korean` (cp949), the two DOS Chinese entries
+///   (cp936, cp950) and `Big 5-E`: the Windows code pages that the WHATWG
+///   `Shift_JIS`, `EUC_KR`, `GBK` and `Big5` tables already *are*, so a second
+///   name on the same codec would add a menu item and no capability.
+/// - `EUC-TW`, which no codec here covers.
+/// - `Unicode (UTF-16)` and `Unicode (UTF-32)`, the two entries that mean "let
+///   the byte-order mark decide". SubText's `FileEncoding` makes the byte order
+///   explicit instead; see the gaps table.
+///
+/// # The listed entries are not all exact
+///
+/// Eight of the thirty-eight are served by a codec that is a superset of the
+/// standard they name, which is a deliberate trade rather than an oversight — a
+/// superset decodes everything the standard would, and refuses only a few byte
+/// sequences the standard would refuse. Two are forced by the Encoding Standard
+/// resolving the label to a Windows code page: "Western (ISO Latin 1)" decodes
+/// with windows-1252 and "Turkish (ISO Latin 5)" with windows-1254. Six are
+/// forced by the standard having no such codec at all:
+///
+/// - "Thai (ISO 8859-11)" decodes with windows-874, which differs only in
+///   `0x80`–`0x9F`;
+/// - "Japanese (Shift JIS)" and "Japanese (Shift JIS X0213)" both decode with
+///   the Windows Shift JIS — cp932, a superset of JIS X 0208 Shift JIS that has
+///   none of JIS X 0213 plane 2;
+/// - "Simplified Chinese (GB 2312)" decodes with GBK and "Korean (EUC)" with
+///   what is really cp949, both supersets;
+/// - "Traditional Chinese (Big 5 HKSCS)" decodes with the WHATWG Big 5 table,
+///   which carries the HKSCS extensions but maps them to their real code points
+///   rather than to the Private Use Area.
 pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // Unicode (UTF-8). Upstream's first group is one entry, and its menu
     // builder splices "Unicode (UTF-8) with BOM" in right after it — see
     // `FileEncoding::menu_groups`.
     &[TextEncoding::UTF8],
-    // Japanese. Upstream's group also names a DOS Shift JIS (which is what
-    // `encoding_rs`'s one Shift JIS codec already is) and a Mac OS one
-    // (`encoding_rs` has no Mac Japanese).
+    // Japanese. Upstream's group is six: Shift JIS, EUC, DOS Shift JIS, Shift
+    // JIS X0213, Mac OS, ISO 2022-JP. The DOS one is cp932, which is what
+    // `encoding_rs`'s one Shift JIS codec is, and the Mac OS one has no codec.
     &[
         TextEncoding::rs("Japanese (Shift JIS)", "shift_jis", encoding_rs::SHIFT_JIS),
-        TextEncoding::rs("Japanese (EUC-JP)", "euc-jp", encoding_rs::EUC_JP),
+        TextEncoding::rs("Japanese (EUC)", "euc-jp", encoding_rs::EUC_JP),
         TextEncoding::rs(
             "Japanese (Shift JIS X0213)",
             "shift_jis_x0213",
             encoding_rs::SHIFT_JIS,
         ),
-        TextEncoding::rs("Japanese (ISO-2022-JP)", "iso-2022-jp", encoding_rs::ISO_2022_JP),
+        TextEncoding::rs("Japanese (ISO 2022-JP)", "iso-2022-jp", encoding_rs::ISO_2022_JP),
     ],
     // Western. Upstream's two entries are exactly these.
     &[
         TextEncoding::rs("Western (Mac OS Roman)", "macintosh", encoding_rs::MACINTOSH),
         TextEncoding::rs("Western (Windows Latin 1)", "windows-1252", encoding_rs::WINDOWS_1252),
     ],
-    // Chinese. Upstream's group is ten entries; the six `encoding_rs` cannot
-    // honour are the two Mac OS ones, Big 5-E, EUC-TW and the two DOS ones.
-    // Big 5 and Big 5-HKSCS are one codec here — the WHATWG Big 5 table already
-    // carries the HKSCS extensions — and so are GB 2312 and GBK.
+    // Chinese. Upstream's group is ten: GB 18030, Big 5 HKSCS, Big 5-E, Big 5,
+    // the two Mac OS ones, EUC-TW, GB 2312, and the two DOS ones. Big 5 and
+    // Big 5-HKSCS are one codec here — the WHATWG Big 5 table already carries
+    // the HKSCS extensions — and so are GB 2312 and GBK.
     &[
         TextEncoding::rs("Chinese (GB 18030)", "gb18030", encoding_rs::GB18030),
-        TextEncoding::rs("Chinese (Big5)", "big5", encoding_rs::BIG5),
-        TextEncoding::rs("Chinese (Big5-HKSCS)", "big5_hkscs", encoding_rs::BIG5),
-        TextEncoding::rs("Chinese (GB 2312)", "gb2312", encoding_rs::GBK),
-        TextEncoding::rs("Chinese (GBK)", "gbk", encoding_rs::GBK),
+        TextEncoding::rs(
+            "Traditional Chinese (Big 5 HKSCS)",
+            "big5_hkscs",
+            encoding_rs::BIG5,
+        ),
+        TextEncoding::rs("Traditional Chinese (Big 5)", "big5", encoding_rs::BIG5),
+        TextEncoding::rs("Simplified Chinese (GB 2312)", "gb2312", encoding_rs::GBK),
     ],
-    // Korean. Upstream's group also names a Mac OS one.
-    &[TextEncoding::rs("Korean (EUC-KR)", "euc-kr", encoding_rs::EUC_KR)],
-    // Thai, in upstream's order: the Windows one first, then ISO 8859-11.
+    // Korean. Upstream's group is three: the Mac OS one, EUC, and the DOS one
+    // (cp949, which is what `encoding_rs`'s EUC-KR codec is).
+    &[TextEncoding::rs("Korean (EUC)", "euc-kr", encoding_rs::EUC_KR)],
+    // Thai, in upstream's order: the DOS one (cp874, which Windows shares) first,
+    // then ISO 8859-11.
     &[
-        TextEncoding::rs("Thai (Windows)", "windows-874", encoding_rs::WINDOWS_874),
+        TextEncoding::rs("Thai (Windows, DOS)", "windows-874", encoding_rs::WINDOWS_874),
         TextEncoding::rs("Thai (ISO 8859-11)", "iso-8859-11", encoding_rs::WINDOWS_874),
     ],
-    // Arabic, Greek, Hebrew, Cyrillic, Turkish. Upstream's group of sixteen is
-    // mostly Mac OS codecs; these are the ones `encoding_rs` has, plus four
-    // Windows codecs upstream lists among its *available* encodings rather than
-    // in this group (Vietnamese, Baltic, KOI8-R and KOI8-U).
+    // Arabic, Greek, Hebrew, Cyrillic. Upstream's group of sixteen is mostly Mac
+    // OS codecs. The three Cyrillic entries are in upstream's order — ISO 8859-5,
+    // Windows, DOS — and the DOS one is cp866, which `encoding_rs` has as IBM866.
+    // `macCyrillic` is not here: see `UNLISTED`. `macCentralEurRoman`,
+    // `macTurkish` and `macIcelandic` have no codec at all, and the Turkish
+    // standard is in the ISO Latin group below, which is where upstream's own
+    // Turkish entry is.
     &[
         TextEncoding::rs("Arabic (ISO 8859-6)", "iso-8859-6", encoding_rs::ISO_8859_6),
         TextEncoding::rs("Arabic (Windows)", "windows-1256", encoding_rs::WINDOWS_1256),
@@ -362,14 +438,7 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
         TextEncoding::rs("Hebrew (Windows)", "windows-1255", encoding_rs::WINDOWS_1255),
         TextEncoding::rs("Cyrillic (ISO 8859-5)", "iso-8859-5", encoding_rs::ISO_8859_5),
         TextEncoding::rs("Cyrillic (Windows)", "windows-1251", encoding_rs::WINDOWS_1251),
-        TextEncoding::rs("Cyrillic (KOI8-R)", "koi8-r", encoding_rs::KOI8_R),
-        TextEncoding::rs("Cyrillic (KOI8-U)", "koi8-u", encoding_rs::KOI8_U),
-        TextEncoding::rs("Turkish (ISO 8859-9)", "iso-8859-9", encoding_rs::WINDOWS_1254),
-        TextEncoding::rs("Turkish (Windows)", "windows-1254", encoding_rs::WINDOWS_1254),
-        TextEncoding::rs("Vietnamese (Windows)", "windows-1258", encoding_rs::WINDOWS_1258),
-        TextEncoding::rs("Baltic (ISO 8859-4)", "iso-8859-4", encoding_rs::ISO_8859_4),
-        TextEncoding::rs("Baltic (Windows)", "windows-1257", encoding_rs::WINDOWS_1257),
-        TextEncoding::rs("Central European (ISO 8859-2)", "iso-8859-2", encoding_rs::ISO_8859_2),
+        TextEncoding::rs("Russian (DOS)", "ibm866", encoding_rs::IBM866),
     ],
     // ISO Latin 1 through 10, in upstream's order and under upstream's names —
     // which are the language each one serves, not the number's ordinal.
@@ -380,6 +449,10 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // superset of the standard it stands for, which is why the pair is offered
     // rather than dropped — but the item says "ISO Latin 1" and answers with
     // windows-1252, which is recorded in the gaps table of `docs/PLAN.md`.
+    //
+    // The three entries upstream's group seven also holds — ISO Latin 2, ISO
+    // Latin 4 and the Turkish Windows code page — are not repeated here:
+    // upstream names them once, in this group.
     &[
         TextEncoding::rs("Western (ISO Latin 1)", "iso-8859-1", encoding_rs::WINDOWS_1252),
         TextEncoding::rs(
@@ -402,13 +475,18 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     ],
     // Central European, Windows code page. Upstream's group of four is a DOS
     // Latin-US, this one, a NextStep Latin and ASCII; `encoding_rs` has none of
-    // the other three.
-    &[
-        TextEncoding::rs("Western (Windows Latin 2)", "windows-latin-2", encoding_rs::WINDOWS_1250),
-        TextEncoding::rs("Central European (Windows)", "windows-1250", encoding_rs::WINDOWS_1250),
-    ],
-    // Unicode, wide. Upstream's order: UTF-16, then the two byte orders, then
-    // UTF-32 and its two.
+    // the other three. This one entry is upstream's `windowsLatin2`, and it is
+    // the only place windows-1250 appears — the two names SubText used to carry
+    // for it were one code page.
+    &[TextEncoding::rs(
+        "Central European (Windows Latin 2)",
+        "windows-1250",
+        encoding_rs::WINDOWS_1250,
+    )],
+    // Unicode, wide. Upstream's group is six: UTF-16, then its two byte orders,
+    // then UTF-32 and its two. The two unspecified ones are absent — they mean
+    // "let the byte-order mark decide", and `FileEncoding` names the order
+    // instead; see the gaps table of `docs/PLAN.md`.
     &[
         TextEncoding::UTF16_LE,
         TextEncoding::UTF16_BE,
@@ -417,13 +495,74 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     ],
 ];
 
-/// Every encoding SubText can read and write, in menu order.
+/// Encodings SubText can read and write that the menu does not list.
+///
+/// Upstream's encoding list is a *subset* of `String.availableStringEncodings`:
+/// the settings pane can add any encoding the platform has, and the default list
+/// is a curated sixty of them. These are the ones SubText can serve that
+/// upstream can add but does not list by default — the menu has to agree with
+/// upstream's, so they are not in it, but they stay in the registry for two
+/// reasons: a settings file written by an earlier build spells six of them, and
+/// the list editor the gaps table still owes will have to offer them.
+///
+/// Six of the seven were in the menu until the list was aligned with upstream's;
+/// the seventh is "Cyrillic (Mac OS Ukrainian)", and it is here rather than in the
+/// menu because of a collision worth knowing about. Upstream lists `macCyrillic`
+/// — "Cyrillic (Mac OS)", code page 10007 — while `encoding_rs`'s only Mac
+/// Cyrillic-family codec, `X_MAC_CYRILLIC`, documents itself as Apple's
+/// *MacUkrainian* (code page 10017) even though it carries Mac Cyrillic's IANA
+/// name. Naming that codec after upstream's entry would name one table and
+/// decode with another, so it is offered under the name Foundation gives the
+/// table it really is.
+pub static UNLISTED: &[TextEncoding] = &[
+    TextEncoding::rs("Cyrillic (KOI8-R)", "koi8-r", encoding_rs::KOI8_R),
+    TextEncoding::rs("Ukrainian (KOI8-U)", "koi8-u", encoding_rs::KOI8_U),
+    TextEncoding::rs("Turkish (Windows Latin 5)", "windows-1254", encoding_rs::WINDOWS_1254),
+    TextEncoding::rs("Baltic (Windows)", "windows-1257", encoding_rs::WINDOWS_1257),
+    TextEncoding::rs("Vietnamese (Windows)", "windows-1258", encoding_rs::WINDOWS_1258),
+    TextEncoding::rs("Chinese (GBK)", "gbk", encoding_rs::GBK),
+    TextEncoding::rs("Cyrillic (Mac OS Ukrainian)", "x-mac-cyrillic", encoding_rs::X_MAC_CYRILLIC),
+];
+
+/// Every encoding the menu lists, in menu order.
 ///
 /// [`MENU_GROUPS`] flattened. Derived rather than written out, so an encoding
 /// cannot end up in the registry but not in the menu, or the other way round.
-pub static ALL: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
+///
+/// This is upstream's *encoding list*: the set the encoding menu is drawn from,
+/// the set the open dialog tries in order, and the set the default-encoding
+/// picker offers. [`AVAILABLE`] is the wider one.
+pub static MENU: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
     MENU_GROUPS.iter().flat_map(|group| group.iter().copied()).collect()
 });
+
+/// Every encoding SubText can read and write: the menu's list, then [`UNLISTED`].
+///
+/// Upstream's counterpart is `String.availableStringEncodings`. Only
+/// [`from_identifier`](TextEncoding::from_identifier) searches this one — the
+/// menu, the detector and the settings pickers all work from [`MENU`], which is
+/// the narrower set upstream builds them from too.
+pub static AVAILABLE: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
+    MENU.iter().copied().chain(UNLISTED.iter().copied()).collect()
+});
+
+/// Spellings this registry used to carry that are not WHATWG labels, so the
+/// label fallback in [`from_identifier`](TextEncoding::from_identifier) cannot
+/// find them.
+///
+/// One entry, and it is here because aligning the names with upstream merged two
+/// entries into one. "Western (Windows Latin 2)" and "Central European
+/// (Windows)" were both windows-1250 and upstream lists that code page once, as
+/// "Central European (Windows Latin 2)"; the survivor took the WHATWG spelling
+/// `windows-1250`, which the label fallback resolves unaided, and the other
+/// spelling — which is not a label — needs this table.
+///
+/// The four other identifiers this alignment dropped resolve without help,
+/// because each is a WHATWG label that the fallback maps to the same codec:
+/// `iso-8859-2`, `iso-8859-4` and `iso-8859-9` name the standards the surviving
+/// entries name, and the sixth dropped identifier was a second spelling of
+/// `windows-1250`.
+static LEGACY_IDENTIFIERS: &[(&str, &str)] = &[("windows-latin-2", "windows-1250")];
 
 /// An encoding as a *file* is written with it: a codec, plus whether a UTF-8
 /// file carries a byte-order mark.
@@ -571,11 +710,14 @@ impl DecodedFile {
         }
 
         // `chardetng` wants the whole document in one call for a stable answer.
+        // The guess is then matched against the menu's list, which is the set
+        // upstream tries too — a codec the menu does not offer is a codec the
+        // document cannot be *kept* in, so guessing it would be a dead end.
         let mut detector = chardetng::EncodingDetector::new();
         detector.feed(bytes, true);
         let guessed = detector.guess(None, true);
         if let Some(encoding) =
-            ALL.iter().copied().find(|e| matches!(e.kind, Kind::Rs(x) if x == guessed))
+            MENU.iter().copied().find(|e| matches!(e.kind, Kind::Rs(x) if x == guessed))
         {
             let (text, had_errors) = encoding.decode(bytes);
             if !had_errors {
@@ -667,9 +809,12 @@ mod tests {
         assert_eq!(file.encoding, TextEncoding::from_identifier("shift_jis").unwrap());
     }
 
+    /// Names have to be unique across both tiers, not just within the menu: a
+    /// name is what the user picks an encoding by, and two entries answering to
+    /// one name are two entries the user cannot tell apart.
     #[test]
     fn encoding_registry_names_are_unique() {
-        let mut names: Vec<_> = ALL.iter().map(|e| e.name).collect();
+        let mut names: Vec<_> = AVAILABLE.iter().map(|e| e.name).collect();
         names.sort_unstable();
         let count = names.len();
         names.dedup();
@@ -682,7 +827,7 @@ mod tests {
     /// encodings do share a codec; none may share an identifier.
     #[test]
     fn every_encoding_has_its_own_identifier() {
-        let mut ids: Vec<_> = ALL.iter().map(|e| e.identifier()).collect();
+        let mut ids: Vec<_> = AVAILABLE.iter().map(|e| e.identifier()).collect();
         ids.sort_unstable();
         let count = ids.len();
         ids.dedup();
@@ -691,7 +836,7 @@ mod tests {
 
     #[test]
     fn every_encoding_round_trips_through_its_identifier() {
-        for encoding in ALL.iter() {
+        for encoding in AVAILABLE.iter() {
             assert_eq!(
                 TextEncoding::from_identifier(encoding.identifier()),
                 Some(*encoding),
@@ -709,18 +854,20 @@ mod tests {
     fn the_old_whatwg_spellings_still_resolve() {
         for (spelling, name) in [
             ("shift_jis", "Japanese (Shift JIS)"),
-            ("euc-jp", "Japanese (EUC-JP)"),
-            ("iso-2022-jp", "Japanese (ISO-2022-JP)"),
+            ("euc-jp", "Japanese (EUC)"),
+            ("iso-2022-jp", "Japanese (ISO 2022-JP)"),
             ("gb18030", "Chinese (GB 18030)"),
             ("gbk", "Chinese (GBK)"),
-            ("big5", "Chinese (Big5)"),
-            ("euc-kr", "Korean (EUC-KR)"),
+            ("big5", "Traditional Chinese (Big 5)"),
+            ("euc-kr", "Korean (EUC)"),
             ("macintosh", "Western (Mac OS Roman)"),
             ("windows-1252", "Western (Windows Latin 1)"),
-            ("windows-1250", "Central European (Windows)"),
-            ("windows-1254", "Turkish (Windows)"),
-            ("windows-874", "Thai (Windows)"),
-            ("koi8-u", "Cyrillic (KOI8-U)"),
+            ("windows-1250", "Central European (Windows Latin 2)"),
+            ("windows-1254", "Turkish (Windows Latin 5)"),
+            ("windows-874", "Thai (Windows, DOS)"),
+            ("koi8-u", "Ukrainian (KOI8-U)"),
+            ("ibm866", "Russian (DOS)"),
+            ("x-mac-cyrillic", "Cyrillic (Mac OS Ukrainian)"),
         ] {
             let found = TextEncoding::from_identifier(spelling)
                 .unwrap_or_else(|| panic!("{spelling} did not resolve"));
@@ -728,13 +875,235 @@ mod tests {
         }
     }
 
-    /// `ALL` and the menu's grouping are two views of one table, so neither can
-    /// gain an encoding the other does not have.
+    /// The identifiers this alignment dropped still resolve, and to the codec
+    /// they used to name. Three of them name the same standard as the entry that
+    /// survived the merge and one is a second spelling of windows-1250, so all
+    /// four land on the same codec as before; only the *entry* changes.
+    #[test]
+    fn the_identifiers_this_alignment_dropped_still_resolve() {
+        for (dropped, codec, name) in [
+            ("windows-latin-2", encoding_rs::WINDOWS_1250, "Central European (Windows Latin 2)"),
+            ("iso-8859-2", encoding_rs::ISO_8859_2, "Central European (ISO Latin 2)"),
+            ("iso-8859-4", encoding_rs::ISO_8859_4, "Central European (ISO Latin 4)"),
+            ("iso-8859-9", encoding_rs::WINDOWS_1254, "Turkish (ISO Latin 5)"),
+        ] {
+            let found = TextEncoding::from_identifier(dropped)
+                .unwrap_or_else(|| panic!("{dropped} did not resolve"));
+            assert_eq!(found.name, name, "{dropped} resolved to the wrong entry");
+            assert!(
+                matches!(found.kind, Kind::Rs(x) if x == codec),
+                "{dropped} no longer decodes with the codec it named"
+            );
+        }
+    }
+
+    /// `MENU_GROUPS` and the flat list are two views of one table, so neither
+    /// can gain an encoding the other does not have.
     #[test]
     fn the_menu_groups_are_the_registry_in_order() {
         let flattened: Vec<TextEncoding> =
             MENU_GROUPS.iter().flat_map(|group| group.iter().copied()).collect();
-        assert_eq!(flattened, ALL.to_vec());
+        assert_eq!(flattened, MENU.to_vec());
+    }
+
+    /// Upstream's default encoding list, entry for entry, in its order.
+    ///
+    /// These are the strings `String.localizedName(of:)` answers for the
+    /// `CFStringEncoding` values `DefaultSettings+Encodings.swift` holds, read
+    /// off macOS — not transcribed from that file's comments, which are right
+    /// about all but one of them. The comment on `GB_18030_2000` says
+    /// "Chinese (GB18030)" and Foundation says "Chinese (GB 18030)"; the code
+    /// follows Foundation.
+    const UPSTREAM_DEFAULT_LIST: &[&str] = &[
+        "Unicode (UTF-8)",
+        "Japanese (Shift JIS)",
+        "Japanese (EUC)",
+        "Japanese (Windows, DOS)",
+        "Japanese (Shift JIS X0213)",
+        "Japanese (Mac OS)",
+        "Japanese (ISO 2022-JP)",
+        "Western (Mac OS Roman)",
+        "Western (Windows Latin 1)",
+        "Chinese (GB 18030)",
+        "Traditional Chinese (Big 5 HKSCS)",
+        "Traditional Chinese (Big 5-E)",
+        "Traditional Chinese (Big 5)",
+        "Traditional Chinese (Mac OS)",
+        "Simplified Chinese (Mac OS)",
+        "Traditional Chinese (EUC)",
+        "Simplified Chinese (GB 2312)",
+        "Traditional Chinese (Windows, DOS)",
+        "Simplified Chinese (Windows, DOS)",
+        "Korean (Mac OS)",
+        "Korean (EUC)",
+        "Korean (Windows, DOS)",
+        "Thai (Windows, DOS)",
+        "Thai (ISO 8859-11)",
+        "Arabic (Mac OS)",
+        "Arabic (ISO 8859-6)",
+        "Arabic (Windows)",
+        "Greek (Mac OS)",
+        "Greek (ISO 8859-7)",
+        "Greek (Windows)",
+        "Hebrew (Mac OS)",
+        "Hebrew (ISO 8859-8)",
+        "Hebrew (Windows)",
+        "Cyrillic (Mac OS)",
+        "Cyrillic (ISO 8859-5)",
+        "Cyrillic (Windows)",
+        "Russian (DOS)",
+        "Central European (Mac OS)",
+        "Turkish (Mac OS)",
+        "Icelandic (Mac OS)",
+        "Western (ISO Latin 1)",
+        "Central European (ISO Latin 2)",
+        "Western (ISO Latin 3)",
+        "Central European (ISO Latin 4)",
+        "Turkish (ISO Latin 5)",
+        "Nordic (ISO Latin 6)",
+        "Baltic (ISO Latin 7)",
+        "Celtic (ISO Latin 8)",
+        "Western (ISO Latin 9)",
+        "Romanian (ISO Latin 10)",
+        "Latin-US (DOS)",
+        "Central European (Windows Latin 2)",
+        "Western (NextStep)",
+        "Western (ASCII)",
+        "Unicode (UTF-16)",
+        "Unicode (UTF-16BE)",
+        "Unicode (UTF-16LE)",
+        "Unicode (UTF-32)",
+        "Unicode (UTF-32BE)",
+        "Unicode (UTF-32LE)",
+    ];
+
+    /// The entries of that list the menu can hold, because `encoding_rs` has a
+    /// codec for the standard each one names. In upstream's order, which is the
+    /// order the menu is in — every group keeps upstream's sequence, with the
+    /// entries that have no codec dropped out of it.
+    const UPSTREAM_LISTED: &[&str] = &[
+        "Unicode (UTF-8)",
+        "Japanese (Shift JIS)",
+        "Japanese (EUC)",
+        "Japanese (Shift JIS X0213)",
+        "Japanese (ISO 2022-JP)",
+        "Western (Mac OS Roman)",
+        "Western (Windows Latin 1)",
+        "Chinese (GB 18030)",
+        "Traditional Chinese (Big 5 HKSCS)",
+        "Traditional Chinese (Big 5)",
+        "Simplified Chinese (GB 2312)",
+        "Korean (EUC)",
+        "Thai (Windows, DOS)",
+        "Thai (ISO 8859-11)",
+        "Arabic (ISO 8859-6)",
+        "Arabic (Windows)",
+        "Greek (ISO 8859-7)",
+        "Greek (Windows)",
+        "Hebrew (ISO 8859-8)",
+        "Hebrew (Windows)",
+        "Cyrillic (ISO 8859-5)",
+        "Cyrillic (Windows)",
+        "Russian (DOS)",
+        "Western (ISO Latin 1)",
+        "Central European (ISO Latin 2)",
+        "Western (ISO Latin 3)",
+        "Central European (ISO Latin 4)",
+        "Turkish (ISO Latin 5)",
+        "Nordic (ISO Latin 6)",
+        "Baltic (ISO Latin 7)",
+        "Celtic (ISO Latin 8)",
+        "Western (ISO Latin 9)",
+        "Romanian (ISO Latin 10)",
+        "Central European (Windows Latin 2)",
+        "Unicode (UTF-16LE)",
+        "Unicode (UTF-16BE)",
+        "Unicode (UTF-32LE)",
+        "Unicode (UTF-32BE)",
+    ];
+
+    /// The reconciliation, machine-checked. Two lists that have to keep adding
+    /// up to upstream's sixty are what stops a rename or an omission from
+    /// drifting in unnoticed: adding an encoding to the menu without moving it
+    /// out of the omitted set, or the reverse, fails here.
+    #[test]
+    fn the_menu_is_upstream_s_default_list_less_the_entries_no_codec_covers() {
+        assert_eq!(UPSTREAM_DEFAULT_LIST.len(), 60, "upstream's default list is sixty entries");
+        assert_eq!(UPSTREAM_LISTED.len(), 38, "thirty-eight of them have a codec here");
+
+        for name in UPSTREAM_LISTED {
+            assert!(
+                UPSTREAM_DEFAULT_LIST.contains(name),
+                "{name} is not in upstream's default list"
+            );
+        }
+
+        let listed: Vec<&str> = MENU.iter().map(|e| e.name).collect();
+        assert_eq!(listed, UPSTREAM_LISTED, "the menu is not upstream's list in order");
+
+        let omitted: Vec<&str> = UPSTREAM_DEFAULT_LIST
+            .iter()
+            .copied()
+            .filter(|name| !UPSTREAM_LISTED.contains(name))
+            .collect();
+        assert_eq!(omitted.len(), 22, "sixty less thirty-eight");
+        for name in omitted {
+            assert!(
+                !AVAILABLE.iter().any(|e| e.name == name),
+                "{name} has no codec, so it must not be in the registry under that name"
+            );
+        }
+    }
+
+    /// The encodings SubText knows but does not list. Each has to resolve — a
+    /// settings file written by an earlier build spells six of them — and none
+    /// may be in the menu, because upstream's default list does not hold them.
+    #[test]
+    fn the_unlisted_tier_holds_the_encodings_upstream_can_add_but_does_not_list() {
+        let ids: Vec<&str> = UNLISTED.iter().map(|e| e.identifier()).collect();
+        assert_eq!(
+            ids,
+            [
+                "koi8-r",
+                "koi8-u",
+                "windows-1254",
+                "windows-1257",
+                "windows-1258",
+                "gbk",
+                "x-mac-cyrillic",
+            ]
+        );
+
+        for encoding in UNLISTED {
+            assert!(
+                !MENU.contains(encoding),
+                "{} is in the menu as well as the unlisted tier",
+                encoding.name
+            );
+            assert_eq!(
+                TextEncoding::from_identifier(encoding.identifier()),
+                Some(*encoding),
+                "{} did not come back",
+                encoding.name
+            );
+            assert!(
+                !UPSTREAM_DEFAULT_LIST.contains(&encoding.name),
+                "{} is in upstream's default list, so it belongs in the menu",
+                encoding.name
+            );
+        }
+    }
+
+    /// The two tiers are one list and a tail: the menu first, in menu order,
+    /// then what upstream can add. Nothing is in both, and nothing is in
+    /// neither.
+    #[test]
+    fn the_available_tier_is_the_menu_plus_the_unlisted_one() {
+        assert_eq!(MENU.len(), 38);
+        assert_eq!(UNLISTED.len(), 7);
+        assert_eq!(AVAILABLE.len(), MENU.len() + UNLISTED.len());
+        assert_eq!(&AVAILABLE[..MENU.len()], MENU.as_slice());
+        assert_eq!(&AVAILABLE[MENU.len()..], UNLISTED);
     }
 
     /// The five encodings the rest of the crate names directly have to be the
@@ -750,8 +1119,8 @@ mod tests {
             TextEncoding::UTF32_BE,
         ] {
             assert!(
-                ALL.contains(&encoding),
-                "{} is not in the registry",
+                MENU.contains(&encoding),
+                "{} is not in the menu",
                 encoding.name
             );
         }

@@ -819,6 +819,45 @@ mod tests {
         assert_eq!(SettingsPane::ALL[8], SettingsPane::Integration);
     }
 
+    /// The default encoding is stored as a spelling, not as an index, so a
+    /// settings file outlives the list it was written against. Aligning the
+    /// registry with upstream's took six encodings out of the menu and merged
+    /// four more away; every spelling a build before that could have written
+    /// still has to name the encoding it named.
+    #[test]
+    fn a_default_encoding_the_menu_no_longer_lists_still_resolves() {
+        let mut settings = Settings::default();
+
+        // Six entries left the menu for the unlisted tier.
+        for (spelling, name) in [
+            ("koi8-r", "Cyrillic (KOI8-R)"),
+            ("koi8-u", "Ukrainian (KOI8-U)"),
+            ("windows-1254", "Turkish (Windows Latin 5)"),
+            ("windows-1257", "Baltic (Windows)"),
+            ("windows-1258", "Vietnamese (Windows)"),
+            ("gbk", "Chinese (GBK)"),
+        ] {
+            settings.default_encoding = spelling.to_string();
+            assert_eq!(settings.encoding().name, name, "{spelling} was lost");
+        }
+
+        // Four identifiers were merged into the entry that survived; one of them
+        // is not a WHATWG label, so it goes through the alias table.
+        for (spelling, name) in [
+            ("windows-latin-2", "Central European (Windows Latin 2)"),
+            ("iso-8859-2", "Central European (ISO Latin 2)"),
+            ("iso-8859-4", "Central European (ISO Latin 4)"),
+            ("iso-8859-9", "Turkish (ISO Latin 5)"),
+        ] {
+            settings.default_encoding = spelling.to_string();
+            assert_eq!(settings.encoding().name, name, "{spelling} was lost");
+        }
+
+        // And the fallback still stands for a spelling that names nothing.
+        settings.default_encoding = "no-such-encoding".to_string();
+        assert_eq!(settings.encoding(), TextEncoding::UTF8);
+    }
+
     #[test]
     fn defaults_match_coteditor() {
         let settings = Settings::default();

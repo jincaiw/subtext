@@ -2390,7 +2390,7 @@ impl Workspace {
     }
 
     pub fn encodings(&self) -> &'static [TextEncoding] {
-        &subtext_core::encoding::ALL
+        &subtext_core::encoding::MENU
     }
 
     // ---- inspectors ------------------------------------------------------
