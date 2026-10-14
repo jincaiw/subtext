@@ -14,6 +14,8 @@
 
 use gpui_kit::{AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window};
 
+use subtext_core::LineEnding;
+
 use crate::actions;
 use crate::workspace::Workspace;
 
@@ -79,6 +81,18 @@ pub fn insert_snippet(id: u64, cx: &mut App) {
     });
 }
 
+/// Run `command` in the active window's workspace.
+///
+/// [`run`] without the "is it mine" question, for the commands reached through a
+/// runtime menu item: the item exists because a workspace put it there, so the
+/// workspace it reaches is the one that wants it.
+fn tell(cx: &mut App, command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>)) {
+    run(cx, move |workspace, window, cx| {
+        command(workspace, window, cx);
+        true
+    });
+}
+
 /// Hand `command` to the first workspace that recognises it.
 ///
 /// The windows are tried in the order they were opened, newest last, so the
@@ -118,6 +132,31 @@ pub fn install(cx: &mut App) {
     // which forwards an action's *name*; the id is what the handler needs.
     cx.on_action(|action: &actions::snippet::InsertSnippet, cx: &mut App| {
         insert_snippet(action.id, cx);
+    });
+    // The three the Format menu builds at runtime carry a value for the same
+    // reason, and each one is turned back into the thing it names here — the one
+    // place that knows both vocabularies. An abbreviation or a name nothing
+    // recognises is dropped rather than reported: the menu was built from the
+    // same list this resolves against, so the only way to reach one is a stale
+    // menu, and a stale menu is replaced on the next refresh.
+    cx.on_action(|action: &actions::format::ChangeLineEnding, cx: &mut App| {
+        if let Some(ending) = LineEnding::from_abbreviation(&action.ending) {
+            tell(cx, move |workspace, window, cx| {
+                workspace.set_line_ending(ending, window, cx)
+            });
+        }
+    });
+    cx.on_action(|action: &actions::format::ChangeSyntax, cx: &mut App| {
+        let name = action.name.clone();
+        tell(cx, move |workspace, window, cx| {
+            workspace.set_syntax(&name, window, cx)
+        });
+    });
+    cx.on_action(|action: &actions::format::ChangeTheme, cx: &mut App| {
+        let name = action.name.clone();
+        tell(cx, move |workspace, _window, cx| {
+            workspace.apply_theme_by_name(&name, cx)
+        });
     });
     bind_actions! { cx,
         actions::app::ShowAboutPanel => "ShowAboutPanel",
@@ -180,15 +219,8 @@ pub fn install(cx: &mut App) {
         actions::spelling::StartSpeaking => "StartSpeaking",
         actions::spelling::StopSpeaking => "StopSpeaking",
         actions::format::RecolorAll => "RecolorAll",
-        actions::format::SetLineEndingLf => "SetLineEndingLf",
-        actions::format::SetLineEndingCrlf => "SetLineEndingCrlf",
-        actions::format::SetLineEndingCr => "SetLineEndingCr",
-        actions::format::SetLineEndingNel => "SetLineEndingNel",
-        actions::format::SetLineEndingLs => "SetLineEndingLs",
-        actions::format::SetLineEndingPs => "SetLineEndingPs",
         actions::format::SetEncoding => "SetEncoding",
         actions::format::ReinterpretEncoding => "ReinterpretEncoding",
-        actions::format::SetSyntax => "SetSyntax",
         actions::format::MakeFontStandard => "MakeFontStandard",
         actions::format::MakeFontMonospaced => "MakeFontMonospaced",
         actions::format::BiggerFont => "BiggerFont",
@@ -197,7 +229,6 @@ pub fn install(cx: &mut App) {
         actions::format::OrderFrontFontPanel => "OrderFrontFontPanel",
         actions::format::ToggleAntialias => "ToggleAntialias",
         actions::format::ToggleLigatures => "ToggleLigatures",
-        actions::format::SetTheme => "SetTheme",
         actions::format::ChangeTabWidth => "ChangeTabWidth",
         actions::format::CustomizeTabWidth => "CustomizeTabWidth",
         actions::format::ToggleAutoTabExpand => "ToggleAutoTabExpand",

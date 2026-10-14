@@ -1491,7 +1491,7 @@ impl SettingsWindow {
                 }
                 workspace.apply_settings(window, cx);
                 if rebuild_menu {
-                    workspace.rebuild_snippets(cx);
+                    workspace.rebuild_menus(cx);
                 }
             })
             .ok();

@@ -38,6 +38,7 @@ pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;
 pub mod menu;
+pub mod menus;
 pub mod multiple_replace_sheet;
 pub mod outline;
 pub mod resources;
@@ -105,10 +106,31 @@ pub fn run() {
 
             bridge::install(cx);
             // The keymap and the menu bar, with the saved snippets already in
-            // them. The workspace rebuilds both when the frontmost document's
-            // syntax changes; this is what gives the application a menu before
-            // any window exists.
-            snippets::install(cx, &settings.snippets, None);
+            // them. The workspace rebuilds both as documents come and go; this is
+            // what gives the application a menu before any window exists.
+            //
+            // No document is open yet, so the submenus that follow one are filled
+            // with items that cannot be chosen — which is what they would be in
+            // CotEditor with every document closed.
+            let menu_state = menus::MenuState {
+                document: None,
+                theme: settings
+                    .theme
+                    .clone()
+                    .unwrap_or_else(|| themes.default_theme().name.clone()),
+                syntaxes: syntaxes
+                    .all()
+                    .iter()
+                    .map(|syntax| syntax.name.clone())
+                    .collect(),
+                themes: themes
+                    .all()
+                    .iter()
+                    .map(|theme| theme.name.clone())
+                    .collect(),
+                snippets: settings.snippets.clone(),
+            };
+            menus::install(cx, &menu_state);
 
             open_main_window(cx, syntaxes, themes, settings, paths);
         });

@@ -217,7 +217,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.6 | 选区扩展命令 | 纯逻辑（选包围符号、按行拆分） | ✅ |
 | 8.7 | 代码片段 + 文件拖放 | 需要编辑器与存储 | ✅ |
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
-| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ⏳ |
+| 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | 🚧 8.9a ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript、书写方向 RTL、工具栏自定义。
 理由：前三者需要平台能力或框架不支持，第四者收益低于成本。
@@ -812,24 +812,76 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 3. 行的**外框**（搜索框字号、行内边距与圆角、列表内缩）用组件族的几何，
    行**内容**按上游逐项对齐到加粗的命中字符。
 
-### 8.9 运行时填充的菜单子菜单 ⏳
+### 8.9 运行时填充的菜单子菜单 🚧
 
 阶段 8.8 把 `COMMANDS` 当成了完整的命令表，于是暴露出一个更早的缺口：
-`menu.json` 里有 **11 个扁平占位项**，它们在上游是**运行时**填出来的子菜单，
-SubText 目前只渲染成一个置灰的死项：
+`menu.json` 里有 **11 个占位项**，它们在上游是**运行时**填出来的，SubText 此前只渲染成
+一个置灰的死项：
 
-`Format ▸ Line Endings` / `Text Encoding` / `Syntax` / `Theme`、
-`Format ▸ Font ▸ Font Type`、`Format ▸ Writing Direction ▸ Orientation` / `Direction`、
-`Text ▸ Unicode Normalizations`、`CotEditor ▸ Services`、
-`Edit ▸ Insert from iPhone or iPad`、顶层 `Script`。
+| 占位项 | 上游的填充来源 | 本轮 |
+| --- | --- | --- |
+| `Format ▸ Line Endings` | `AppDelegate.prepareMainMenu`，`LineEnding.allCases` | ✅ 8.9a |
+| `Format ▸ Syntax` | `AppDelegate.prepareMainMenu`，`SyntaxManager.settingNames` | ✅ 8.9a |
+| `Format ▸ Theme` | 同上，`ThemeManager.settingNames` | ✅ 8.9a |
+| `Format ▸ Text Encoding` | `AppDelegate.updateEncodingMenu`，`EncodingManager.fileEncodings` | ⏳ 8.9b |
+| `Text ▸ Unicode Normalizations` | `UnicodeNormalizationForm.standardForms + [nil] + modifiedForms` | ⏳ 8.9c |
+| `CotEditor ▸ Services` | 系统（`SystemMenuType::Services`） | ✅ 8.9a |
+| `Script`（顶层） | `ScriptManager`，`~/Library/Application Scripts` | ⏳ 8.9d |
+| `Font ▸ Font Type`、`Writing Direction ▸ Orientation` / `Direction` | 上游是 `NSMenuItem.sectionHeader`，本表里已是置灰 `NoOp` 叶 | ✅（即上游形态） |
+| `Edit ▸ Insert from iPhone or iPad` | 系统（Handoff） | ✅（即上游形态） |
 
 后果不只是「菜单里少几项」：`set_syntax` / `set_theme` / `set_encoding` /
 `set_line_ending` 这些**动作已经实现**，却因为菜单里没有可点的条目而**没有入口**——
 只能靠快捷键（如果那条命令有）或设置窗口间接达到。
 
-8.9 要把这 11 处按上游的填充逻辑补上（每个子菜单的内容来源、勾选态、排序都不同），
-并让 `COMMANDS` 在构建时把这些运行时条目也算进去，这样 Quick Actions 才能搜到
-`Syntax ▸ Swift`、`Theme ▸ Solarized Dark` 这类条目——上游正是这么做的。
+**8.9a 统一菜单重建通道 + 三个子菜单**（`crates/subtext-app/src/menus.rs`，新文件）
+
+- 新增 `menus.rs` 作为**唯一**的菜单重建入口，`snippets::install` 被它吸收：
+  `MenuState`（当前文档的语法/换行符/编码 + 主题 + 语法表 + 主题表 + 片段）
+  → `build()` → `cx.set_menus()`。`snippets.rs` 退化成「按语法分好组的片段条目 +
+  快捷键绑定」两个纯函数（`items` / `bindings`）。
+- **生成器不再渲染置灰叶，而是渲染空子菜单**（`tools/generate_menu.py` 的
+  `RUNTIME_SUBMENUS` / `SYSTEM_MENUS`）：`MenuItem::submenu(Menu { items: vec![],
+  disabled: true })` 与 `MenuItem::os_submenu("Services", SystemMenuType::Services)`。
+  运行时按**名字**就地替换（`replace()` 递归找同名子菜单，找到即置 `disabled: false`）。
+  名字在全表内唯一，所以不必把路径写进代码——写路径等于把 storyboard 的结构抄第二遍。
+- **参数化动作**：`ChangeLineEnding { ending }` / `ChangeSyntax { name }` /
+  `ChangeTheme { name }`。`actions!` 宏只能造 unit struct，带值的要手写 derive
+  （与既有的 `InsertSnippet { id }` 同形）。载荷是**菜单上已经显示的那个名字**
+  （换行符用缩写 `"CRLF"`，语法/主题用名字本身），`bridge.rs` 把它解析回值——用
+  **位置**当载荷的话，列表上方一插入条目就会跑错命令。同时删掉 6 个
+  `SetLineEnding*` 与 `SetSyntax` / `SetTheme` 这 8 个占位 unit 动作：上游只有
+  `changeLineEnding(_:)` 一个选择器，参数从菜单项里读。
+- **勾选态**走 `MenuItem::checked`；**没文档时**语法/换行符子菜单整片置灰
+  （上游是 responder 链找不到 target，效果相同）。主题属于应用，无文档时仍可切换。
+- **换行符顺序修正**：`LineEnding::ALL` 此前是 `LF, CRLF, CR, …`，而上游
+  `allCases` 是 `LF, CR, CRLF, …`——菜单顺序是用户可见的，已改成上游顺序，
+  并加了断言。标题也改成上游的 `"{平台} ({缩写})"`（`"Windows (CRLF)"`），
+  此前 core 里那个「Line Feed」式的 `description()` 两个菜单都没用过。
+- 每次文档打开/关闭/切换、以及 `set_line_ending` / `change_encoding` /
+  `reinterpret_encoding` / `set_syntax` / `set_theme` 之后都会重建菜单。
+  `refresh_menus` 用 `MenuSignature`（文档 + 主题）挡掉无变化的调用——一次重建是
+  全表 258 项的 `App::set_menus`，而每次切标签页都会走这条路。
+
+**已知偏差（记账）**：**NEL / LS / PS 一直列出来**。上游只显示 3 个基本换行符，
+另外 3 个按住 Option 才出现（`ControlUI.OptionalMenu` 在菜单打开期间盯着修饰键）。
+GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 个恒列——上游能选的这里
+都能选，其中 3 个少按一个键。
+
+**8.9b 文本编码子菜单**：`AppDelegate.updateEncodingMenu` 的形状（UTF-8 → 分组分隔符
+→ 各语系组 → 末尾分隔符 + `Customize Encodings List…`），当前编码勾选，当前编码不在
+列表里时插到最前；`SetEncoding` / `ReinterpretEncoding` 两个占位动作一并改造。
+
+**8.9c Unicode 规范化子菜单**：core 的 `Normalization` 只有 4 种，上游是 7 种
+（多 `NFKC Case-Fold`、`Modified NFD`、`Modified NFC`），补齐后按
+`standardForms + 分隔符 + modifiedForms` 铺。
+
+**8.9d `Script` 菜单**：上游从 `~/Library/Application Scripts/<bundle id>` 读脚本。
+平台相关，排在最后。
+
+**8.9e 让 `COMMANDS` 包含运行时条目**：`Syntax ▸ Swift`、`Theme ▸ Solarized Dark`
+这类条目上游在 Quick Actions 里也能搜到，本表目前搜不到——`COMMANDS` 只由
+`menu.json` 生成。要把运行时的「子菜单名 ▸ 条目名」在构建时并进去。
 
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |

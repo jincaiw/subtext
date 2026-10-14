@@ -19,9 +19,20 @@ pub enum LineEnding {
     PS,
 }
 
-/// Every line ending, in the order CotEditor lists them in its menu.
-pub const ALL: [LineEnding; 6] =
-    [LineEnding::LF, LineEnding::CRLF, LineEnding::CR, LineEnding::NEL, LineEnding::LS, LineEnding::PS];
+/// Every line ending, in the order upstream enumerates them.
+///
+/// `LineEnding.allCases` in CotEditor, which is the order its Format ▸ Line
+/// Endings submenu lists them in: the three a document is normally written with
+/// — the same three, in the same order, as the Format settings picker — and then
+/// the three it hides behind the Option key.
+pub const ALL: [LineEnding; 6] = [
+    LineEnding::LF,
+    LineEnding::CR,
+    LineEnding::CRLF,
+    LineEnding::NEL,
+    LineEnding::LS,
+    LineEnding::PS,
+];
 
 impl LineEnding {
     /// The character sequence this ending is written as.
@@ -48,7 +59,12 @@ impl LineEnding {
         }
     }
 
-    /// The human-readable name, used in menus and settings.
+    /// The Unicode name of the ending.
+    ///
+    /// Not the name either menu shows: both CotEditor menus title an item by the
+    /// system the ending belongs to, with the abbreviation in brackets — see
+    /// [`platform_description`](Self::platform_description) and
+    /// [`abbreviation`](Self::abbreviation).
     pub fn description(self) -> &'static str {
         match self {
             LineEnding::LF => "Line Feed",
@@ -277,6 +293,26 @@ mod tests {
         for ending in [LineEnding::NEL, LineEnding::LS, LineEnding::PS] {
             assert!(!ending.is_basic(), "{ending:?} should not be basic");
         }
+    }
+
+    #[test]
+    fn the_menu_order_is_upstream_s_enumeration_order() {
+        // `LineEnding.allCases`: CR comes before CRLF, and the three the Format
+        // menu hides come last. The Format ▸ Line Endings submenu is built from
+        // this list, so the order is user-visible.
+        assert_eq!(
+            ALL,
+            [
+                LineEnding::LF,
+                LineEnding::CR,
+                LineEnding::CRLF,
+                LineEnding::NEL,
+                LineEnding::LS,
+                LineEnding::PS,
+            ]
+        );
+        // Which is also the order the settings picker's three appear in.
+        assert_eq!(&ALL[..3], LineEnding::BASIC);
     }
 
     #[test]

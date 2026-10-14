@@ -17,7 +17,7 @@
 | 动作类型 | 153 个 `@objc` selector | 182 个类型化动作 | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 27,295（Rust，不含生成器与生成文件） | — |
+| 代码行数 | 约 72,128（Swift） | 27,887（Rust，不含生成器与生成文件） | — |
 
 ---
 
@@ -27,7 +27,7 @@
 | --- | --- | --- | --- |
 | 关于面板 | `orderFrontStandardAboutPanel:` | `AboutView`（`dialogs.rs`） | 🔁 |
 | 设置窗口 | `SettingsWindowController`（9 面板） | `SettingsWindow`（9 面板，标签 / 顺序 / 分组逐项对齐） | ✅ |
-| 服务 | `NSMenu` Services | 保留菜单项（置灰） | ⚠️ |
+| 服务 | `NSMenu` Services | `MenuItem::os_submenu(_, SystemMenuType::Services)` | ✅ 交系统填 |
 | 隐藏 / 隐藏其他 / 全部显示 | `NSApplication` | 交窗口系统处理 | 🔁 |
 | 退出 | `terminate:` | `cx.quit()` | ✅ |
 | 捐赠窗口 | 独立窗口 | 状态栏提示 | ⏳ |
@@ -95,10 +95,10 @@
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
 | 重新着色 | `rehighlight` | ✅ |
-| 换行符 LF / CRLF / CR | `set_line_ending` | ✅ |
-| 换行符 NEL / LS / PS | `set_line_ending` | ✅ **超出多数编辑器** |
-| 编码（设置 / 重新解释） | `change_encoding` / `reinterpret_encoding` | ✅ 经 Format ▸ Encoding 菜单 |
-| 语法（设置） | `set_syntax` | ✅ 经 Format ▸ Syntax 菜单 |
+| 换行符 LF / CR / CRLF | `set_line_ending` | ✅ 经 Format ▸ Line Endings 菜单，当前项打勾 |
+| 换行符 NEL / LS / PS | `set_line_ending` | ✅ **超出多数编辑器**；上游按住 Option 才显示这 3 项，这里恒列（GPUI 菜单没有隐藏项） |
+| 编码（设置 / 重新解释） | `change_encoding` / `reinterpret_encoding` | ⏳ 动作已实现，`Format ▸ Text Encoding` 子菜单待填（8.9b） |
+| 语法（设置） | `set_syntax` | ✅ 经 Format ▸ Syntax 菜单（None 在前 + 分隔符 + 全部语法，当前项打勾） |
 | 标准字体 | `set_font(None)` | ✅ |
 | 等宽字体 | `set_font(mono_font())` | ✅ |
 | 增大 / 减小字号 | `bump_font(±1.0)` | ✅ |
@@ -106,7 +106,7 @@
 | 字体面板 | — | ⏳ 提示走 Format ▸ Font |
 | 抗锯齿 | `toggle_antialias` | ✅ |
 | 连字 | `toggle_ligatures` | ✅ |
-| 主题 | `apply_theme_by_name` | ✅ 经 Format ▸ Theme 菜单 |
+| 主题 | `apply_theme_by_name` | ✅ 经 Format ▸ Theme 菜单，当前项打勾 |
 | 制表符宽度 | `cycle_tab_width` | ✅ |
 | 自动展开制表符 | `toggle_auto_expand_tabs` | ✅ |
 | 显示不可见字符 | `update_editor_options` | ✅ |
@@ -165,11 +165,11 @@
 | 转大写 / 小写 / 首字母大写 | `transform_case` | ✅ |
 | 全角 / 半角 / 全角罗马字 / 半角罗马字 | `transform_width` | ✅ 4 种 |
 | URL 编码 / 解码 | `url_encode` / `url_decode` | ✅ |
-| NFC / NFD / NFKC / NFKD 规范化 | `normalize` | ✅ 4 种 |
+| NFC / NFD / NFKC / NFKD 规范化 | `normalize` | ⏳ 4 种；上游是 7 种，且菜单子菜单待填（8.9c） |
 | 显示选区信息 | `inspect_selection` | ✅ |
 | 高级计数 | `inspect_document` | ✅ |
 | 编辑颜色代码 | `color_code_dialog` | ✅ 11 种记法 |
-| 插入片段（子菜单） | `snippets::install` 按语法动态重建 | ✅ 无范围片段在前 + 按语法分节 |
+| 插入片段（子菜单） | `menus::install` 按语法动态重建 | ✅ 无范围片段在前 + 按语法分节 |
 | 代码片段编辑器 | `show_settings_pane(Snippets)` | ✅ 两个页签 + 令牌插入菜单 |
 | 文件拖放 | `drop_files` | ✅ 11 个令牌 / 五种图片格式 |
 

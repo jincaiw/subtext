@@ -12,7 +12,7 @@
 
 use gpui_kit::{Context, Window};
 
-use subtext_core::{LineEnding, textops};
+use subtext_core::textops;
 
 use crate::settings::{InspectorPane, SettingsPane, SidebarPane};
 use crate::workspace::Workspace;
@@ -101,18 +101,11 @@ impl Workspace {
                 self.rehighlight(cx);
                 self.notice("Syntax analysis reset", cx)
             }
-            "SetLineEndingLf" => self.set_line_ending(LineEnding::LF, window, cx),
-            "SetLineEndingCrlf" => self.set_line_ending(LineEnding::CRLF, window, cx),
-            "SetLineEndingCr" => self.set_line_ending(LineEnding::CR, window, cx),
-            "SetLineEndingNel" => self.set_line_ending(LineEnding::NEL, window, cx),
-            "SetLineEndingLs" => self.set_line_ending(LineEnding::LS, window, cx),
-            "SetLineEndingPs" => self.set_line_ending(LineEnding::PS, window, cx),
             "SetEncoding" => self.notice(
                 "Use the Format ▸ Encoding menu; the list comes from the same registry CotEditor uses",
                 cx,
             ),
             "ReinterpretEncoding" => self.notice("Use the Format ▸ Encoding menu", cx),
-            "SetSyntax" => self.notice("Use the Format ▸ Syntax menu", cx),
             "MakeFontStandard" => self.set_font(None, cx),
             "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),
             "BiggerFont" => self.bump_font(1.0, cx),
@@ -124,7 +117,6 @@ impl Workspace {
             "OrderFrontFontPanel" => self.notice("Use Format ▸ Font to change the font", cx),
             "ToggleAntialias" => self.toggle_antialias(window, cx),
             "ToggleLigatures" => self.toggle_ligatures(window, cx),
-            "SetTheme" => self.notice("Use the Format ▸ Theme menu", cx),
             "ChangeTabWidth" | "CustomizeTabWidth" => self.cycle_tab_width(cx),
             "ToggleAutoTabExpand" => self.toggle_auto_expand_tabs(cx),
             "ToggleInvisibleChars" => self.update_editor_options(window, cx, |options| {

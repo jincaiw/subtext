@@ -95,15 +95,8 @@ pub mod format {
     use super::*;
     actions!(subtext, [
         RecolorAll,
-        SetLineEndingLf,
-        SetLineEndingCrlf,
-        SetLineEndingCr,
-        SetLineEndingNel,
-        SetLineEndingLs,
-        SetLineEndingPs,
         SetEncoding,
         ReinterpretEncoding,
-        SetSyntax,
         MakeFontStandard,
         MakeFontMonospaced,
         BiggerFont,
@@ -112,7 +105,6 @@ pub mod format {
         OrderFrontFontPanel,
         ToggleAntialias,
         ToggleLigatures,
-        SetTheme,
         ChangeTabWidth,
         CustomizeTabWidth,
         ToggleAutoTabExpand,
@@ -126,6 +118,43 @@ pub mod format {
         ToggleLineWrap,
         ToggleEditable,
     ]);
+
+    /// Set the frontmost document's line endings.
+    ///
+    /// Upstream has one selector for this — `changeLineEnding(_:)`, which reads
+    /// the ending out of the menu item's tag. SubText's Format ▸ Line Endings
+    /// submenu is built at runtime from `LineEnding::ALL`, so the ending has to
+    /// travel with the action instead. The payload is the abbreviation the menu
+    /// already shows — `"LF"`, `"CRLF"` — so the item and the command that runs
+    /// it name the same thing.
+    ///
+    /// `no_json` for the same reason `InsertSnippet` has it: the action is built
+    /// from the menu, never from a configuration file.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct ChangeLineEnding {
+        pub ending: String,
+    }
+
+    /// Highlight the frontmost document as `name`.
+    ///
+    /// The syntax list is the user's, so the menu item cannot name the syntax at
+    /// compile time. `"None"` is a value here rather than the absence of one —
+    /// see [`crate::menus`].
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct ChangeSyntax {
+        pub name: String,
+    }
+
+    /// Apply the theme called `name`.
+    ///
+    /// The theme list is the user's, for the same reason.
+    #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+    #[action(namespace = subtext, no_json)]
+    pub struct ChangeTheme {
+        pub name: String,
+    }
 }
 
 pub mod view {

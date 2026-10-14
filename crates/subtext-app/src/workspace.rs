@@ -66,6 +66,7 @@ use crate::command_bar::{self, CommandBar};
 use crate::dialogs::AboutView;
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
+use crate::menus;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
 use crate::settings::{DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SettingsPane, SidebarPane};
@@ -281,14 +282,14 @@ pub struct Workspace {
     _outline_selection: Subscription,
     /// The filter field's `Change` subscription.
     _outline_filter_changes: Subscription,
-    /// The syntax the *Insert Snippet* submenu and its key bindings were last
-    /// built for.
+    /// What the menu bar was last built from.
     ///
-    /// Both are application-wide, and a snippet may belong to one syntax, so
-    /// both depend on which document is in front. CotEditor's `SnippetManager`
-    /// watches `currentSyntaxName` for the same reason; this is what tells the
-    /// workspace the watch has something to do.
-    snippets_built_for: Option<String>,
+    /// The bar is application-wide, and four of its submenus are filled in from
+    /// the document in front — the snippets, the line endings, the syntax and the
+    /// encoding, each with the setting in force checked. CotEditor's
+    /// `SnippetManager` watches `currentSyntaxName` for the same reason; this is
+    /// what tells the workspace the watch has something to do.
+    menus_built_for: Option<menus::MenuSignature>,
 }
 
 impl Workspace {
@@ -386,7 +387,7 @@ impl Workspace {
             _outline_expansion: outline_expansion,
             _outline_selection: outline_selection,
             _outline_filter_changes: outline_filter_changes,
-            snippets_built_for: None,
+            menus_built_for: None,
         };
         this.new_document(window, cx);
         this
@@ -434,7 +435,7 @@ impl Workspace {
             modified_on_disk: false,
         });
         self.active = self.documents.len() - 1;
-        self.refresh_snippets(cx);
+        self.refresh_menus(cx);
         cx.notify();
     }
 
@@ -607,7 +608,7 @@ impl Workspace {
             .position(|doc| doc.document.path() == Some(path.as_path()))
         {
             self.active = index;
-            self.refresh_snippets(cx);
+            self.refresh_menus(cx);
             cx.notify();
             return;
         }
@@ -796,7 +797,7 @@ impl Workspace {
         // Keep the selection on the same document where possible, and on the
         // neighbour that took its place when the closed one was selected.
         self.active = self.active.min(self.documents.len() - 1);
-        self.refresh_snippets(cx);
+        self.refresh_menus(cx);
         cx.notify();
     }
 
@@ -1301,34 +1302,56 @@ impl Workspace {
         true
     }
 
-    /// The active document's syntax name, or `None` when nothing is open.
+    /// Rebuild the menu bar, if anything it is built from has moved.
     ///
-    /// This is the `scope` a snippet is matched against, and the heading the
-    /// *Insert Snippet* submenu shows.
-    pub fn snippets_scope(&self) -> Option<&str> {
-        self.active_document().map(|document| document.syntax.as_ref())
-    }
-
-    /// Rebuild the snippet submenu and its key bindings, if the syntax the
-    /// frontmost document is in changed.
+    /// Cheap to call from anywhere a document is opened, closed or switched: the
+    /// comparison is what makes it a no-op the rest of the time, and a rebuild is
+    /// a full `App::set_menus` over the whole bar.
     ///
-    /// Cheap to call from anywhere a document is opened, closed or switched:
-    /// the comparison is what makes it a no-op the rest of the time.
-    pub fn refresh_snippets(&mut self, cx: &mut Context<Self>) {
-        if self.snippets_built_for.as_deref() == self.snippets_scope() {
+    /// The tables — the syntax list, the theme list, the snippets — are not part
+    /// of the comparison. They change only when the settings do, which is
+    /// [`rebuild_menus`](Self::rebuild_menus).
+    pub fn refresh_menus(&mut self, cx: &mut Context<Self>) {
+        if self.menus_built_for.as_ref() == Some(&self.menu_signature()) {
             return;
         }
-        self.rebuild_snippets(cx);
+        self.rebuild_menus(cx);
     }
 
-    /// Rebuild the snippet submenu and its key bindings unconditionally.
+    /// Rebuild the menu bar and the key bindings unconditionally.
     ///
     /// The settings pane calls this after the snippet list is edited, where the
-    /// scope has not moved but the items under it have.
-    pub fn rebuild_snippets(&mut self, cx: &mut Context<Self>) {
-        let scope = self.snippets_scope().map(str::to_string);
-        self.snippets_built_for = scope;
-        crate::snippets::install(cx, &self.settings.snippets, self.snippets_built_for.as_deref());
+    /// document in front has not moved but the items under it have.
+    pub fn rebuild_menus(&mut self, cx: &mut Context<Self>) {
+        let state = self.menu_state();
+        self.menus_built_for = Some(state.signature());
+        crate::menus::install(cx, &state);
+    }
+
+    /// Everything the menu bar is built from, as it is right now.
+    fn menu_state(&self) -> menus::MenuState {
+        menus::MenuState {
+            document: self.menu_document(),
+            theme: self.theme.name.clone(),
+            syntaxes: self.syntax_names(),
+            themes: self.theme_names(),
+            snippets: self.settings.snippets.clone(),
+        }
+    }
+
+    /// The part of that which changes without the settings changing.
+    fn menu_signature(&self) -> menus::MenuSignature {
+        menus::MenuSignature::of(self.menu_document(), self.theme.name.clone())
+    }
+
+    /// The frontmost document, as the menu bar needs to see it.
+    fn menu_document(&self) -> Option<menus::DocumentState> {
+        let document = self.active_document()?;
+        Some(menus::DocumentState {
+            syntax: document.syntax.to_string(),
+            line_ending: document.document.line_ending(),
+            encoding: document.document.encoding(),
+        })
     }
 
     // ---- file drop --------------------------------------------------------
@@ -1921,6 +1944,8 @@ impl Workspace {
             editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
         }
         self.loading = false;
+        // The Format ▸ Line Endings submenu checks the one in use.
+        self.refresh_menus(cx);
         self.set_status(format!("Line endings: {}", ending.abbreviation()), cx);
     }
 
@@ -1941,6 +1966,7 @@ impl Workspace {
         }
         self.loading = false;
         let _ = window;
+        self.refresh_menus(cx);
         self.set_status(format!("Encoding: {}", encoding.name), cx);
     }
 
@@ -1962,6 +1988,7 @@ impl Workspace {
                     editor.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
                 }
                 self.loading = false;
+                self.refresh_menus(cx);
                 self.set_status(
                     format!("Reinterpreted as {}", encoding.name),
                     cx,
@@ -1980,8 +2007,8 @@ impl Workspace {
             editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
         }
         // A snippet may be limited to one syntax, so the submenu's contents
-        // follow the document's.
-        self.refresh_snippets(cx);
+        // follow the document's — and the submenu checks the syntax in use.
+        self.refresh_menus(cx);
         self.set_status(format!("Syntax: {name}"), cx);
     }
 
@@ -2076,6 +2103,8 @@ impl Workspace {
             });
         }
         let _ = self.settings.save();
+        // The Format ▸ Theme submenu checks the theme in force.
+        self.refresh_menus(cx);
         self.set_status(format!("Theme: {}", theme.name), cx);
         cx.refresh_windows();
     }
@@ -2483,7 +2512,7 @@ impl Workspace {
                     .on_click(cx.listener(|this, index, _, cx| {
                         if *index < this.documents.len() {
                             this.active = *index;
-                            this.refresh_snippets(cx);
+                            this.refresh_menus(cx);
                             cx.notify();
                         }
                     })),
