@@ -12,6 +12,7 @@ pub mod colorcode;
 pub mod document;
 pub mod encoding;
 pub mod finder;
+pub mod folderfind;
 pub mod line_ending;
 pub mod multireplace;
 pub mod textops;
@@ -21,6 +22,10 @@ pub use colorcode::{Color, ColorCodeType};
 pub use document::{Document, DocumentError, FileStatus};
 pub use encoding::{Bom, DecodedFile, Detection, TextEncoding};
 pub use finder::{FindOptions, ReplacementSyntax, Searcher, replace_all, replace_one};
+pub use folderfind::{
+    Comparison, Conjunction, FileResult, FileScope, FileScopeError, Match, Metrics, Mode,
+    Options as FolderFindOptions, Progress, Query, Search, SearchError, Summary, Target,
+};
 pub use line_ending::LineEnding;
 pub use multireplace::{MultipleReplace, Outcome, PatternError, Replacement, Settings};
 pub use textops::{

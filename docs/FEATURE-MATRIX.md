@@ -126,7 +126,7 @@
 | 工具栏自定义 | — | ⏳ |
 | 快速操作 | — | ⏳ |
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
-| 文件夹查找 | `show_sidebar(FolderFind)` | 🔁 面板存在，查找逻辑未接 |
+| 文件夹查找 | `show_sidebar(FolderFind)` | ✅ |
 | 侧边栏 | `update_window_options` | ✅ |
 | 检查器 | `update_window_options` | ✅ |
 | 文稿检查器 | `show_inspector(Document)` | ✅ |

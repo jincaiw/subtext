@@ -13,5 +13,6 @@ encoding_rs.workspace = true
 chardetng.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
 unicode-width.workspace = true
 unicode_names2 = "1"

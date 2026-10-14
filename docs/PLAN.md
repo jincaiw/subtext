@@ -196,7 +196,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | --- | --- | --- | --- |
 | 8.0 | 大纲改 `Tree` | 阶段 7.7 顺延；`Tree` / `TreeState` 已提供 | ⏳ |
 | 8.1 | 分屏编辑器 | 菜单里 3 项，`h_resizable`/`v_resizable` 已提供 | ⏳ |
-| 8.2 | 文件夹查找 | 侧栏面板已在，缺查找逻辑 | ⏳ |
+| 8.2 | 文件夹查找 | 侧栏面板已在，缺查找逻辑 | ✅ |
 | 8.3 | 多重替换 | 需要一张可编辑的规则表 | ✅ |
 | 8.4 | 颜色代码编辑 | `ColorPicker` 组件已提供 | ✅ |
 | 8.5 | 按模式排序 | 纯逻辑，`subtext-core` 可测 | ✅ |
@@ -288,6 +288,137 @@ SubText 用对话框，因此面板打开期间无法改动插入点。面板内
 `KeyPathComparator(\.contents, comparator: .localized)`，依赖 ICU 的 locale 感知排序；
 Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明原因，不假装生效。
 
+### 8.2 文件夹查找 ✅
+
+上游 *Find ▸ Find in Folder…*（⇧⌘F）把「查找栏」换成「文件夹查找」侧栏：一个搜索框、
+一个 *Search method* 下拉（Text / Regular Expression）、一个 *Case Sensitive* 开关、
+一个文件范围菜单（隐藏文件、其他文件类型、编辑范围、清除范围、已存范围），
+下面是进度行与按文件分组的结果树。点结果在新窗口打开命中位置。
+
+本轮分两层落地。
+
+1. **模型**（`subtext-core/src/folderfind.rs`，约 1830 行含测试，移植自
+   `FolderFind.swift` / `Search.swift` / `FileScope.swift` / `FolderFindProgress.swift`
+   / `URL+Binary.swift`）：
+   - `Query { find_string, mode }`，`Mode { uses_regular_expression, ignores_case }`。
+     **默认是大小写敏感**（两个标志都为 `false`），与上游 `FolderFindMode` 一致；
+     `Query::searcher()` 是唯一的编译入口，空串报 `EmptyFindString`、
+     正则不编译报 `InvalidRegularExpression`。
+   - `Options` 七个字段对齐上游 `FolderFindOptions`：默认 `includes_other_file_types
+     = false`、`includes_hidden_files = false`、`excluded_names = [".DS_Store", ".git"]`、
+     `maximum_file_size = 1_000_000_000`、`maximum_match_count = 500_000`、
+     `maximum_match_count_per_file = 5_000`、`file_scope = None`。
+   - `Search::run(progress, cancel)` 遍历目录：读目录 → 剔除 `excluded_names`、
+     隐藏项与符号链接 → 排序（**目录优先**，同类内用 `natural_compare`，
+     所以 `file2` 排在 `file10` 前面）→ 递归。命中数到上限即停并置
+     `has_unsearched_files`；`Cancellation` 是 `Arc<AtomicBool>`，在目录、文件、
+     每行三个层级各查一次，被取消返回 `Err(Cancelled)`。
+   - `Match { range, line, range_in_line }` 的 `range` 是**文档内字节偏移**，
+     `range_in_line` 是**行内字节偏移**。行长超过 `MAXIMUM_LINE_LENGTH`（512）时
+     以命中为中心裁窗口，命中前保留 `HEAD_PADDING`（64）字节；
+     `grapheme_range` 用 `unicode-segmentation` 的 `grapheme_indices(true)` 复刻
+     Foundation 的 `rangeOfComposedCharacterSequences`，保证裁剪点落在字素簇边界，
+     不会把 emoji 或组合字符劈开。
+   - `FileScope { conjunction, rules }` 是本轮唯一新加 `Serialize`/`Deserialize`
+     的模型类型（为了落盘）：`Conjunction`（Any / All）、`Rule { target, comparison,
+     value }`、`Target`（Filename / FilePath / FileExtension）、
+     `Comparison`（七种，含 `MatchesRegularExpression`）。
+     `validate()` 拒绝空值与不编译的正则；正则规则编译成
+     `\A(?:{值}(?x)\n)\z` —— 包 `(?x)` 让模式里的空白被忽略、再用
+     `\A…\z` 锚定整串，从而等价于上游 `NSRegularExpression` 的
+     「整串匹配 + `allowCommentsAndWhitespace`」。
+   - 二进制识别 `is_binary()` 复刻 `URL+Binary.swift`：读前 8 KiB 找 NUL，
+     找不到 NUL 就按 UTF-8 解码率判定；`is_searchable_text()` 是**扩展名表**
+     判定（见下面的偏差 3）。
+   - 39 项测试逐条对齐上游测试名（`naturalCompare`、行裁剪、范围裁剪、
+     字素边界、作用域七种比较、取消、截断、排除项、隐藏项、目录优先排序…）。
+
+2. **面板**（`crates/subtext-app/src/folder_find.rs`，约 2000 行含测试）：
+   - `FolderFindPane` 持有 `InputState`、三个开关、`FileScope` 与
+     `BTreeMap<String, FileScope>`（已存范围）、`root: Option<PathBuf>`、
+     `state: SearchState`、`submitted: String` 与 `generation: u64`。
+     `SearchState` 四态 `Idle / Searching { progress, cancel } / Finished(Summary)
+     / Failed(String)`。
+   - **扫描前把能报的错都报掉**，顺序与上游一致：空串 → 回 `Idle`；
+     根目录不存在或不是目录 → `Failed("The folder cannot be found.")`；
+     `Query::searcher()` 失败 → 该错误的消息；`scope.validate()` 失败 → 该错误的消息。
+     只有全过才起搜索，避免一个注定失败的任务先闪一下 spinner。
+   - 搜索跑在 `cx.background_executor()` 上，`generation` 计数丢弃过期结果
+     （用户改了查询再回车，旧任务的结果不会覆盖新结果）。进度靠
+     `start_progress_ticker` 每 120 ms `cx.notify()` 一次，直到状态不再是
+     `Searching` 为止 —— 上游也是定时读 `FolderFindProgress` 的快照。
+   - `invalidate()`：取消在跑的任务、`generation += 1`、清结果与折叠/选中状态。
+     订阅 `InputEvent::PressEnter` 起搜索，`InputEvent::Change` 且内容与
+     `submitted` 不同就 `invalidate` —— 改了查询就立刻撤掉旧结果，
+     与上游一致（上游把结果清空但保留搜索框内容）。
+   - 结果树：每个文件一行（折叠按钮 + 标签区），标签区可点、可右键
+     （*Show in Finder* / *Open in New Tab* / *Copy Path*）；展开后是匹配行，
+     命中片段用 `split_display_line()` 切出 head/hit/tail 三段分别着色。
+     这个函数把前导空白去掉、把命中前的部分裁到 32 字符并在切点前补 `…`，
+     且回退到字节边界 —— 纯函数，所以有 5 项测试盯着它。
+   - 末尾一条 `Search Limit Reached`（当 `summary.is_truncated()`），
+     文件行内一条 `Only the first N matches were found.`（当 `is_truncated`），
+     指标行 `N+ matches in M files`（截断时带 `+`，是下界而不是精确值）。
+   - Delete / Backspace 从结果里移除选中的文件（只动 `summary.files`，
+     `metrics` 不动 —— 上游如此），所以结果区要 `track_focus`。
+   - 两个对话框：`FileScopeSheet`（编辑范围：conjunction 选择 + Name 行 +
+     条件行，每行 target / comparison / value + 删除按钮 + *Add Condition* +
+     错误行 + Delete / Cancel / Apply）与 `SavedScopesSheet`（已存范围列表，
+     行内重命名 / 删除，点击进入编辑）。两者每帧从 pane 重读数据，
+     提交后一律 `persist(cx)`。
+   - `persist(cx)` 把四个开关 + `folder_find_scope` + `folder_find_saved_scopes`
+     写回 `Workspace::settings` 并 `settings.save()`，所以关掉应用再打开，
+     范围和已存范围都还在。
+   - 10 项测试：5 项盯 `split_display_line()`、1 项盯指标文案、
+     1 项盯范围名校验（空名、重名、原名可保留）、2 项是**接缝测试** ——
+     `the_panes_options_and_predicate_drive_a_real_search` 与
+     `a_scope_narrows_the_walk` 用面板算出的 `Options` 与
+     `InclusionPredicate` 去跑一次真实的 `Search`，在自建自删的临时目录上断言结果。
+     之所以用这种写法而不是 UI 集成测试，见下面的偏差 6。
+
+3. **接线**：`Settings` 新增 6 个字段（`folder_find_uses_regular_expression` /
+   `folder_find_ignores_case` / `folder_find_includes_hidden_files` /
+   `folder_find_includes_other_file_types` / `folder_find_scope` /
+   `folder_find_saved_scopes`）；`Workspace` 新增 `folder_find: Entity<FolderFindPane>`
+   字段，`render_folder_find()` 从占位实现改成渲染这个 entity；
+   `Workspace::active_directory()` 给面板提供默认根目录（当前文档所在目录），
+   `Workspace::open_and_select(path, range)` 负责「打开文件并选中命中位置」。
+
+**已知偏差（记账）**：
+
+1. **偏移单位**：所有偏移是 **UTF-8 字节**而不是 UTF-16 单元。上游用
+   `NSRange`（UTF-16），SubText 的编辑器本身就是字节偏移，两边各自自洽；
+   跨层传递时不换算，因为换算需要把整篇文本再走一遍。
+2. **编码回退**：用 `DecodedFile` 解码，回退编码（`Detection::Default`）的文件
+   直接跳过，另外额外识别**无 BOM** 的 UTF-16 / UTF-32（上游靠 BOM）。
+   即：能确定编码的照搜，不能确定的不猜。
+3. **文件类型判定**：按**扩展名表**判定而不是 `UTType`。`UTType` 是 Apple 平台
+   的机制，跨平台没有对应物。调用方可以传 `InclusionPredicate` 加宽 ——
+   面板就是这么做的：它把 `SyntaxManager` 里所有语法的
+   `info.file_map.extensions` 收成一个集合，于是「其他文件类型」开关一开，
+   所有已知语法覆盖的扩展名都会被搜到，而不是只有硬编码的那几种。
+4. **`NSRuleEditor` → 行式规则编辑器**：上游的范围编辑器是 `NSRuleEditor`
+   （可嵌套的谓词构建器）。SubText 用「每行一条规则 + *Add Condition*」的平铺列表，
+   表达力等价于 Any / All + 单层规则的组合，嵌套结构不支持。
+5. **保存 / 管理已存范围**：上游 *Save as Named Scope…* 弹一个输入框、
+   *Manage Saved Scopes…* 打开一个管理面板；SubText 把前者做成
+   `FileScopeSheet` 里的内联名称字段，把后者做成 `SavedScopesSheet` 对话框。
+6. **没有 `test-support`，UI 层不做无头测试**：仓库未启用 gpui-kit 的
+   `test-support` feature，也没有 `#[gpui_kit::test]` 用例。与其给面板写一堆
+   只能验证「结构没变」的脆弱断言，不如把**可测的部分做成纯函数**
+   （`split_display_line` / `metrics_message` / `validate_scope_name`），
+   再写两条**接缝测试**：用面板的公开算法算出 `Options` 与谓词，
+   喂给真实的 `Search` 跑一遍临时目录。这样测的是「面板 → 核心」这条线，
+   而不是「面板长什么样」。
+7. **去掉 *Reveal in File Browser***：上游结果行的右键菜单里有这一项，
+   依赖一个真正的文件浏览器侧栏。SubText 的 File Browser 只是最近文件列表，
+   没有可 reveal 的位置，所以这一项不出现（而不是灰掉）。
+8. **不支持跨应用拖拽**：上游可以把结果行拖到别的应用。gpui-kit 的拖放
+   只在应用内，跨应用拖拽没有通道。
+9. **结果开在本窗口新标签页**：上游每次命中开一个新窗口。SubText 统一走
+   `Workspace::open_and_select()`，在现有窗口里新开一个标签页并选中命中范围。
+   这是 SubText 全局的导航约定，不只这一处。
+
 ### 8.3 多重替换 ✅
 
 上游 *Find ▸ Multiple Replace ▸ Manage Multiple Replace…* 打开一个浮动面板：
@@ -343,7 +474,7 @@ Rust 标准库无 ICU，该开关在 sheet 里渲染为 **disabled** 并注明�
 ## 阶段 9 — 验证与发布 v0.2.0 ⏳
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（208 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（257 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ⏳ |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |

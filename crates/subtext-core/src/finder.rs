@@ -40,6 +40,7 @@ impl Default for FindOptions {
 }
 
 /// A compiled search that can be reused across keystrokes.
+#[derive(Debug)]
 pub struct Searcher {
     regex: Regex,
     /// The pattern was empty, so nothing can ever match.

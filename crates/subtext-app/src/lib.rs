@@ -33,6 +33,7 @@ pub mod bridge;
 pub mod color_sheet;
 pub mod dialogs;
 pub mod dispatch;
+pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;
 pub mod menu;

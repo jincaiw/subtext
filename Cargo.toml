@@ -40,6 +40,9 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 regex = "1"
 unicode-normalization = "0.1"
+# Folder Find grows a displayed line fragment to whole grapheme clusters, which
+# is what Foundation's `rangeOfComposedCharacterSequences` does for CotEditor.
+unicode-segmentation = "1"
 unicode-width = "0.2"
 dirs = "6"
 clap = { version = "4", features = ["derive"] }

@@ -52,6 +52,7 @@ use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
 use crate::dialogs::AboutView;
+use crate::folder_find::FolderFindPane;
 use crate::highlighter;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::settings::{InspectorPane, Settings, SidebarPane};
@@ -142,6 +143,9 @@ pub struct Workspace {
     find: FindState,
     find_query: Entity<InputState>,
     find_replacement: Entity<InputState>,
+    /// The sidebar's *Folder Find* pane. It owns its own query, options and
+    /// results, because none of them belong to a document.
+    folder_find: Entity<FolderFindPane>,
     status: Option<Status>,
     /// Set while a document is being loaded, so the change handler does not
     /// mark it dirty.
@@ -175,6 +179,14 @@ impl Workspace {
         let find_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
         let find_replacement = cx.new(|cx| InputState::new(window, cx).placeholder("Replace"));
 
+        // The pane reads its switches out of the settings at construction and
+        // writes them back as they change, so it is built from the same
+        // `Settings` this workspace is about to take ownership of.
+        let folder_find = {
+            let workspace = cx.entity().downgrade();
+            cx.new(|cx| FolderFindPane::new(workspace, &settings, window, cx))
+        };
+
         let mut this = Self {
             settings,
             syntaxes,
@@ -186,6 +198,7 @@ impl Workspace {
             find: FindState::default(),
             find_query,
             find_replacement,
+            folder_find,
             status: None,
             loading: false,
             settings_window: None,
@@ -1885,24 +1898,14 @@ impl Workspace {
         list.into_any_element()
     }
 
-    fn render_folder_find(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        v_flex()
-            .gap_1()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Search a folder for text, like CotEditor's Folder Find."),
-            )
-            .child(
-                Button::new("choose-folder")
-                    .small()
-                    .label("Choose Folder…")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_status("Folder Find is not implemented yet", cx)
-                    })),
-            )
-            .into_any_element()
+    /// The *Folder Find* pane.
+    ///
+    /// The pane is an entity of its own: it owns the query, the options and the
+    /// search results, and it drives the background walk itself. The workspace
+    /// only hands it a place in the sidebar and the folder of the active
+    /// document to fall back on.
+    fn render_folder_find(&self, _cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        self.folder_find.clone().into_any_element()
     }
 
     fn render_inspector(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2312,6 +2315,42 @@ impl Workspace {
     /// The workspace handle, for views that need to talk back to it.
     pub fn weak(cx: &Context<Self>) -> WeakEntity<Self> {
         cx.entity().downgrade()
+    }
+
+    /// The folder the active document lives in.
+    ///
+    /// CotEditor's Folder Find searches the document's folder because a folder
+    /// opened as a document *is* the document. SubText has no directory
+    /// documents, so the folder of the file on screen is the same answer for
+    /// every document that has one — and an unsaved document has none.
+    pub fn active_directory(&self) -> Option<PathBuf> {
+        self.active_document()?
+            .document
+            .path()
+            .and_then(|path| path.parent())
+            .map(PathBuf::from)
+    }
+
+    /// Open a file and put the caret on `range` in it.
+    ///
+    /// Used by Folder Find: clicking a match opens its file and selects the
+    /// hit, so the result list doubles as a jump list. The selection is only
+    /// moved when the file actually became the active document — a result in a
+    /// file that cannot be opened leaves the current document alone.
+    pub fn open_and_select(
+        &mut self,
+        path: PathBuf,
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_path(path.clone(), window, cx);
+        let arrived = self
+            .active_document()
+            .is_some_and(|document| document.document.path() == Some(path.as_path()));
+        if arrived {
+            self.set_selection(range, cx);
+        }
     }
 }
 

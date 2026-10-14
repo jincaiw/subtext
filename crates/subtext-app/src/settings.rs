@@ -16,10 +16,12 @@
 //! snake-cased, so that a value can be traced back to its upstream origin
 //! without a lookup table.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use subtext_core::encoding::TextEncoding;
+use subtext_core::folderfind::FileScope;
 use subtext_core::line_ending::LineEnding;
 
 /// Which pane of the settings window is showing.
@@ -591,6 +593,23 @@ pub struct Settings {
 
     /// The most recently opened documents, newest first.
     pub recent_documents: Vec<PathBuf>,
+
+    /// Folder Find's *Text / Regular Expression* menu.
+    ///
+    /// CotEditor keeps the four switches below in `UserDefaults` and restores
+    /// them between launches, so the pane reopens on the mode the user left it
+    /// in. Unlike the find bar, folder find is **case sensitive** by default —
+    /// hence the doubly negated key, which is upstream's own spelling.
+    pub folder_find_uses_regular_expression: bool,
+    /// Upstream's `folderFindIgnoresCase`.
+    pub folder_find_ignores_case: bool,
+    pub folder_find_includes_hidden_files: bool,
+    pub folder_find_includes_other_file_types: bool,
+
+    /// The unnamed file scope the *File Scope* menu last held.
+    pub folder_find_scope: Option<FileScope>,
+    /// Named scopes, keyed by name — upstream's `folderFindSavedScopes`.
+    pub folder_find_saved_scopes: BTreeMap<String, FileScope>,
 }
 
 impl Default for Settings {
@@ -625,6 +644,14 @@ impl Default for Settings {
             // CotEditor's `colorCodeType` default is `1`, which is `Hex`.
             color_code_type: subtext_core::colorcode::ColorCodeType::default().raw_value(),
             recent_documents: Vec::new(),
+            folder_find_uses_regular_expression: false,
+            // CotEditor's `folderFindIgnoresCase` default is `false`, so the
+            // folder pane starts case sensitive.
+            folder_find_ignores_case: false,
+            folder_find_includes_hidden_files: false,
+            folder_find_includes_other_file_types: false,
+            folder_find_scope: None,
+            folder_find_saved_scopes: BTreeMap::new(),
         }
     }
 }
