@@ -65,8 +65,9 @@ use gpui_kit::{
 use subtext_core::completion;
 use subtext_core::scripts::{InputType, Invocation, Item as ScriptItem, OutputType};
 use subtext_core::{
-    Document, DroppedFile, FileEncoding, LineEnding, Normalization, TextEncoding, charinfo,
-    colorcode, fileattrs, finder, imagesize, line_ending, multireplace, textops,
+    Document, DroppedFile, FileEncoding, LineEnding, MatchLine, Normalization, TextEncoding,
+    charinfo, colorcode, fileattrs, finder, findresult, imagesize, line_ending, multireplace,
+    textops,
 };
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
@@ -82,8 +83,9 @@ use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
 use crate::resources;
 use crate::scripts;
 use crate::settings::{
-    DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH, INSPECTOR_MIN_WIDTH, InspectorPane, Settings,
-    SettingsPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarPane,
+    DEFAULT_FIND_RESULT_FONT_SIZE, DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH,
+    INSPECTOR_MIN_WIDTH, InspectorPane, Settings, SettingsPane, SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH, SidebarPane,
 };
 use crate::settings_window::SettingsWindow;
 use crate::count_panel::{CountOptionsView, CountSheet};
@@ -267,7 +269,35 @@ pub struct FindState {
     pub matches: Vec<Range<usize>>,
     pub current: Option<usize>,
     pub error: Option<String>,
+    /// The rows of the *Find All* result table.
+    ///
+    /// Empty until *Find All* runs. Upstream builds them in the same pass that
+    /// highlights the matches and only when the result view is going to be
+    /// shown, because a row costs a copy of its line — so this is a separate
+    /// list rather than something derived from `matches` on every frame.
+    pub results: Vec<MatchLine>,
+    /// Whether the result section is showing.
+    ///
+    /// Upstream's middle split item is collapsed until a *Find All* finds
+    /// something, and the panel's own chevron collapses it again.
+    pub results_open: bool,
 }
+
+/// The **Find & Replace** panel's window size, in points.
+///
+/// A utility window is a short column of rows, so it opens at the size those
+/// rows need. The minimum width is where the button row still fits on one line;
+/// below it the row wraps and the trailing pair of stepper buttons is what
+/// gives way first.
+const FIND_PANEL_WIDTH: f32 = 520.;
+const FIND_PANEL_MIN_WIDTH: f32 = 420.;
+const FIND_PANEL_HEIGHT: f32 = 190.;
+
+/// How much taller the panel becomes while the *Find All* result table is open.
+///
+/// Upstream's `FindPanelContentViewController.defaultResultViewHeight` — the
+/// result split item opens at 200 points, which is what makes the panel grow.
+const FIND_PANEL_RESULT_HEIGHT: f32 = 200.;
 
 /// A transient message shown in the status bar.
 struct Status {
@@ -1931,7 +1961,11 @@ impl Workspace {
         if let Some(handle) = self.find_window {
             if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
                 self.find_window_owner = Some(owner);
+                // `refresh_matches` drops the previous Find All's rows, so a
+                // panel that was left open with the result table showing comes
+                // back collapsed and at the collapsed height.
                 self.refresh_matches(cx);
+                self.resize_find_panel(cx);
                 self.focus_find_field(handle, show_replace, cx);
                 return;
             }
@@ -1951,10 +1985,10 @@ impl Workspace {
                 // the size those rows need rather than filling the screen, and
                 // the minimum is the width below which the button row wraps.
                 window_bounds: Some(WindowBounds::centered(
-                    gpui_kit::size(px(520.), px(190.)),
+                    gpui_kit::size(px(FIND_PANEL_WIDTH), px(FIND_PANEL_HEIGHT)),
                     cx,
                 )),
-                window_min_size: Some(gpui_kit::size(px(420.), px(150.))),
+                window_min_size: Some(gpui_kit::size(px(FIND_PANEL_MIN_WIDTH), px(150.))),
                 ..Default::default()
             };
             let panel = weak.clone();
@@ -1973,7 +2007,14 @@ impl Workspace {
                 view
             });
             weak.update(cx, |workspace, cx| match opened {
-                Ok((handle, _)) => workspace.find_window = Some(handle),
+                Ok((handle, _)) => {
+                    workspace.find_window = Some(handle);
+                    // The panel opens at the collapsed height, but a *Find All*
+                    // can run before this window exists — the window is created
+                    // in this very defer — so the size the results ask for is
+                    // applied here rather than only where the results change.
+                    workspace.resize_find_panel(cx);
+                }
                 Err(error) => workspace.set_status(error.to_string(), cx),
             })
             .ok();
@@ -2011,10 +2052,20 @@ impl Workspace {
     }
 
     /// Run the current query and remember where the matches are.
+    ///
+    /// The result rows are dropped rather than rebuilt: they belong to one
+    /// *Find All* pass, and a stale row would point at a range the new query
+    /// never produced. Upstream collapses the result view on the same events.
     pub fn refresh_matches(&mut self, cx: &mut Context<Self>) {
         let Some(text) = self.active_text(cx) else {
             return;
         };
+        let was_open = self.find.results_open;
+        self.find.results.clear();
+        self.find.results_open = false;
+        if was_open {
+            self.resize_find_panel(cx);
+        }
         let query = self.query(cx);
         if query.is_empty() {
             self.find.matches.clear();
@@ -2079,6 +2130,11 @@ impl Workspace {
     }
 
     /// Select every match, which is what "Find All" does in CotEditor.
+    ///
+    /// It is also the only command that fills the result table, and the only
+    /// one that opens the middle section of the panel — upstream collapses it
+    /// again as soon as the panel closes, and leaves it collapsed when nothing
+    /// was found.
     pub fn find_all(&mut self, cx: &mut Context<Self>) {
         self.refresh_matches(cx);
         let count = self.find.matches.len();
@@ -2086,7 +2142,91 @@ impl Workspace {
             self.set_status("No matches", cx);
             return;
         }
+        if let Some(text) = self.active_text(cx) {
+            self.find.results = findresult::match_lines(&text, &self.find.matches);
+            self.find.results_open = true;
+            self.resize_find_panel(cx);
+        }
         self.set_status(format!("{count} match(es)"), cx);
+    }
+
+    /// Collapse the result section — the panel's `⌃` button.
+    pub fn close_find_results(&mut self, cx: &mut Context<Self>) {
+        self.find.results_open = false;
+        self.resize_find_panel(cx);
+        cx.notify();
+    }
+
+    /// Grow or shrink the panel to fit the result section.
+    ///
+    /// Upstream's result view is a split item that opens to 200 points, which
+    /// makes the panel taller; the panel is resizable there and the user can
+    /// drag it back. Here the window owns its own size, so opening and closing
+    /// the section adds and removes the same 200 points.
+    fn resize_find_panel(&self, cx: &mut Context<Self>) {
+        let Some(handle) = self.find_window else {
+            return;
+        };
+        let height = FIND_PANEL_HEIGHT
+            + if self.find.results_open { FIND_PANEL_RESULT_HEIGHT } else { 0.0 };
+        handle
+            .update(cx, |_, window, _| {
+                // Keep whatever width the user has dragged the panel to; only
+                // the height is ours to decide.
+                let width = window.bounds().size.width;
+                window.resize(gpui_kit::size(width, px(height)));
+            })
+            .ok();
+    }
+
+    /// Select the match a result row stands for.
+    ///
+    /// The row's `range` is the match itself, so this is the same selection the
+    /// editor's own *Find Next* would make.
+    pub fn select_find_result(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        if let Some(index) = self.find.matches.iter().position(|match_| *match_ == range) {
+            self.select_match(index, cx);
+        }
+    }
+
+    /// The result rows and whether the section is open, for the panel.
+    pub fn find_results(&self) -> (&[MatchLine], bool) {
+        (&self.find.results, self.find.results_open)
+    }
+
+    /// The active document's display name, for the result table's header.
+    pub fn document_name(&self) -> String {
+        self.documents[self.active_index()].document.display_name()
+    }
+
+    /// The result table's text size, in points.
+    pub fn find_result_font_size(&self) -> f32 {
+        self.settings.find_result_font_size
+    }
+
+    /// *Bigger* / *Smaller* from the result table's context menu.
+    ///
+    /// Upstream steps by one point and stops *Smaller* at the default — the
+    /// table may be enlarged past it but not shrunk below it.
+    pub fn step_find_result_font_size(&mut self, bigger: bool, cx: &mut Context<Self>) {
+        let current = self.settings.find_result_font_size;
+        let size = if bigger {
+            current + 1.0
+        } else {
+            (current - 1.0).max(DEFAULT_FIND_RESULT_FONT_SIZE)
+        };
+        if size != current {
+            self.settings.find_result_font_size = size;
+            let _ = self.settings.save();
+        }
+        cx.notify();
+    }
+
+    /// *Reset to Default* — upstream's `UserDefaults.restore(key:)`.
+    pub fn reset_find_result_font_size(&mut self, cx: &mut Context<Self>) {
+        self.settings.find_result_font_size = DEFAULT_FIND_RESULT_FONT_SIZE;
+        let _ = self.settings.save();
+        cx.notify();
     }
 
     /// Highlight All and Find All are the same query; the difference in
@@ -2098,6 +2238,13 @@ impl Workspace {
     pub fn clear_highlights(&mut self, cx: &mut Context<Self>) {
         self.find.matches.clear();
         self.find.current = None;
+        // The result rows stand for one Find All pass over those matches, so
+        // removing the highlights removes the list as well.
+        self.find.results.clear();
+        if self.find.results_open {
+            self.find.results_open = false;
+            self.resize_find_panel(cx);
+        }
         self.set_status("Highlights removed", cx);
     }
 

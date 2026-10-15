@@ -578,6 +578,12 @@ pub enum InspectorPane {
 /// also the floor its *Smaller* command stops at.
 pub const DEFAULT_OUTLINE_FONT_SIZE: f32 = 11.0;
 
+/// The *Find All* result table's font size before the user changes it.
+///
+/// Upstream's `findResultViewFontSize`, also `NSFont.smallSystemFontSize` — 11
+/// points, and the floor its *Smaller* command stops at.
+pub const DEFAULT_FIND_RESULT_FONT_SIZE: f32 = 11.0;
+
 /// The sidebar's three width constraints, in rem.
 ///
 /// The minimum is where a file name and its icon still fit, the default is what
@@ -649,6 +655,15 @@ pub struct Settings {
     /// the matches that come back are still offsets into the whole buffer and
     /// the editor's selection of them needs no translation.
     pub find_in_selection: bool,
+    /// The *Find All* result table's text size, in points.
+    ///
+    /// Upstream's `findResultViewFontSize`, whose only controls are the result
+    /// view's context menu (*Bigger* / *Smaller* / *Reset to Default*) and the
+    /// standard Text Size menu commands. It is a plain point size rather than a
+    /// rem multiple because that is what upstream stores, and because the table
+    /// is the one surface the user is expected to zoom independently of the
+    /// rest of the panel.
+    pub find_result_font_size: f32,
 
     /// Accept `rmate` connections from a remote host.
     pub enables_remote_editing: bool,
@@ -787,6 +802,7 @@ impl Default for Settings {
             find_case_sensitive: false,
             find_whole_word: false,
             find_in_selection: false,
+            find_result_font_size: DEFAULT_FIND_RESULT_FONT_SIZE,
             enables_remote_editing: false,
             remote_editing_port: 52698,
             // CotEditor's `colorCodeType` default is `1`, which is `Hex`.

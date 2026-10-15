@@ -231,6 +231,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.20 | 补全 + 三个被 base64 吃掉的快捷键 | `Edit ▸ Complete` 是占位提示，Mode 面板的三个补全开关没人读；顺带发现 ⌘⌫ / ⇧⌘⌫ / ⌥⎋ 三条键位在 storyboard 里是 base64 存的，一直没被读出来 | ✅ |
 | 8.21 | 警告检查器按上游重排成两栏 | 上游是 `VSplitView` 的两个面板（不兼容字符 / 不一致换行符），各带状态行与表格；SubText 是一列自编的提示。顺带查出保存路径丢掉了有损标志，会把 `&#65533;` 静默写进文件 | ✅ |
 | 8.22 | 查找面板改成独立的浮动窗口 | 上游 `FindPanelController` 是 `NSPanel`（标题 *Find & Replace*），内容是三段纵向布局；SubText 是窗口内的一条横条。顺带补上 *In Selection*。**照抄注释会写错三处**：位置消息是 `1/4` 不是 `1 of 4`、消息是字段的尾随附件不是独立一行、焦点必须给在面板自己的窗口里 | ✅ |
+| 8.23 | *Find All* 的结果列表 | §8.22 之后面板中间那一段还空着 —— 上游是**三段**纵向 split，中间是默认收起、打开占 200 点的结果表。顺带查出结果表的行号是**六种**换行符的口径，而 `textops` 里已有的扫描器只有三种 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2328,11 +2329,106 @@ self.windowFrameAutosaveName = "Find Panel"
 行数 42,688 → 42,819（`find_panel.rs` 282 → 379；口径同 FEATURE-MATRIX：
 `find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`）。
 
+### 8.23 *Find All* 的结果列表 ✅
+
+§8.22 把面板改成了独立窗口，但窗口中间那一段一直空着 —— 上游的
+`FindPanelContentViewController` 是一个**三段**纵向 `NSSplitViewController`：
+
+```swift
+self.splitViewItems = [fieldViewItem, resultViewItem, buttonViewItem]
+```
+
+中间那段 `FindPanelResultView`（211 行）默认 `isCollapsed = true`，
+只有 `Find All` 找到东西时才 `setResultShown(true)`，而且一开就是 200 点高
+（`defaultResultViewHeight`）。这一段此前**没有画**，所以面板比上游矮 200 点。
+
+#### 现在的中间那一段
+
+```
+[⌃]  Found 5 matches in “sample.txt.”
+Find text: alpha
+┌────────────────────────────────────────────┐
+│     Line   Matched Text                    │
+├────────────────────────────────────────────┤
+│        1   alpha one                       │
+│        2   beta alpha two                  │
+│        4   alpha alpha three               │
+│        4   alpha alpha three               │
+│        6   long line alpha xxxxxxxxxxxx…   │
+└────────────────────────────────────────────┘
+```
+
+- 表头行是 `[⌃] **Found N matches in “文件名.”**` —— `⌃` 是上游那个
+  `chevron.up` 的折叠按钮（tooltip *Close find result.*），文件名取自活动文档。
+- 第二行 `Find text: <查询>`。
+- 表格两列：`Line`（1 基行号，**右对齐的窄栏**）与 `Matched Text`（尾截断）。
+- 行高与字号跟 `findResultViewFontSize` 走（默认 11 点），右键出
+  *Text Size ▸ Bigger / Smaller / Reset to Default*，与上游的表右键菜单同形。
+- 点一行把编辑器选区放到那个匹配上。
+
+#### 三个数字，和它们各自的口径
+
+上游的 `FindAllMatch` 带四个字段，这一轮逐条搬了过来：
+
+| 字段 | 上游来源 | 这里的实现 |
+| --- | --- | --- |
+| `range` | 匹配本身 | 同一批 `find.matches` |
+| `lineNumber` | `LineCounter.lineNumber(at:)` | `textops::LineIndex`（**六种换行符**） |
+| `inlineLocation` | `match.start - fragment.start` | 同一算式，注意它是**行内**偏移不是文档偏移 |
+| `attributedLineString` | 行的内容，`clamped(around:maxLength:1024)` | `findresult::match_lines` |
+
+两个容易抄错的地方，都用测试钉住了：
+
+1. **行号是六种换行符的口径。** 上游 `LineCounter` 数的是
+   `enumerateSubstrings(.byLines)` 给的，即 Foundation 的六种（LF / CR / CRLF /
+   NEL / LS / PS）。`textops` 里已有的 `line_bounds` 只认三种 —— 那是
+   `line_content_ranges`（⌃L 拆行）与各条行操作的口径，上游那几处也是 NSString 的
+   三种。**两个问题、两个扫描器**：混用会让用 `\u{2028}` 写的文档里，结果表的行号
+   与状态栏的行号对不上。新加的 `LineIndex` 是六种的那一个。
+2. **表头的行内偏移是相对行的，不是相对文档的。** 上游 `inlineLocation`
+   是 `matchedRange.location - lineFragmentRange.location`；单元格的头部截断
+   （`truncatedHead(until:offset:)`，offset 16）只读这一个量。
+
+`truncate_head` 按**字形簇**回退 16 个，不是按标量 —— 上游走
+`enumerateSubstrings(.byComposedCharacterSequences)`，所以十个家庭 emoji
+（每个 5 个标量）退 16 个簇是退掉 4 个 emoji，不是退到某个 emoji 中间。
+测试 `head_truncation_counts_grapheme_clusters_not_scalars` 钉住这一条。
+
+#### 顺带：窗口要跟着长高
+
+上游的结果视图是一个 split item，打开就占 200 点，面板因此变高（而且可以拖）。
+这里的窗口自己管自己的尺寸，所以 `find_all` 打开这一段时把面板长高
+`FIND_PANEL_RESULT_HEIGHT`（200），折叠时收回。**两个方向都实测过**：
+不折叠时窗口列表读到 `520x422`，折叠后 `520x222`（190 内容 + 200 + 33 标题栏）。
+
+一处顺序陷阱：`⌘E` 之后紧接 `Find All` 时，结果先于面板窗口存在 ——
+窗口是在 `show_find` 的 `defer` 里建的。所以「按结果调高度」这件事同时放在
+建窗口之后那一步，而不只放在结果变化的地方。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 表格不支持多选 | 上游 `Table` 是 `Set<Match.ID>` 多选，且 `.copyable(...)` 让 ⌘C 复制选中行。SubText 用组件库里无状态的 `Table`（与警告检查器同一个），单选即「把编辑器选区放到那个匹配上」，没有多选与「复制选中行」。 |
+| 表格不能按列排序 | 上游 `sortOrder` 可点表头排序。两列里行号本来就与文档顺序同序，所以排序唯一能改变的是「按匹配文本排」，而这里的 `Table` 没有排序。 |
+| 单元格里没有匹配高亮 | 上游 `attributedLineString` 给每个捕获组背景着色（`highlightColors` 按捕获组数分解）。SubText 的 `line` 是纯文本，没有按组着色。 |
+| 没有 `Text Size` 的标准菜单项通路 | 上游那三个命令同时挂在 View 菜单的 *Bigger Font* / *Smaller Font* / *Reset Font* 上（`onCommand`）。这里只有表格的右键菜单 —— 那三个菜单项作用于编辑器字号，不是结果表字号。 |
+
+验收：**10 条新测试**（638 = 628 + 10）—— `findresult` 的十条：行号与行内偏移、
+LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 上限保留 64 字前导、
+短行不动、头部截断的边界（正好 16 不动）、超过 16 才加省略号、
+按字形簇而不是标量、行太短就整体保留。
+全工作区 **638** 项测试全绿、clippy 零自有警告、生成器幂等、探针已移除、
+冒烟存活且 stdout/stderr 各 0 字节。**截了应用窗口核对**（临时探针，核对完即删）：
+结果表的表头与表体列宽对齐、行号右对齐在窄栏里、长行尾截断；
+探针另读出 `PROBE row-click selection=31..36`（第三行是第 4 行的第一个 `alpha`）。
+行数 42,819 → 43,493（`findresult.rs` 262）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（628 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（638 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在 `a9bc177`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
@@ -2352,7 +2448,10 @@ self.windowFrameAutosaveName = "Find Panel"
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
-| 查找面板没有结果列表 | 上游中间那一段是「Find All 之后列出所有匹配」的表格，默认收起；SubText 的 `find.matches` 已经在手，但没有渲染成列表。 |
+| 结果表不支持多选与「复制选中行」 | 上游的 `Table` 是 `Set<Match.ID>` 多选，且 `.copyable(...)` 让 ⌘C 复制选中行。SubText 用组件库里无状态的 `Table`（与警告检查器同一个），单选即「把编辑器选区放到那个匹配上」。 |
+| 结果表不能按列排序 | 上游 `sortOrder` 可点表头排序；这里的 `Table` 没有排序。 |
+| 结果表的单元格里没有匹配高亮 | 上游给每个捕获组背景着色；SubText 的 `line` 是纯文本。 |
+| 结果表字号没有标准菜单项通路 | 上游那三个命令同时挂在 View 菜单的 *Bigger Font* / *Smaller Font* / *Reset Font* 上；这里只有表格的右键菜单（那三个菜单项作用于编辑器字号）。 |
 | `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
 | 查找面板没有正则速查与高级选项弹层 | 上游字段行两端各有一个（`RegularExpressionReferenceView` / `FindSettingsView` 的 10 个开关）；SubText 的三个复选框覆盖其中三个。 |
 | 查找面板没有 Recent Searches / Recent Replacements 历史菜单 | 上游两个字段的附件行左边各有一个 `HistoryMenu`（最多 64 字符截断 + *Clear Recent…*），值存在 `UserDefaults` 里。SubText 没有「最近查找」的持久化存储，附件行只有消息与清空按钮。 |

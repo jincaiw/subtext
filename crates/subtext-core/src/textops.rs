@@ -57,7 +57,7 @@ fn line_index_at(text: &str, offset: usize) -> usize {
     text[..floor_char_boundary(text, offset)].matches('\n').count()
 }
 
-fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+pub(crate) fn floor_char_boundary(text: &str, mut index: usize) -> usize {
     if index >= text.len() {
         return text.len();
     }
@@ -1701,6 +1701,63 @@ pub fn offset_of_line(text: &str, line: usize) -> usize {
         }
     }
     text.len()
+}
+
+/// Line geometry for a whole text, computed once.
+///
+/// This is the **six-terminator** view — `\r\n`, `\r`, `\n`, NEL, LS, PS —
+/// because that is what the status bar and the *Find All* result table report.
+/// Upstream gets both from Foundation: `LineCounter` counts whatever
+/// `enumerateSubstrings(.byLines)` yields, which includes the three Unicode
+/// terminators.
+///
+/// It is deliberately *not* [`line_bounds`], the three-terminator scanner behind
+/// `line_content_ranges` and the line-splitting commands. Those two are
+/// NSString-based upstream as well, so the split is upstream's rather than an
+/// accident here. Mixing them would put the result table's line numbers out of
+/// step with the status bar's on a document written with, say, `\u{2028}`.
+pub struct LineIndex {
+    /// `(start, content_end)` for every line, the terminator excluded.
+    bounds: Vec<(usize, usize)>,
+    /// The indexed text's byte length, to clamp an out-of-range offset.
+    len: usize,
+}
+
+impl LineIndex {
+    /// Index `text`. The final line always appears, even when the text ends
+    /// with a terminator and that line is empty.
+    pub fn new(text: &str) -> Self {
+        let mut bounds = Vec::new();
+        let mut start = 0;
+        let mut cursor = 0;
+        while cursor < text.len() {
+            match line_ending_at(text, cursor) {
+                Some((_, len)) => {
+                    bounds.push((start, cursor));
+                    cursor += len;
+                    start = cursor;
+                }
+                None => cursor += text[cursor..].chars().next().map_or(1, char::len_utf8),
+            }
+        }
+        bounds.push((start, text.len()));
+        Self { bounds, len: text.len() }
+    }
+
+    /// The 1-based line number holding `offset`, and that line's content range.
+    ///
+    /// An offset inside a terminator belongs to the line it terminates: the
+    /// `\n` of a `\r\n` is still on the line the pair ends, which is what
+    /// upstream's `lineNumber(at:)` documents and what searching for the last
+    /// line start at or before `offset` gives for free.
+    pub fn locate(&self, offset: usize) -> (usize, Range<usize>) {
+        let offset = offset.min(self.len);
+        // The last line whose start is at or before `offset`. `bounds` is
+        // sorted by start, so this is a partition point.
+        let index = self.bounds.partition_point(|(start, _)| *start <= offset).saturating_sub(1);
+        let (start, end) = self.bounds[index];
+        (index + 1, start..end)
+    }
 }
 
 #[cfg(test)]

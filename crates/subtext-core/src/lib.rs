@@ -15,6 +15,7 @@ pub mod encoding;
 pub mod fileattrs;
 pub mod filedrop;
 pub mod finder;
+pub mod findresult;
 pub mod folderfind;
 pub mod imagesize;
 pub mod line_ending;
@@ -39,6 +40,7 @@ pub use folderfind::{
     Options as FolderFindOptions, Progress, Query, Search, SearchError, Summary, Target,
 };
 pub use line_ending::LineEnding;
+pub use findresult::{MatchLine, match_lines, truncate_head};
 pub use matcher::{AbbreviatedMatch, abbreviated_match, abbreviated_matched_ranges};
 pub use multireplace::{MultipleReplace, Outcome, PatternError, Replacement, Settings};
 pub use scripts::{

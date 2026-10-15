@@ -28,13 +28,19 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
+    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
+    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Context, Entity, Focusable as _, IntoElement, ParentElement as _, Render, Styled as _,
+    Context, Entity, Focusable as _, FontWeight, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
     WeakEntity, Window, div, px, rems,
 };
+
+use subtext_core::findresult::CELL_HEAD_OFFSET;
+use subtext_core::truncate_head;
 
 use crate::workspace::Workspace;
 
@@ -43,6 +49,27 @@ use crate::workspace::Workspace;
 /// Upstream's `.frame(minHeight: 44)` — 44 points, which is 2.75 rem at the
 /// default root size.
 const FIELD_HEIGHT: f32 = 2.75;
+
+/// How wide the result table's line-number lane is, in rem.
+///
+/// Upstream gives the `Line` column `ideal: 30, max: 64` points, so it is a
+/// narrow lane rather than an equal share of the table. 3 rem is 48 at the
+/// default base size — inside that range, and wide enough for a four-digit
+/// number plus the cell's own padding.
+///
+/// It has to be set on the header cell *and* the body cells, and it has to
+/// carry a `min_w`: the component's cells have a 100-point floor of their own,
+/// so a width without one is silently widened and the header then stops lining
+/// up with the column under it.
+const LINE_COLUMN_WIDTH: f32 = 3.;
+
+/// How tall the result table may get before it scrolls, in rem.
+///
+/// Upstream's result view opens at 200 points (`defaultResultViewHeight`) and
+/// the split view then lets the user drag it. 12.5 rem is 200 at the default
+/// base size, and it is a maximum rather than a fixed height so a short list
+/// does not leave a hole under itself.
+const RESULT_TABLE_MAX_HEIGHT: f32 = 12.5;
 
 /// How wide the result message may get before it truncates.
 ///
@@ -68,7 +95,7 @@ impl FindPanel {
     fn on_document(
         &self,
         cx: &mut Context<Self>,
-        command: fn(&mut Workspace, &mut Window, &mut Context<Workspace>),
+        command: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
     ) {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
@@ -103,6 +130,7 @@ impl Render for FindPanel {
             (settings.find_regex, settings.find_case_sensitive, settings.find_in_selection)
         };
         let (count, current, error) = workspace.read(cx).find_status();
+        let results_open = workspace.read(cx).find_results().1;
 
         // Upstream's `FindPanelFieldAccessoryView` draws the result message at
         // the *trailing edge of the find field*, and draws nothing at all while
@@ -128,7 +156,169 @@ impl Render for FindPanel {
                 case_sensitive,
                 in_selection,
             ))
+            // Upstream's panel is a three-part vertical split — the fields, the
+            // result list, the buttons — and the middle part is collapsed until
+            // *Find All* finds something.
+            .when(results_open, |this| this.child(self.render_results(cx)))
             .child(self.render_buttons(cx))
+            .into_any_element()
+    }
+}
+
+impl FindPanel {
+    /// The **Find All** result list: the middle section of upstream's split.
+    ///
+    /// Upstream's `FindPanelResultView` is a `⌃` collapse button and a bold
+    /// `Found N matches in “name.”` on one line, `Find text: query` on the
+    /// next, and then a bordered two-column table — the line number, right
+    /// aligned in a narrow lane, and the matched line.
+    fn render_results(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return div().into_any_element();
+        };
+        let (rows, _) = workspace.read(cx).find_results();
+        let count = rows.len();
+        let document = workspace.read(cx).document_name();
+        let (query, _) = workspace.read(cx).find_fields();
+        let query = query.read(cx).value().to_string();
+        let font_size = workspace.read(cx).find_result_font_size();
+
+        let header = TableRow::new()
+            .child(
+                TableHead::new()
+                    .w(rems(LINE_COLUMN_WIDTH))
+                    .min_w(rems(LINE_COLUMN_WIDTH))
+                    .text_right()
+                    .child("Line"),
+            )
+            .child(TableHead::new().child("Matched Text"));
+
+        // A `TableRow` is not an interactive element, so the click lives on the
+        // cell contents — one handler per cell, which makes the whole row
+        // clickable rather than just the line number.
+        let mut body = TableBody::new();
+        for (index, row) in rows.iter().enumerate() {
+            let text = truncate_head(&row.line, row.inline_location, CELL_HEAD_OFFSET);
+            let line_number = row.line_number.to_string();
+            let mut table_row = TableRow::new();
+            for (column, text) in [line_number, text].into_iter().enumerate() {
+                let range = row.range.clone();
+                let mut cell = TableCell::new().child(
+                    div()
+                        .id(("find-result", index * 2 + column))
+                        .w_full()
+                        .cursor_pointer()
+                        .truncate()
+                        .when(column == 0, |this| this.text_right())
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                let range = range.clone();
+                                this.on_document(cx, move |workspace, _, cx| {
+                                    workspace.select_find_result(range, cx);
+                                });
+                            }),
+                        )
+                        .child(text),
+                );
+                if column == 0 {
+                    cell = cell.w(rems(LINE_COLUMN_WIDTH)).min_w(rems(LINE_COLUMN_WIDTH));
+                }
+                table_row = table_row.child(cell);
+            }
+            body = body.child(table_row);
+        }
+
+        let stop = self.workspace.clone();
+        v_flex()
+            .w_full()
+            .gap_1()
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("find-result-close")
+                            .ghost()
+                            .compact()
+                            .icon(gpui_kit::assets::IconName::ChevronUp)
+                            .accessibility_label("Close")
+                            .tooltip("Close find result.")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.on_document(cx, |workspace, _, cx| {
+                                    workspace.close_find_results(cx);
+                                });
+                            })),
+                    )
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .truncate()
+                            // Upstream's `.unknown` is the fallback for a window
+                            // whose document has gone; this section cannot be
+                            // open without one, so the fallback would be a
+                            // spelling of "never" rather than a state a reader
+                            // meets.
+                            .child(format!("Found {count} matches in “{document}.”")),
+                    ),
+            )
+            .child(div().text_sm().truncate().child(format!("Find text: {query}")))
+            .child(
+                // The table is the section's scroll owner: the panel's height is
+                // fixed, so a long match list scrolls here rather than growing
+                // the window without bound.
+                div()
+                    .id("find-result-table")
+                    .w_full()
+                    .min_w_0()
+                    .max_h(rems(RESULT_TABLE_MAX_HEIGHT))
+                    .overflow_y_scroll()
+                    .text_size(px(font_size))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    // Upstream's table context menu is the Text Size menu; the
+                    // same three commands are also on the standard Text Size
+                    // menu items.
+                    .context_menu(move |menu, window, cx| {
+                        let bigger = stop.clone();
+                        let smaller = stop.clone();
+                        let reset = stop.clone();
+                        let size_menu = PopupMenu::build(window, cx, move |menu, _, _| {
+                            menu.item(PopupMenuItem::new("Bigger").on_click(move |_, _, cx| {
+                                bigger
+                                    .update(cx, |workspace, cx| {
+                                        workspace.step_find_result_font_size(true, cx);
+                                    })
+                                    .ok();
+                            }))
+                            .item(PopupMenuItem::new("Smaller").on_click(move |_, _, cx| {
+                                smaller
+                                    .update(cx, |workspace, cx| {
+                                        workspace.step_find_result_font_size(false, cx);
+                                    })
+                                    .ok();
+                            }))
+                            .separator()
+                            .item(PopupMenuItem::new("Reset to Default").on_click(
+                                move |_, _, cx| {
+                                    reset
+                                        .update(cx, |workspace, cx| {
+                                            workspace.reset_find_result_font_size(cx);
+                                        })
+                                        .ok();
+                                },
+                            ))
+                        });
+                        menu.item(PopupMenuItem::submenu("Text Size", size_menu))
+                    })
+                    .child(
+                        Table::new()
+                            .small()
+                            .child(TableHeader::new().child(header))
+                            .child(body),
+                    ),
+            )
             .into_any_element()
     }
 }
