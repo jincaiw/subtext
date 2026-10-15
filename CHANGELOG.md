@@ -78,6 +78,11 @@
 - **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
   `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
   （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
+- **`Text ▸ Surround Selection With ▸ Custom…`（⇧⌘L）**：文本菜单最后一个占位提示，
+  现在是上游那个 sheet —— *Surround with:* 下面 `Begin:` 与 `End:` 两个输入框
+  （`End` 的提示文字跟着 `Begin` 走），加一对 Cancel / OK。**end 留空表示「和 begin
+  一样」**，所以 `"` 打一次就得到 `"…"`；**begin 为空时 OK 置灰**。用过的那一对会记住，
+  下次打开就是它。
 
 **运行时填充的菜单**
 
@@ -121,6 +126,12 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
   现在分别按扩展字形簇、上游的行数规则与 UAX #29 词边界算，并把上游
   `StringCountingTests.swift` 的四组向量搬成测试。**`Words` 与上游仍有一处差异**
   （ICU 的分词带词典），已记账。
+- **五个内置包围命令包错了对象**：`Surround Selection With` 的 Single Quotes /
+  Double Quotes / Parentheses / Braces / Brackets 一直包的是**行**，而上游包的是
+  **选区**（`String.surround(in:begin:end:)`）。两个能看见的后果：在 `hello world`
+  里只选中 `world` 按 ⇧⌘9，原来得到 `(hello world)`，现在是 `hello (world)`；
+  没有选区只有一个光标时按 ⌘'，原来把整行包起来，现在是**在光标处插入一对引号**
+  并把光标留在两半中间 —— 那本来就是这个快捷键的意思。
 - **多标量字符的 Inspect Character 一打开就崩**：每个标量一行的展开状态是按标量序号
   取的，而选中时只建了 Block 名的那个向量，于是 `index out of bounds` 直接把进程
   abort。两个向量现在一起按标量数建好，取值也改成越界时当作收起。
@@ -178,16 +189,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**588** 项测试全部通过（v0.1.0 是 124 项）：
+**593** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 335 |
-| `subtext-app` | 216 |
+| `subtext-core` | 338 |
+| `subtext-app` | 218 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **588** |
+| **合计** | **593** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

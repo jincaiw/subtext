@@ -226,6 +226,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.15 | 文档窗口的状态栏与导航栏 | 上游两者都不在窗口这一层：状态栏属于内容列、导航栏属于每个分屏 | ✅ |
 | 8.16 | 文档检查器按上游重排 | 8.15 读窗口层次时发现检查器的行集是自编的；顺带查出三个计数（Characters / Lines / Words）算错 | ✅ |
 | 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
+| 8.18 | 自定义包围 + 五个内置包围的语义 | 文本菜单最后一个占位提示；做它的时候用上游 fixture 发现内置命令一直包的是**行**而不是**选区** | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1951,14 +1952,92 @@ deprecated 标志）。
 + 代理对 `D890 DC00` + `No Block` 禁用按钮 + 没有 Version 行）。
 行数 37,284 → 39,741（`unicode_tables.rs` 1903、`charinfo.rs` 1439、`workspace.rs` 5429）。
 
+### 8.18 自定义包围 —— 以及五个内置包围一直包错了对象 ✅
+
+`Text ▸ Surround Selection With ▸ Custom…`（⇧⌘L）是**文本菜单最后一个占位提示**，
+触发时在状态栏说「Custom surrounds are not implemented yet」。这一轮把它做出来，
+顺手发现**同菜单里那五个内置命令一直在包行，而上游包的是选区**。
+
+#### 上游的 sheet
+
+```swift
+@IBAction func surroundSelection(_ sender: Any?) {
+    self.window?.beginSheet {
+        CustomSurroundView(pair: self.customSurroundPair) { [weak self] pair in
+            self?.surroundSelections(begin: pair.begin, end: pair.end)
+            self?.customSurroundPair = pair
+        }
+        .scenePadding()
+    }
+}
+```
+
+`CustomSurroundView` 是三行东西：`Surround with:`（semibold）、
+`Begin:` 与 `End:` 两个 48pt 输入框（`End` 的 placeholder 是 `Begin` 的值），
+再加一对等宽按钮（Cancel / OK）。提交规则两条：
+
+- **begin 为空不是一对**（上游 `guard !begin.isEmpty else { return NSSound.beep() }`）；
+- **end 为空表示「和 begin 一样」**，于是 `"` 打一次就得到 `"…"`。
+
+SubText 的两处有意偏差：begin 为空时**把 OK 置灰**而不是让按钮按下去再响一声
+（同一条规则，多一个看得见的理由），`End` 的 placeholder **跟着 `Begin` 走**
+（上游是构造时传 `prompt:`，打开后就冻住了）。配对存在
+`Settings::custom_surround_begin/end`，对应上游的两个 `UserDefaults` 键。
+
+#### 顺带查出的真 bug：包围的是行，不是选区
+
+SubText 原来调用的是自己写的 `textops::surround_lines` —— 「把选中的**每一行**
+用前后缀包起来，空行跳过」。上游的 `surroundSelections(begin:end:)` 走的是
+`String.surround(in: selectedRanges, begin:end:)`，包的是**选区本身**。
+
+上游自己的 fixture 把这件事钉死了（`StringEditingTests.surround`）：
+
+```
+"foo\nbar\nbaz"  +  ranges [0..<3, 4..<4, 8..<11]  +  "<" ">"
+  →  strings         ["<foo>", "<>", "<baz>"]
+  →  applying(…)     "<foo>\n<>bar\n<baz>"
+```
+
+两个后果，都是用户能看见的：
+
+| 情形 | SubText 原来 | 上游 |
+| --- | --- | --- |
+| `hello world` 里只选中 `world`，按 ⇧⌘9 | `(hello world)` —— 整行被包 | `hello (world)` |
+| 没有选区、只有一个光标，按 ⌘' | 整行被包成 `'…'` | 在光标处插入 `''`，光标落在两半中间 |
+
+第二条尤其重要：`rangesForUserTextChange` 返回的是 `insertionRanges`，
+光标就是一个**空 range**，而空 range 和别的 range 一样处理 —— 所以那五个内置命令
+本来也是「打一对引号」的快捷键。新函数 `textops::surround` 就是照这个语义写的，
+`surround_lines` 与它的测试一并删掉（没有别的调用者，也没有别的上游对应物）。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 对话框有标题 | 上游的 sheet 没有标题（一个光秃秃的 `beginSheet { … }`）。GPUI 的 `Dialog` 要一个，用了 *Custom Surround* —— 与 §8.11 的 *Encoding List* 同一条。 |
+| begin 为空时按钮置灰而不是响一声 | 同一条规则，多一个看得见的理由。Enter 走的是对话框自己的动作而不是那个按钮，所以 `submit()` 里**再查一次**。 |
+| 记住的是一对字符串，不是每个文本视图一份 | 上游除了 `UserDefaults` 还在 `EditorTextView` 上留一份 `customSurroundPair`（每个文档窗口一份）。两者在提交时同时写、内容总是一样，所以 SubText 只留了持久化的那一份。 |
+
+验收：**5 条新测试**（593 = 588 + 5）——core 的 `surround_wraps_the_selection_not_the_line`
+（上游 fixture 的三种 range）、`surround_keeps_the_delimiters_off_a_multibyte_boundary`、
+`a_custom_surround_pair_can_be_anything`；app 的 `an_empty_beginning_is_not_a_pair`、
+`an_empty_end_means_the_same_as_the_beginning`。
+全工作区 **593** 项测试全绿、clippy 零自有警告、两个生成器都幂等、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活且 stdout/stderr 各 0 字节。
+**三种情形截了应用窗口核对**：sheet 打开（`Begin:`/`End:` 两个框、OK 因为 begin 为空而置灰）、
+提交后正文变成 `hello **world**`（**只包选区**，行模式的旧实现会得到 `**hello world**`）、
+重开 sheet（两个框带上次的 `**`，OK 可用），并核对了 `Settings.json` 里
+`custom_surround_begin/end` 都写成了 `**`。
+行数 39,741 → 40,087。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（588 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（593 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.17 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.18 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 

@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 39,741（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 40,087（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
 
 ---
 
@@ -163,8 +163,8 @@
 | 取消注释 | `toggle_comment` | ✅ |
 | 向右 / 向左缩进 | `shift_right` / `shift_left` | ✅ |
 | 缩进转空格 / 转制表符 | `convert_indentation_to_*` | ✅ |
-| 用引号 / 双引号 / 括号 / 花括号 / 方括号包围 | `surround` | ✅ 5 种 |
-| 自定义包围 | — | ⏳ |
+| 用引号 / 双引号 / 括号 / 花括号 / 方括号包围 | `surround` | ✅ 5 种，包的是**选区**（上游 `String.surround(in:begin:end:)`）；空选区会在光标处插一对 |
+| 自定义包围 | `surround_sheet` | ✅ 上游的 sheet：`Begin:` / `End:` 两个框（`End` 的提示跟着 `Begin`）、begin 为空时 OK 置灰、end 为空表示与 begin 相同；用过的一对记在设置里 |
 | 修剪行尾空白 | `trim_trailing_whitespace` | ✅ |
 | 上移 / 下移行 | `move_lines` | ✅ |
 | 按行升序排序 | `sort_lines` | ✅ |
@@ -187,7 +187,8 @@
 | 文件拖放 | `drop_files` | ✅ 11 个令牌 / 五种图片格式 |
 
 > **文本菜单是保真度最高的部分**：`subtext-core::textops` 里的文本操作全部实现，
-> 全是纯函数，全部有单元测试覆盖。菜单里只剩「自定义包围」一项仍是占位提示。
+> 全是纯函数，全部有单元测试覆盖。**菜单里已经没有占位提示了** ——
+> §8.18 做掉了最后一项（自定义包围）。
 
 ## 8. 查找菜单
 
@@ -298,10 +299,10 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 131 | 64% |
+| ✅ 完整实现 | 约 132 | 65% |
 | 🔁 等价实现（委托或改写） | 约 24 | 12% |
 | ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
-| ⏳ 未实现（菜单保留 + 提示） | 约 28 | 14% |
+| ⏳ 未实现（菜单保留 + 提示） | 约 27 | 13% |
 | **合计** | **203** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。

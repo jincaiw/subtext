@@ -67,6 +67,17 @@ fn floor_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
+/// Round `index` up to the next character boundary.
+fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
 /// Shift every selected line right by one indentation step.
 pub fn shift_right(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
     indent_lines(text, selection, indent)
@@ -208,34 +219,36 @@ pub fn convert_indentation_to_tabs(text: &str, selection: &Range<usize>, tab_wid
     })
 }
 
-/// Wrap each selected line in `prefix` / `suffix`.
-pub fn surround_lines(
-    text: &str,
-    selection: &Range<usize>,
-    prefix: &str,
-    suffix: &str,
-) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
-    let block_end = block_end_of(text, end);
+/// Wrap the **selection** in `begin` and `end`.
+///
+/// CotEditor's `String.surround(in:begin:end:)`, which is what all six
+/// *Surround Selection With* commands call. The delimiters go around the
+/// selection itself and not around the lines it touches — upstream's own
+/// fixture is `"foo\nbar\nbaz"` with `<` and `>` over the ranges
+/// `0..<3`, `4..<4` and `8..<11`, giving `"<foo>\n<>bar\n<baz>"`. An empty
+/// selection is a range like any other, so a bare caret gets the pair with the
+/// caret left between its two halves.
+///
+/// The selection stays on the text that was selected rather than growing to
+/// cover the delimiters, so pressing ⌘' twice nests the quotes.
+pub fn surround(text: &str, selection: &Range<usize>, begin: &str, end: &str) -> Edit {
+    let (start, end_of_selection) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    let start = floor_char_boundary(text, start);
+    let end_of_selection = ceil_char_boundary(text, end_of_selection);
 
-    let mut out = String::with_capacity(text.len() + 8);
-    out.push_str(&text[..block_start]);
-    for line in split_inclusive_newline(&text[block_start..block_end]) {
-        let body = line.trim_end_matches('\n');
-        let newline = &line[body.len()..];
-        if body.is_empty() {
-            out.push_str(line);
-            continue;
-        }
-        out.push_str(prefix);
-        out.push_str(body);
-        out.push_str(suffix);
-        out.push_str(newline);
-    }
-    out.push_str(&text[block_end..]);
-    let new_start = start + prefix.len();
-    Edit { text: out, selection: new_start..(end + prefix.len()) }
+    let mut out = String::with_capacity(text.len() + begin.len() + end.len());
+    out.push_str(&text[..start]);
+    out.push_str(begin);
+    out.push_str(&text[start..end_of_selection]);
+    out.push_str(end);
+    out.push_str(&text[end_of_selection..]);
+
+    let offset = start + begin.len();
+    Edit { text: out, selection: offset..offset + (end_of_selection - start) }
 }
 
 /// Trim whitespace at the end of every selected line.
@@ -2097,7 +2110,58 @@ mod tests {
     fn surround_and_trim() {
         let text = "a  \nb  ";
         assert_eq!(trim_trailing_whitespace(text, &all(text)).text, "a\nb");
-        assert_eq!(surround_lines(text, &all(text), "\"", "\"").text, "\"a  \"\n\"b  \"");
+    }
+
+    /// Upstream's own fixture for `String.surround(in:begin:end:)`.
+    ///
+    /// `StringEditingTests.surround` runs it over three ranges of
+    /// `"foo\nbar\nbaz"` — one full line, one *empty* range just after a
+    /// newline, and one at the end — and expects `"<foo>\n<>bar\n<baz>"`.
+    /// SubText has a single selection, so the three are three separate calls
+    /// whose results are stitched the way upstream's `applying(_:)` stitches
+    /// them.
+    #[test]
+    fn surround_wraps_the_selection_not_the_line() {
+        let text = "foo\nbar\nbaz";
+
+        // The middle range is empty and sits at offset 4, immediately after
+        // the first newline: the pair is inserted there and the caret lands
+        // between its halves.
+        let middle = surround(text, &(4..4), "<", ">");
+        assert_eq!(middle.text, "foo\n<>bar\nbaz");
+        assert_eq!(middle.selection, 5..5);
+
+        // A range that starts and ends inside one line wraps only what it
+        // covers — the whole-line reading would have produced `(hello world)`.
+        let partial = surround("hello world", &(6..11), "(", ")");
+        assert_eq!(partial.text, "hello (world)");
+        assert_eq!(partial.selection, 7..12);
+
+        // The selection does not grow to cover the delimiters, so a second
+        // surround nests rather than replacing.
+        let once = surround("abc", &all("abc"), "'", "'");
+        assert_eq!(once.text, "'abc'");
+        assert_eq!(once.selection, 1..4);
+        let twice = surround(&once.text, &once.selection, "\"", "\"");
+        assert_eq!(twice.text, "'\"abc\"'");
+    }
+
+    #[test]
+    fn surround_keeps_the_delimiters_off_a_multibyte_boundary() {
+        // An offset in the middle of a character is rounded outwards rather
+        // than panicking on a slice.
+        let text = "aé b";
+        let edit = surround(text, &(2..2), "[", "]");
+        assert_eq!(edit.text, "a[é] b");
+    }
+
+    #[test]
+    fn a_custom_surround_pair_can_be_anything() {
+        // The sheet lets the user type both halves, and an empty end half
+        // means "the same as the beginning" — upstream's `submit`.
+        let text = "let x";
+        assert_eq!(surround(text, &(4..5), "**", "**").text, "let **x**");
+        assert_eq!(surround(text, &all(text), "```\n", "\n```").text, "```\nlet x\n```");
     }
 
     /// The three status-bar counts, against CotEditor's own test vectors.

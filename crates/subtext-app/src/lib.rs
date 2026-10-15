@@ -49,6 +49,7 @@ pub mod settings_window;
 pub mod snippet_pane;
 pub mod snippets;
 pub mod sort_sheet;
+pub mod surround_sheet;
 pub mod workspace;
 
 use std::path::PathBuf;

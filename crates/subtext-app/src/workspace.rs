@@ -84,6 +84,7 @@ use crate::settings::{
 };
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
+use crate::surround_sheet::SurroundSheet;
 
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
@@ -1075,7 +1076,33 @@ impl Workspace {
         });
     }
 
-    /// Wrap every selected line in `open`/`close`.
+    /// The *Custom…* surround sheet, and the command it runs.    ///
+    /// CotEditor opens the sheet with the pair last used — `UserDefaults` under
+    /// `beginCustomSurroundString` / `endCustomSurroundString` — and wraps the
+    /// selection in whatever the sheet ends up holding. The pair is written
+    /// back here rather than by the sheet, so the setting and the edit are one
+    /// step from the workspace's point of view.
+    pub fn custom_surround(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        begin: &str,
+        end: &str,
+    ) {
+        self.settings.custom_surround_begin = begin.to_string();
+        self.settings.custom_surround_end = end.to_string();
+        let _ = self.settings.save();
+        self.surround(window, cx, begin, end);
+    }
+
+    /// Wrap the selection in `open`/`close` — CotEditor's *Surround Selection
+    /// With* commands, including the one the custom sheet drives.
+    ///
+    /// The delimiters go around the selection, not around the lines it touches:
+    /// upstream's `surroundSelections(begin:end:)` hands
+    /// `String.surround(in:begin:end:)` the selected *ranges*. With a bare
+    /// caret the selection is an empty range, so the pair is inserted and the
+    /// caret is left between its halves.
     pub fn surround(
         &mut self,
         window: &mut Window,
@@ -1085,7 +1112,7 @@ impl Workspace {
     ) {
         let (open, close) = (open.to_string(), close.to_string());
         self.text_op(window, cx, move |text, selection, _| {
-            textops::surround_lines(text, selection, &open, &close)
+            textops::surround(text, selection, &open, &close)
         });
     }
 
@@ -1113,6 +1140,35 @@ impl Workspace {
         let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
         let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
         SharedString::from(text[start..end].to_string())
+    }
+
+    /// The *Custom…* surround sheet.
+    ///
+    /// Upstream's sheet has no title — it is a bare `beginSheet { … }` — so
+    /// the title here is SubText's, named after the command that opens it. The
+    /// two fields are seeded from the pair last used.
+    pub fn surround_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = Workspace::weak(cx);
+        let begin = self.settings.custom_surround_begin.clone();
+        let end = self.settings.custom_surround_end.clone();
+        let sheet = cx.new(|cx| SurroundSheet::new(workspace, &begin, &end, window, cx));
+        window.open_dialog(cx, move |dialog, window, _| {
+            let submit = sheet.clone();
+            dialog
+                .title("Custom Surround")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 24.)
+                .child(sheet.clone())
+                // Enter and Escape reach the dialog's own actions, not the
+                // buttons the sheet draws, so the callbacks are installed here
+                // too. `submit` re-checks the pair, so confirming an empty
+                // begin field is a no-op rather than a surprise.
+                .on_ok(move |_, _, cx| {
+                    submit.update(cx, |sheet, cx| sheet.submit(cx));
+                    true
+                })
+        });
     }
 
     /// The *Sort Lines by Pattern* sheet.

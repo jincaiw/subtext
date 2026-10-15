@@ -720,6 +720,15 @@ pub struct Settings {
     /// The order is the user's, and it is the order that decides which item
     /// answers when two of them match the same file.
     pub file_drop: Vec<FileDropItem>,
+
+    /// The pair the last *Custom…* surround used.
+    ///
+    /// CotEditor keeps these in `UserDefaults` under `beginCustomSurroundString`
+    /// and `endCustomSurroundString`, and the sheet opens on them. Only the
+    /// strings are kept — the command itself is one-shot, so there is nothing
+    /// else to remember.
+    pub custom_surround_begin: String,
+    pub custom_surround_end: String,
 }
 
 impl Default for Settings {
@@ -780,6 +789,10 @@ impl Default for Settings {
             // fresh SubText drops a picture into Markdown as an image for the
             // same reason a fresh CotEditor does.
             file_drop: FileDropItem::defaults(),
+            // CotEditor has no default pair — the sheet opens on two empty
+            // fields the first time.
+            custom_surround_begin: String::new(),
+            custom_surround_end: String::new(),
         }
     }
 }

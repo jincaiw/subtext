@@ -254,7 +254,7 @@ impl Workspace {
             "SurroundSelectionWithParentheses" => self.surround(window, cx, "(", ")"),
             "SurroundSelectionWithBraces" => self.surround(window, cx, "{", "}"),
             "SurroundSelectionWithSquareBrackets" => self.surround(window, cx, "[", "]"),
-            "SurroundSelection" => self.notice("Custom surrounds are not implemented yet", cx),
+            "SurroundSelection" => self.surround_sheet(window, cx),
             "TrimTrailingWhitespace" => self.text_op(window, cx, |text, selection, _| {
                 textops::trim_trailing_whitespace(text, selection)
             }),
