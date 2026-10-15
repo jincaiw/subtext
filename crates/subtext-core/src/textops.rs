@@ -8,7 +8,9 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
+use crate::line_ending::line_ending_at;
 use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// A buffer replacement: the new text and where the selection lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1585,6 +1587,55 @@ pub fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
+/// Where the caret is, as CotEditor's status bar reports it: `(line, column,
+/// location)`.
+///
+/// Three numbers that do **not** share a base. That is upstream's shape rather
+/// than an accident of this port — `String+Counting.swift` gets them from three
+/// different functions, and they are easy to reconcile wrongly:
+///
+/// | count | base | unit |
+/// | --- | --- | --- |
+/// | `Location` | 0 | grapheme clusters from the start of the text |
+/// | `Line` | 1 | line endings wholly behind the caret |
+/// | `Column` | 0 | grapheme clusters from the start of its own line |
+///
+/// The unit is Swift's `Character`, an extended grapheme cluster, which is why
+/// a `\r\n` is one column wide and `🐱` is one too. `line_and_column` above
+/// counts `\n` bytes and scalars instead, so it answers a different question —
+/// it is the *Go to Line* dialog's, which parses a fuzzy line range and never
+/// asks for a column.
+///
+/// A line ending belongs to the line it **terminates**: a caret sitting on the
+/// `\r` of a `\r\n` is still on the line that `\r\n` ends, and only the
+/// position after the whole ending is on the next line. Upstream reaches that
+/// through Foundation's `getLineStart(_:end:contentsEnd:for:)`; this walks the
+/// endings itself.
+pub fn status_position(text: &str, offset: usize) -> (usize, usize, usize) {
+    let offset = floor_char_boundary(text, offset.min(text.len()));
+    let location = text[..offset].graphemes(true).count();
+
+    let mut line = 1;
+    let mut line_start = 0;
+    let mut cursor = 0;
+    while cursor < offset {
+        match line_ending_at(text, cursor) {
+            Some((_, len)) if cursor + len <= offset => {
+                line += 1;
+                cursor += len;
+                line_start = cursor;
+            }
+            // The caret is inside this ending, so the ending is not behind it:
+            // step over it for the scan, but leave the line alone.
+            Some((_, len)) => cursor += len,
+            None => cursor += text[cursor..].chars().next().map_or(1, char::len_utf8),
+        }
+    }
+
+    let column = text[line_start..offset].graphemes(true).count();
+    (line, column, location)
+}
+
 /// Byte offset of the start of 1-based `line`.
 pub fn offset_of_line(text: &str, line: usize) -> usize {
     if line <= 1 {
@@ -2047,6 +2098,73 @@ mod tests {
         let text = "a  \nb  ";
         assert_eq!(trim_trailing_whitespace(text, &all(text)).text, "a\nb");
         assert_eq!(surround_lines(text, &all(text), "\"", "\"").text, "\"a  \"\n\"b  \"");
+    }
+
+    /// The three status-bar counts, against CotEditor's own test vectors.
+    ///
+    /// Every expectation below is copied from `StringCountingTests.swift`
+    /// (`lineNumberAtLocation`, `lineNumberAtIndex`, `columnNumberAtIndex`) or
+    /// from `String+Counting.swift`'s definitions. They are worth pinning
+    /// because the three numbers have three different bases and a reader will
+    /// assume they agree unless told otherwise.
+    #[test]
+    fn the_status_position_has_three_different_bases() {
+        // `lineNumberAtLocation`: `"a\nb c\n\n"`, one-based, LF endings.
+        let lf = "a\nb c\n\n";
+        for (offset, line) in [(0, 1), (1, 1), (2, 2), (5, 2), (6, 3), (7, 4)] {
+            assert_eq!(status_position(lf, offset).0, line, "line at {offset}");
+        }
+
+        // The same, with a CRLF: the LF of the pair is still on the line the
+        // pair terminates, and only the position after it moves on.
+        let crlf = "a\r\nb";
+        for (offset, line) in [(0, 1), (1, 1), (2, 1), (3, 2), (4, 2)] {
+            assert_eq!(status_position(crlf, offset).0, line, "line at {offset}");
+        }
+
+        // `lineNumberAtIndex`: `"a\n\n b"`.
+        let blank = "a\n\n b";
+        for (offset, line) in [(0, 1), (1, 1), (2, 2), (3, 3)] {
+            assert_eq!(status_position(blank, offset).0, line, "line at {offset}");
+        }
+    }
+
+    /// `columnNumberAtIndex`: `"aaa \r\n🐱 "`.
+    ///
+    /// The offsets in upstream's test are Swift `Character` offsets, so they are
+    /// translated to byte offsets here — `\r\n` is one Character spanning two
+    /// bytes, and `🐱` is one spanning four. That translation *is* the point:
+    /// the unit is the grapheme cluster.
+    #[test]
+    fn the_status_column_counts_graphemes() {
+        let text = "aaa \r\n🐱 ";
+        // Character 3 is the space, 4 the CRLF, 5 the cat, 6 the last space.
+        for (offset, column) in [(3, 3), (4, 4), (6, 0), (10, 1), (11, 2)] {
+            assert_eq!(status_position(text, offset).1, column, "column at {offset}");
+        }
+
+        // …and `Location` is the same unit, from the start of the text.
+        assert_eq!(status_position(text, 0).2, 0);
+        assert_eq!(status_position(text, 3).2, 3, "three letters and a space");
+        assert_eq!(status_position(text, 6).2, 5, "the CRLF is one cluster");
+        assert_eq!(status_position(text, 11).2, 7, "…and the cat is another");
+    }
+
+    /// All six line endings, not just the two the status bar used to know.
+    ///
+    /// `line_and_column` counts `\n` bytes, so a document written with CR, NEL,
+    /// LS or PS reported line 1 for every position. This is the count the status
+    /// bar shows, so it has to know what the editor can write.
+    #[test]
+    fn every_line_ending_moves_the_line_number() {
+        for ending in ["\n", "\r", "\r\n", "\u{85}", "\u{2028}", "\u{2029}"] {
+            let text = format!("a{ending}b");
+            let after = 1 + ending.len();
+            assert_eq!(status_position(&text, 0).0, 1, "{ending:?} at the start");
+            assert_eq!(status_position(&text, 1).0, 1, "{ending:?} inside the ending");
+            assert_eq!(status_position(&text, after).0, 2, "{ending:?} behind us");
+            assert_eq!(status_position(&text, after + 1).0, 2, "{ending:?} at the end");
+        }
     }
 
     #[test]

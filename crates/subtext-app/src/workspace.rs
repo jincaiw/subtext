@@ -34,13 +34,13 @@ use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::input::InputEvent;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::{DialogClose, DialogFooter},
     h_flex, h_resizable,
     input::{Editor, Input, InputState},
     list::ListItem,
-    menu::{DropdownMenu as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     resizable_panel,
     tab::{Tab, TabBar},
     tree::{TreeEvent, TreeItem, TreeState, tree},
@@ -48,7 +48,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
+    Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px, rems,
@@ -3122,7 +3122,7 @@ impl Workspace {
 
         let rows: Vec<(&str, String)> = vec![
             ("File Name", model.display_name()),
-            ("File Size", format_size(count.encoded_bytes)),
+            ("File Size", format_size(count.encoded_bytes, true)),
             ("Encoding", model.encoding().name.to_string()),
             ("BOM", model.bom().to_string()),
             ("Line Endings", model.line_ending().to_string()),
@@ -3630,58 +3630,538 @@ impl Workspace {
         list.into_any_element()
     }
 
-    fn render_navigation_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let document = self.active_document();
-        let label = document
-            .map(|document| {
-                format!("{} — {}", document.syntax, document.document.line_ending())
+    /// The status bar's encoding picker.
+    ///
+    /// Upstream's `Picker` over `encodingManager.fileEncodings`, with the
+    /// document's own file encoding spliced to the top when the list lacks it —
+    /// the same rule the Format menu and the settings picker follow, because it
+    /// is the same list.
+    ///
+    /// Choosing one asks whether to convert or reinterpret
+    /// ([`ask_changing_encoding`](Self::ask_changing_encoding)); it does not
+    /// silently pick one. The menu items go through the same door.
+    fn render_encoding_picker(
+        &self,
+        document: DocumentId,
+        encoding: FileEncoding,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut items = FileEncoding::menu_items(&self.settings.encoding_list);
+        if !items.iter().flatten().any(|item| *item == encoding) {
+            items.insert(0, Some(encoding));
+            items.insert(1, None);
+        }
+        let workspace = cx.entity().downgrade();
+
+        Button::new("status-encoding")
+            .ghost()
+            .xsmall()
+            .label(encoding.name())
+            .accessibility_label("Text Encoding")
+            .tooltip("Text Encoding")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+                let mut menu = menu;
+                for item in items.iter().copied() {
+                    let Some(item) = item else {
+                        menu = menu.separator();
+                        continue;
+                    };
+                    let workspace = workspace.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(item.name())
+                            .checked(item == encoding)
+                            .on_click(move |_, window, cx| {
+                                workspace
+                                    .update(cx, |workspace, cx| {
+                                        workspace.ask_changing_encoding(document, item, window, cx);
+                                    })
+                                    .ok();
+                            }),
+                    );
+                }
+                menu
             })
-            .unwrap_or_else(|| "Plain Text".to_string());
-        h_flex()
-            .w_full()
-            .px_3()
-            .py_1()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(label))
+            .into_any_element()
     }
 
-    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let document = self.active_document();
-        let position = document
-            .map(|document| {
-                let state = document.editor().read(cx);
-                let offset = state.selected_range().start;
-                let text = state.value().to_string();
-                textops::line_and_column(&text, offset)
+    /// The status bar's line-ending picker.
+    ///
+    /// Upstream's `LineEndingPicker`: an unbordered popup whose selected title is
+    /// the abbreviation and whose items are the six endings. It is disabled with
+    /// the document, because changing the ending rewrites the buffer.
+    ///
+    /// Upstream titles the items with the abbreviation and puts the long name in
+    /// a tooltip; a GPUI menu item has no tooltip, so the description goes in
+    /// the label instead — the same compromise the Format ▸ Line Endings submenu
+    /// already makes.
+    fn render_line_ending_picker(
+        &self,
+        current: LineEnding,
+        editable: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let workspace = cx.entity().downgrade();
+
+        Button::new("status-line-ending")
+            .ghost()
+            .xsmall()
+            .label(current.abbreviation())
+            .disabled(!editable)
+            .accessibility_label("Line Endings")
+            .tooltip("Line Endings")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+                let mut menu = menu;
+                for ending in subtext_core::line_ending::ALL {
+                    let workspace = workspace.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(format!(
+                            "{} ({})",
+                            ending.description(),
+                            ending.abbreviation()
+                        ))
+                        .checked(ending == current)
+                        .on_click(move |_, window, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.set_line_ending(ending, window, cx)
+                                })
+                                .ok();
+                        }),
+                    );
+                }
+                menu
             })
-            .unwrap_or((1, 1));
-        let stale = self
-            .status
-            .as_ref()
-            .is_some_and(|status| status.at.elapsed() > STATUS_LIFETIME);
-        let message = if stale {
-            format!("Line {}, Column {}", position.0, position.1)
-        } else {
-            self.status.as_ref().map_or_else(
-                || format!("Line {}, Column {}", position.0, position.1),
-                |status| status.message.clone(),
-            )
+            .into_any_element()
+    }
+
+    /// Ask whether to convert or reinterpret, then do it.
+    ///
+    /// Upstream's `Document.askChangingEncoding`: when the document has no file
+    /// or holds no text there is nothing to lose, so it just changes; otherwise
+    /// it asks with an alert whose buttons are *Convert*, *Reinterpret* and
+    /// *Cancel*.
+    ///
+    /// SubText used to convert silently — from the menu as well as from the
+    /// status bar — but upstream's `changeEncoding(_:)` is one action behind
+    /// both entry points, and it always asks.
+    ///
+    /// **One deviation, recorded**: upstream warns about a lossy conversion in a
+    /// *second* sheet, whose only extra option is *Change Encoding* — that is,
+    /// "do it anyway". The warning is folded into this alert instead, so the
+    /// user sees it before choosing rather than after, and there is one surface
+    /// rather than two. The characters that cannot survive are the same either
+    /// way; the warning is `TextEncoding::encode`'s own error flag, which is what
+    /// the write path would hit.
+    pub fn ask_changing_encoding(
+        &mut self,
+        document: DocumentId,
+        encoding: FileEncoding,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.documents.iter().find(|open| open.id == document) else {
+            return;
         };
-        let count = self.find.matches.len();
+        let current = FileEncoding::of_document(open.document.encoding(), open.document.bom());
+        if current == encoding {
+            return;
+        }
+        // Nothing on disk and nothing typed: there is no text to convert and no
+        // interpretation to change, so upstream changes it without asking.
+        let nothing_to_lose = open.document.path().is_none() || open.document.text().is_empty();
+        if nothing_to_lose {
+            self.change_encoding(encoding, window, cx);
+            return;
+        }
+
+        let lossy = encoding.encoding.encode(open.document.text()).1;
+        let name = encoding.name();
+        let body = if lossy {
+            format!(
+                "The document contains characters incompatible with “{name}”. \
+                 Incompatible characters are either substituted or removed in saving. \
+                 Do you want to convert or reinterpret this document using “{name}”?"
+            )
+        } else {
+            format!("Do you want to convert or reinterpret this document using “{name}”?")
+        };
+
+        let workspace = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, _| {
+            let convert = workspace.clone();
+            let reinterpret = workspace.clone();
+            dialog
+                .title("Text encoding change")
+                .w(window.rem_size() * 26.)
+                .child(div().text_sm().child(body.clone()))
+                .footer(
+                    DialogFooter::new()
+                        // Escape and the dialog's close button both cancel, and
+                        // a dialog dismisses without a callback of its own.
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("encoding-reinterpret").label("Reinterpret").on_click(
+                                move |_, window, cx| {
+                                    reinterpret
+                                        .update(cx, |workspace, cx| {
+                                            workspace.reinterpret_encoding(
+                                                encoding.encoding,
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                        .ok();
+                                    window.close_dialog(cx);
+                                },
+                            ),
+                        )
+                        .child(
+                            Button::new("encoding-convert")
+                                .label("Convert")
+                                .primary()
+                                .on_click(move |_, window, cx| {
+                                    convert
+                                        .update(cx, |workspace, cx| {
+                                            workspace.change_encoding(encoding, window, cx);
+                                        })
+                                        .ok();
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
+                // Enter reaches the dialog's own confirm action; there is no
+                // separate one here, and the three buttons say what they do.
+                .on_ok(|_, _, _| false)
+        });
+    }
+
+    /// The navigation bar above one editor pane.
+    ///
+    /// Upstream's `EditorViewController` is itself a split view whose first item
+    /// is this bar, so every pane has its own: *Close Split Editor*, a rule, the
+    /// outline navigator, a spacer, and *Split Editor* with its orientation menu
+    /// on the context menu. The whole bar is 24 points tall on the window
+    /// background with a four-point inset.
+    ///
+    /// It used to be one bar at the bottom of the window showing the syntax and
+    /// the line ending, which is not what upstream's navigation bar is at all —
+    /// those two belong to the status bar's pickers.
+    fn render_navigation_bar(&self, pane: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(document) = self.active_document() else {
+            return div().into_any_element();
+        };
+        let can_close = document.pane_count() > 1;
+        let is_vertical = self.settings.split_view_vertical;
+
+        let (entries, selection) = self.nav_outline(cx);
+        // The two buttons are greyed the way upstream's are — by asking the same
+        // walk that the commands use, rather than by guessing from the index.
+        let can_previous = crate::outline::previous_item(&entries, &selection).is_some();
+        let can_next = crate::outline::next_item(&entries, &selection).is_some();
+
+        let workspace = cx.entity().downgrade();
+        let close = workspace.clone();
+        let split = workspace.clone();
+        let orientation = workspace.clone();
 
         h_flex()
             .w_full()
+            .h(rems(1.5))
+            .flex_shrink_0()
+            .gap_1()
+            .px_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .child(
+                Button::new("nav-close-split")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Close)
+                    .disabled(!can_close)
+                    .accessibility_label("Close Split Editor")
+                    .tooltip("Close split editor")
+                    .on_click(move |_, window, cx| {
+                        // Upstream sends the action from the bar's own text view
+                        // and the responder chain resolves it to *that* pane.
+                        // GPUI has no responder chain, so the pane is named
+                        // first and the command then acts on the active one.
+                        close
+                            .update(cx, |workspace, cx| {
+                                workspace.focus_pane(pane, window, cx);
+                                workspace.close_split_editor(window, cx);
+                            })
+                            .ok();
+                    }),
+            )
+            .when(can_close && !entries.is_empty(), |this| {
+                this.child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+            })
+            .when(!entries.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .gap_0p5()
+                        .child(
+                            Button::new("nav-outline-previous")
+                                .ghost()
+                                .xsmall()
+                                .icon(if is_vertical {
+                                    IconName::ChevronLeft
+                                } else {
+                                    IconName::ChevronUp
+                                })
+                                .disabled(!can_previous)
+                                .accessibility_label("Previous Outline Item")
+                                .tooltip("Jump to previous outline item")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.select_previous_outline_item(cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("nav-outline-next")
+                                .ghost()
+                                .xsmall()
+                                .icon(if is_vertical {
+                                    IconName::ChevronRight
+                                } else {
+                                    IconName::ChevronDown
+                                })
+                                .disabled(!can_next)
+                                .accessibility_label("Next Outline Item")
+                                .tooltip("Jump to next outline item")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.select_next_outline_item(cx)
+                                })),
+                        )
+                        .child(self.render_outline_menu(&entries, selection.clone(), cx)),
+                )
+            })
+            .child(div().flex_1())
+            .child(
+                Button::new("nav-split")
+                    .ghost()
+                    .xsmall()
+                    .icon(if is_vertical {
+                        IconName::SquareSplitVertical
+                    } else {
+                        IconName::SquareSplitHorizontal
+                    })
+                    .accessibility_label("Split Editor")
+                    .tooltip("Split editor")
+                    .on_click(move |_, window, cx| {
+                        split
+                            .update(cx, |workspace, cx| {
+                                workspace.focus_pane(pane, window, cx);
+                                workspace.open_split_editor(window, cx);
+                            })
+                            .ok();
+                    })
+                    // Upstream puts the orientation on the button's *context*
+                    // menu, so the click still splits. It rotates one symbol by
+                    // 90° to show which way; GPUI has no rotation, so the two
+                    // orientations get two symbols instead.
+                    .context_menu(move |menu, _window, _cx| {
+                        let orientation = orientation.clone();
+                        menu.item(
+                            PopupMenuItem::new(if is_vertical {
+                                "Stack Editors Horizontally"
+                            } else {
+                                "Stack Editors Vertically"
+                            })
+                            .on_click(move |_, _, cx| {
+                                orientation
+                                    .update(cx, |workspace, cx| {
+                                        workspace.toggle_split_orientation(cx);
+                                    })
+                                    .ok();
+                            }),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The outline menu in the navigation bar: every entry, jump on choose.
+    ///
+    /// Upstream's `OutlinePicker`, an AppKit popup it opens programmatically.
+    /// The label carries the entry's own indentation, which is what the picker
+    /// shows — the outline's titles are pre-indented by the extractor.
+    fn render_outline_menu(
+        &self,
+        entries: &[OutlineEntry],
+        selection: Range<usize>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let workspace = cx.entity().downgrade();
+        let current = crate::outline::index_of_item(entries, selection.start);
+        // The menu builder runs after this frame, so the rows are owned rather
+        // than borrowed from the entries.
+        let rows: Vec<(String, Range<usize>)> = entries
+            .iter()
+            .map(|entry| (entry.title.clone(), entry.range.clone()))
+            .collect();
+
+        Button::new("nav-outline-menu")
+            .ghost()
+            .xsmall()
+            .icon(IconName::List)
+            .accessibility_label("Outline Menu")
+            .tooltip("Outline Menu")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, _cx| {
+                let mut menu = menu;
+                for (index, (title, range)) in rows.iter().enumerate() {
+                    let workspace = workspace.clone();
+                    let range = range.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(title.clone())
+                            .checked(Some(index) == current)
+                            .on_click(move |_, _, cx| {
+                                workspace
+                                    .update(cx, |workspace, cx| {
+                                        workspace.set_selection(range.clone(), cx);
+                                    })
+                                    .ok();
+                            }),
+                    );
+                }
+                menu.max_h(window.rem_size() * 18.).scrollable(true)
+            })
+            .into_any_element()
+    }
+
+    /// The outline entries and the selection, for the navigation bar.
+    ///
+    /// Extracted rather than read from `outline_rows`: those are built while the
+    /// Outline inspector renders, and the navigation bar is there whether or not
+    /// the inspector is open. Upstream reads `syntaxController.outlineItems`,
+    /// which is likewise independent of the inspector.
+    fn nav_outline(&self, cx: &App) -> (Vec<OutlineEntry>, Range<usize>) {
+        let selection = self.active_selection(cx);
+        let Some(document) = self.active_document() else {
+            return (Vec::new(), selection);
+        };
+        let Some(syntax) = self.syntaxes.by_name(&document.syntax) else {
+            return (Vec::new(), selection);
+        };
+        let text = document.editor().read(cx).value().to_string();
+        (crate::outline::extract(&text, &syntax.outlines), selection)
+    }
+
+    /// The status bar, as upstream's `StatusBar` lays it out.
+    ///
+    /// `[not-editable badge] [counts] … [file size] │ [encoding] │ [line endings]`
+    ///
+    /// It belongs to the **content** column, not the window: upstream hangs it
+    /// off the content split item as a bottom-aligned accessory, so it stops at
+    /// the sidebar's edge while the sidebar and the inspector run the full
+    /// height of the window. It used to be a bar across the whole window here.
+    ///
+    /// The six *Status Bar* switches in the Window pane pick which of the six
+    /// counts show. Until this rewrite nothing read them, so they were six
+    /// switches that changed nothing — the same defect the byte-order-mark
+    /// switch had (see `docs/PLAN.md` §8.14).
+    fn render_status_bar(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(document) = self.active_document() else {
+            return div().into_any_element();
+        };
+        let encoding = FileEncoding::of_document(document.document.encoding(), document.document.bom());
+        let line_ending = document.document.line_ending();
+        let file_size = document.document.file_size();
+        let editable = self.settings.editor.editable;
+
+        let (text, selection) = {
+            let state = document.editor().read(cx);
+            (state.value().to_string(), state.selected_range())
+        };
+
+        let count = charinfo::CharacterCount::of(&text, encoding.encoding);
+        // Upstream shows `entire (selected)` while a selection is up, which is
+        // the whole reason the counts are worth a glance mid-edit.
+        let selected = (!selection.is_empty())
+            .then(|| {
+                let slice = text.get(selection.start..selection.end).unwrap_or_default();
+                charinfo::CharacterCount::of(slice, encoding.encoding)
+            });
+        let (line, column, location) = textops::status_position(&text, selection.start);
+
+        let window = self.settings.window;
+        let mut counts: Vec<(bool, &str, String)> = vec![
+            (window.show_status_bar_lines, "Lines", count.lines.to_string()),
+            (
+                window.show_status_bar_chars,
+                "Characters",
+                with_selection(count.characters, selected.as_ref().map(|s| s.characters)),
+            ),
+            (
+                window.show_status_bar_words,
+                "Words",
+                with_selection(count.words, selected.as_ref().map(|s| s.words)),
+            ),
+            (window.show_status_bar_location, "Location", location.to_string()),
+            (window.show_status_bar_line, "Line", line.to_string()),
+            (window.show_status_bar_column, "Column", column.to_string()),
+        ];
+        counts.retain(|(shown, _, _)| *shown);
+
+        // SubText's own transient notices share this row. Upstream has no such
+        // line — it uses an alert — so the notice *replaces* the counts for the
+        // four seconds it lives rather than adding a second lane, which keeps
+        // the layout identical to upstream's whenever nothing is being said.
+        let notice = self.status.as_ref().filter(|status| status.at.elapsed() <= STATUS_LIFETIME);
+
+        h_flex()
+            .w_full()
+            .flex_shrink_0()
+            .gap_2()
             .px_3()
             .py_1()
-            .gap_3()
+            .text_xs()
             .border_t_1()
             .border_color(cx.theme().border)
-            .child(div().text_xs().truncate().child(message))
-            .child(div().flex_1())
-            .when(count > 0, |this| {
-                this.child(div().text_xs().child(format!("{count} matches")))
+            .when(!editable, |this| {
+                this.child(
+                    // Upstream's `NotEditableBadge` is a `Label` with a help
+                    // tooltip. A disabled icon button is the closest thing that
+                    // can carry one, and it reads the same: an inert pencil.
+                    Button::new("status-not-editable")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::PenOff)
+                        .disabled(true)
+                        .accessibility_label("Not editable")
+                        .tooltip("The document is not editable."),
+                )
             })
+            .child(
+                h_flex()
+                    .gap_3()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(cx.theme().muted_foreground)
+                    .when_some(notice, |this, status| {
+                        this.child(div().truncate().child(status.message.clone()))
+                    })
+                    .when(notice.is_none(), |this| {
+                        this.children(
+                            counts
+                                .into_iter()
+                                .map(|(_, label, value)| div().child(format!("{label}: {value}"))),
+                        )
+                    }),
+            )
+            .child(div().flex_1())
+            .when_some(file_size, |this, size| {
+                this.child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format_size(size as usize, false)),
+                )
+            })
+            .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+            .child(self.render_encoding_picker(document.id, encoding, cx))
+            .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+            .child(self.render_line_ending_picker(line_ending, editable, cx))
+            .into_any_element()
     }
 
     /// The editor panes of the active document.
@@ -3724,7 +4204,7 @@ impl Workspace {
                 // the click that a drop begins with has already moved the focus
                 // — the same ordering CotEditor relies on.
                 let workspace = cx.entity().downgrade();
-                div()
+                v_flex()
                     .id(ElementId::NamedInteger("editor-pane".into(), (document_id.0 << 8) | pane as u64))
                     .flex_1()
                     .min_w_0()
@@ -3741,6 +4221,13 @@ impl Workspace {
                             })
                             .ok();
                     })
+                    // The navigation bar is per pane, not per window: upstream's
+                    // `EditorViewController` is a split view whose first item is
+                    // this bar, so each pane carries its own close and split
+                    // buttons and its own outline navigator.
+                    .when(self.settings.window.show_navigation_bar, |this| {
+                        this.child(self.render_navigation_bar(pane, cx))
+                    })
                     .child(
                         // `Editor`, not `Input`: the styled code editor, whose
                         // state carries line numbers, folding and the
@@ -3748,7 +4235,8 @@ impl Workspace {
                         Editor::new(&editor)
                             .bordered(false)
                             .p_2()
-                            .h_full()
+                            .flex_1()
+                            .min_h_0()
                             .font_family(font_family.clone())
                             .text_size(text_size)
                             .into_any_element(),
@@ -3873,19 +4361,51 @@ impl Workspace {
     }
 }
 
-/// Format a byte count the way CotEditor's inspector does.
-pub fn format_size(bytes: usize) -> String {
-    const UNITS: [&str; 4] = ["bytes", "KB", "MB", "GB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} {}", UNITS[0])
+/// A byte count as a file size, the way the platform's `ByteCountFormatStyle`
+/// does with `style: .file`.
+///
+/// Decimal units — 1 kB is 1000 bytes — and one decimal place below ten, none
+/// above, which is what `.formatted(.byteCount(style: .file))` produces.
+///
+/// `includes_actual_byte_count` appends the exact count in parentheses. That is
+/// what the *document inspector* shows; the status bar shows the same number
+/// without it.
+pub fn format_size(bytes: usize, includes_actual_byte_count: bool) -> String {
+    const UNITS: [(&str, f64); 4] = [("kB", 1e3), ("MB", 1e6), ("GB", 1e9), ("TB", 1e12)];
+    let value = bytes as f64;
+    let scaled = if value < 1e3 {
+        format!("{bytes} bytes")
     } else {
-        format!("{value:.1} {}", UNITS[unit])
+        let (unit, scale) = UNITS
+            .iter()
+            .rev()
+            .find(|(_, scale)| value >= *scale)
+            .copied()
+            .unwrap_or(("kB", 1e3));
+        let value = value / scale;
+        if value < 10.0 {
+            format!("{value:.1} {unit}")
+        } else {
+            format!("{value:.0} {unit}")
+        }
+    };
+
+    if includes_actual_byte_count {
+        format!("{scaled} ({bytes} bytes)")
+    } else {
+        scaled
+    }
+}
+
+/// `entire (selected)` while a selection is up.
+///
+/// Upstream's `EditorCounter.Count.formatted` — the parenthesised count is what
+/// makes the three counts worth glancing at mid-edit, and it appears only when
+/// something is actually selected.
+fn with_selection(entire: usize, selected: Option<usize>) -> String {
+    match selected {
+        Some(selected) if selected > 0 => format!("{entire} ({selected})"),
+        _ => entire.to_string(),
     }
 }
 
@@ -3951,7 +4471,23 @@ impl Render for Workspace {
                     .child(self.render_sidebar(cx)),
             );
         }
-        panels.push(resizable_panel().child(editor_area));
+        // The content column is the editor *and* the status bar: upstream hangs
+        // the bar off the content split item as a bottom-aligned accessory, so
+        // it spans the document and stops at the sidebar's edge, while the
+        // sidebar and the inspector run the full height of the window. A bar
+        // across the whole window would put it under them too, which is what
+        // this used to do.
+        panels.push(
+            resizable_panel().child(
+                v_flex()
+                    .h_full()
+                    .min_h_0()
+                    .child(editor_area)
+                    .when(self.settings.window.show_status_bar, |this| {
+                        this.child(self.render_status_bar(cx))
+                    }),
+            ),
+        );
         if inspector {
             panels.push(
                 resizable_panel()
@@ -4017,12 +4553,10 @@ impl Render for Workspace {
         // cannot take `flex_1()` itself.
         root = root.child(div().flex_1().min_h_0().child(group));
 
-        if self.settings.window.show_navigation_bar {
-            root = root.child(self.render_navigation_bar(cx));
-        }
-        if self.settings.window.show_status_bar {
-            root = root.child(self.render_status_bar(cx));
-        }
+        // No navigation bar and no status bar here: upstream puts the status bar
+        // inside the content column (above) and the navigation bar inside each
+        // editor pane (`render_editor_area`). A bar at this level would span the
+        // sidebar and the inspector as well, which neither of upstream's does.
         root
     }
 }

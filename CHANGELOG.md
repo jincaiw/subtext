@@ -37,6 +37,20 @@
   codec **加** 是否写字节序标记，选择器里因此有了 *Unicode (UTF-8) with BOM*
   （紧跟 UTF-8），列表的分隔符画成横线。新建文档带上所选编码的标记 ——
   包括 UTF-16 / UTF-32 本来就该有的那一个。
+- **窗口框架按上游的层次重排**：上游的 `WindowContentViewController` 是
+  「侧栏 / 内容 / 检查器」三栏，**状态栏挂在内容项上**、**导航栏挂在每个编辑分屏里**。
+  SubText 此前把两条栏都放在窗口底部，因此状态栏横跨侧栏与检查器、导航栏则是一条
+  与上游无关的「语法 — 换行符」文字。现在：
+  - 状态栏属于内容列，到侧栏边缘为止，内容是上游的那一行：不可编辑徽标 ·
+    Lines / Characters / Words / Location / Line / Column · 文件大小 · 编码选择器 ·
+    换行符选择器。六个计数各由一个开关控制（Window 面板的 *Status Bar* 一节），
+    有选区时显示 `entire (selected)`。
+  - 导航栏每个分屏一条：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 ·
+    分屏按钮（右键改方向）。关闭按钮在只有一个分屏时不可见，上一个/下一个的
+    箭头随分屏方向换（竖直分屏用左右箭头）。
+- **编码切换会问「转换还是重解释」**：`Format ▸ Text Encoding` 的菜单项与状态栏的
+  编码选择器现在走同一个动作，并且与上游一样先弹
+  *Convert* / *Reinterpret* / *Cancel* —— 文档没有文件或文本为空时直接改。
 
 **运行时填充的菜单**
 
@@ -69,6 +83,15 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 修复
 
+- **状态栏的六个开关没有代码读**：Window 面板 *Status Bar* 一节的
+  *Show lines / characters / words / location / line / column* 六项，此前改了没有任何
+  反应 —— 与上面那条 BOM 开关是同一类缺陷（界面在，行为不在）。状态栏按上游重写后
+  六个开关各自生效，关掉的项不再出现。
+- **状态位置量只认 `\n`**：`textops` 里算行列的函数数的是 `\n` 字节与标量，
+  用 CR / NEL / LS / PS 写的文档行号永远是 1。状态栏要的是上游
+  `StringCountingTests.swift` 那个问题（`Location` 0 基、`Line` 1 基、`Column` **0 基**，
+  单位是扩展字形簇），所以新写了 `textops::status_position`，把上游的三组向量逐条
+  搬成测试；原来那个函数留在原地服务 Go to Line。
 - **「保存 UTF-8 时加字节序标记」这个开关是死的，而且上游没有这个开关**：
   SubText 的 Edit 面板里有一个 *Add a byte-order mark when saving as UTF-8*，
   但新建文档一律写 `Bom::None`，打开它没有任何效果；而 CotEditor 的 Edit 面板只有
@@ -115,16 +138,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**559** 项测试全部通过（v0.1.0 是 124 项）：
+**562** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 306 |
+| `subtext-core` | 309 |
 | `subtext-app` | 216 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **559** |
+| **合计** | **562** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

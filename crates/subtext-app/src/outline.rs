@@ -637,7 +637,7 @@ pub fn next_item<'a>(
 /// CotEditor's `indexOfItem(at:)`. [`entry_at`] reads it directly and the two
 /// stepping functions step off it, so all three agree on which entry the caret
 /// is in — which is the whole reason they share it.
-fn index_of_item(entries: &[OutlineEntry], offset: usize) -> Option<usize> {
+pub fn index_of_item(entries: &[OutlineEntry], offset: usize) -> Option<usize> {
     entries
         .iter()
         .rposition(|entry| !entry.is_separator() && entry.range.start <= offset)

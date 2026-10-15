@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 35,202（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 35,865（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -145,9 +145,9 @@
 | 文稿检查器 | `show_inspector(Document)` | ✅ |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
 | 警告检查器 | `show_inspector(Warnings)` | ✅ |
-| 导航栏 | `update_window_options` | ✅ |
+| 导航栏 | `render_navigation_bar(pane)` | ✅ **每个编辑分屏一条**（上游 `EditorViewController` 的第一项）：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 · 分屏按钮（右键改方向）。只有一个分屏时关闭按钮不可见 |
 | 行号 | `update_editor_options` | ✅ |
-| 状态栏 | `update_window_options` | ✅ |
+| 状态栏 | `render_status_bar` | ✅ **属于内容列**（上游挂在内容项的 bottom accessory 上），不跨侧栏与检查器：不可编辑徽标 · Lines / Characters / Words / Location / Line / Column（各由一个开关控制，有选区时 `entire (selected)`）· 文件大小 · 编码选择器 · 换行符选择器 |
 | 下一个 / 上一个编辑器 | `next_tab(±)` | ✅ |
 | 分屏 / 关闭分屏 / 切换方向 | `open_split_editor` / `close_split_editor` / `toggle_split_orientation` | ✅ |
 | 全屏 | `toggle_fullscreen` | ✅ |

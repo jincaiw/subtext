@@ -154,6 +154,17 @@ impl Document {
         self.detection
     }
 
+    /// The size the file had when it was last read or written, or `None` for a
+    /// document that has never been saved.
+    ///
+    /// This is what the status bar shows. Upstream reads
+    /// `FileManager.attributesOfItem` and caches it the same way — the point of
+    /// the cache is that a status bar is redrawn on every keystroke and a
+    /// `stat` per frame is a syscall nobody asked for.
+    pub fn file_size(&self) -> Option<u64> {
+        self.saved_len
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
