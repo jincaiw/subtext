@@ -319,7 +319,7 @@ impl Workspace {
                 textops::url_decode(text, selection)
             }),
             "ShowSelectionInfo" => self.inspect_selection(cx),
-            "ToggleAdvancedCounter" => self.inspect_document(window, cx),
+            "ToggleAdvancedCounter" => self.advanced_counter(window, cx),
             "EditColorCode" => self.color_code_dialog(window, cx),
             "ShowSnippetEditor" => self.show_settings_pane(SettingsPane::Snippets, cx),
 

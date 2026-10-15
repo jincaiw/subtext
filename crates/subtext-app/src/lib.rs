@@ -32,6 +32,7 @@ pub mod actions;
 pub mod bridge;
 pub mod color_sheet;
 pub mod command_bar;
+pub mod count_panel;
 pub mod dialogs;
 pub mod dispatch;
 pub mod encoding_list_sheet;

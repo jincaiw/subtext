@@ -1200,7 +1200,7 @@ pub fn url_decode(text: &str, selection: &Range<usize>) -> Edit {
 /// Both halves of that are Unicode data SubText does not carry, so
 /// [`is_supported`](Self::is_supported) answers for the last three — see the
 /// note on [`normalize`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Normalization {
     /// Canonical decomposition.
     Nfd,

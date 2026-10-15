@@ -78,6 +78,14 @@
 - **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
   `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
   （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
+- **高级计数按上游重做**：`Text ▸ Advanced Character Count…` 原来是标题为
+  *Document Statistics* 的静态对话框（九行固定的数字），现在是上游那个活计数器 ——
+  先开一个 sheet 选选项（三个空白复选框 + *Unit* 菜单，选到 *Byte* 再给一个编码菜单，
+  不是字形簇时再给一个规范化开关与菜单），按 **Start** 后正文右上角浮出一颗胶囊，
+  显示计数（有选区就数选区，否则数整篇）并随打字自己更新；齿轮打开**同一份**选项面板，
+  右键可以 *Copy* 那个数字或 *Stop Count*。字节单位编不出来时显示红三角 + *failed*。
+  计数算法逐条照上游 `String.count(options:)`（忽略换行去 `\R`、忽略空白去
+  `[\t\p{Zs}]`、连续空白折成一个、再规范化、再按单位数）。
 - **`Text ▸ Surround Selection With ▸ Custom…`（⇧⌘L）**：文本菜单最后一个占位提示，
   现在是上游那个 sheet —— *Surround with:* 下面 `Begin:` 与 `End:` 两个输入框
   （`End` 的提示文字跟着 `Begin` 走），加一对 Cancel / OK。**end 留空表示「和 begin
@@ -189,16 +197,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**593** 项测试全部通过（v0.1.0 是 124 项）：
+**602** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 338 |
-| `subtext-app` | 218 |
+| `subtext-core` | 343 |
+| `subtext-app` | 222 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **593** |
+| **合计** | **602** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

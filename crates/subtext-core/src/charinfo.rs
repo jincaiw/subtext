@@ -6,7 +6,12 @@ use unicode_properties::UnicodeGeneralCategory;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::encoding::TextEncoding;
+use crate::textops::{self, Normalization};
 
 /// The Unicode **General_Category** of a scalar value.
 ///
@@ -1063,6 +1068,160 @@ fn count_words(text: &str) -> usize {
     text.split_word_bounds().filter(|word| word.chars().any(char::is_alphanumeric)).count()
 }
 
+// ---- the advanced character count ----------------------------------------
+
+/// What the *Advanced Character Count* counts.
+///
+/// CotEditor's `CharacterCountOptions.CharacterUnit`, and the four entries of
+/// its *Unit* menu in the same order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CharacterUnit {
+    GraphemeCluster,
+    UnicodeScalar,
+    Utf16,
+    Byte,
+}
+
+impl CharacterUnit {
+    /// Every unit, in upstream's `CaseIterable` order.
+    pub const ALL: [CharacterUnit; 4] = [
+        CharacterUnit::GraphemeCluster,
+        CharacterUnit::UnicodeScalar,
+        CharacterUnit::Utf16,
+        CharacterUnit::Byte,
+    ];
+
+    /// The name its menu shows.
+    pub fn label(self) -> &'static str {
+        match self {
+            CharacterUnit::GraphemeCluster => "Grapheme cluster",
+            CharacterUnit::UnicodeScalar => "Unicode scalar",
+            CharacterUnit::Utf16 => "UTF-16",
+            CharacterUnit::Byte => "Byte",
+        }
+    }
+
+    /// The sentence under the menu that says what the unit means.
+    pub fn description(self) -> &'static str {
+        match self {
+            CharacterUnit::GraphemeCluster => {
+                "Count in the intuitive way defined in Unicode. A character consisting of \
+                 multiple Unicode code points, such as emojis, is counted as one character."
+            }
+            CharacterUnit::UnicodeScalar => {
+                "Count Unicode code points. Same as counting UTF-32."
+            }
+            CharacterUnit::Utf16 => {
+                "Count Unicode code points but a surrogate pair as two characters."
+            }
+            CharacterUnit::Byte => {
+                "Count bytes of the text encoded with the specified encoding."
+            }
+        }
+    }
+}
+
+/// How to count, and what to count.
+///
+/// CotEditor's `CharacterCountOptions`. Each field is one control in its
+/// options panel, and the order of the transformations in [`Self::count`] is
+/// the order the checkboxes are stacked in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharacterCountOptions {
+    pub unit: CharacterUnit,
+    /// `None` is the *Normalization* checkbox being off. The form the user
+    /// picked is remembered separately, so turning the checkbox back on
+    /// restores it — which is why this is not just a `Normalization`.
+    pub normalization_form: Option<Normalization>,
+    pub ignores_newlines: bool,
+    pub ignores_whitespaces: bool,
+    pub treats_consecutive_whitespace_as_single: bool,
+    /// Only the byte unit reads this.
+    pub encoding: TextEncoding,
+}
+
+impl Default for CharacterCountOptions {
+    fn default() -> Self {
+        Self {
+            unit: CharacterUnit::GraphemeCluster,
+            normalization_form: None,
+            ignores_newlines: false,
+            ignores_whitespaces: false,
+            treats_consecutive_whitespace_as_single: false,
+            encoding: TextEncoding::UTF8,
+        }
+    }
+}
+
+/// `\R` — the line endings *Ignore line endings* takes out.
+///
+/// ICU's `\R`, which is what upstream's regex means by it: CRLF as one, then
+/// each of the others on its own. Note that this is a wider set than the six
+/// line endings a document can be *written* with — vertical tab and form feed
+/// are in it, and they are not line endings CotEditor's editor recognizes.
+static LINE_ENDINGS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\r\n|[\n\x0B\x0C\r\u{85}\u{2028}\u{2029}]").expect("valid pattern")
+});
+
+/// `[\t\p{Zs}]` — *Ignore whitespace*.
+///
+/// Space *separators* and the tab, and deliberately not the line endings: that
+/// is what makes the two checkboxes independent, and why collapsing runs is
+/// still meaningful with one of them on.
+static WHITESPACES: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\t\p{Zs}]").expect("valid pattern"));
+
+/// `\s{2,}` — the runs *Treat consecutive whitespace as one space* collapses.
+///
+/// ICU's `\s` is `[\t\n\f\r\p{Z}]`: it is *not* Rust's `\p{White_Space}`, which
+/// would also take the vertical tab and NEL. Written out so the two agree.
+static WHITESPACE_RUNS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\t\n\x0C\r\p{Z}]{2,}").expect("valid pattern"));
+
+impl CharacterCountOptions {
+    /// Count `text` the way these options describe.
+    ///
+    /// Upstream's `String.count(options:)`. `None` is the one failure it can
+    /// report: the text is not representable in [`Self::encoding`], which only
+    /// the byte unit can care about.
+    pub fn count(&self, text: &str) -> Option<usize> {
+        // Before any transformation, so an empty document counts as zero bytes
+        // rather than as a failure.
+        if text.is_empty() {
+            return Some(0);
+        }
+
+        let mut text = text.to_string();
+        if self.ignores_newlines {
+            text = LINE_ENDINGS.replace_all(&text, "").into_owned();
+        }
+        if self.ignores_whitespaces {
+            text = WHITESPACES.replace_all(&text, "").into_owned();
+        }
+        // The checkbox is disabled while both of the others are on, because
+        // there would be nothing left to collapse; the guard is repeated here
+        // so the rule holds whatever the panel does.
+        if self.treats_consecutive_whitespace_as_single
+            && !(self.ignores_newlines && self.ignores_whitespaces)
+        {
+            text = WHITESPACE_RUNS.replace_all(&text, " ").into_owned();
+        }
+        if let Some(form) = self.normalization_form {
+            text = textops::normalize(&text, &(0..text.len()), form).text;
+        }
+
+        match self.unit {
+            CharacterUnit::GraphemeCluster => Some(text.graphemes(true).count()),
+            CharacterUnit::UnicodeScalar => Some(text.chars().count()),
+            CharacterUnit::Utf16 => Some(text.chars().map(char::len_utf16).sum()),
+            CharacterUnit::Byte => {
+                let (bytes, had_errors) = self.encoding.encode(&text);
+                (!had_errors).then_some(bytes.len())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1435,5 +1594,142 @@ mod tests {
         assert_eq!(lines("a\u{85}b"), 2);
         assert_eq!(lines("a\u{2028}b"), 2);
         assert_eq!(lines("a\u{2029}b"), 2);
+    }
+
+    // ---- the vectors from upstream `AdvancedCountingTests.swift` ----------
+
+    #[test]
+    fn the_whitespace_options_narrow_the_count() {
+        let text = "aaa \t \u{1F431}\n\r\n c";
+        let count = |options: CharacterCountOptions| options.count(text).expect("countable");
+
+        // Eleven grapheme clusters to begin with: three letters, three
+        // whitespace characters, the cat, the two line endings and the space
+        // before the last letter.
+        assert_eq!(count(CharacterCountOptions::default()), 11);
+
+        let ignores_newlines =
+            CharacterCountOptions { ignores_newlines: true, ..Default::default() };
+        assert_eq!(count(ignores_newlines), 9);
+
+        let ignores_both = CharacterCountOptions {
+            ignores_newlines: true,
+            ignores_whitespaces: true,
+            ..Default::default()
+        };
+        assert_eq!(count(ignores_both), 5);
+
+        // Whitespace without newlines leaves the line endings in.
+        let ignores_whitespaces =
+            CharacterCountOptions { ignores_whitespaces: true, ..Default::default() };
+        assert_eq!(count(ignores_whitespaces), 7);
+
+        // Collapsing runs takes the three characters before the cat down to
+        // one *and* the four after it — the newline run and the space run are
+        // one run, because a newline is whitespace here.
+        let collapses = CharacterCountOptions {
+            treats_consecutive_whitespace_as_single: true,
+            ..Default::default()
+        };
+        assert_eq!(count(collapses), 7);
+
+        // Collapsing and dropping newlines agree on this text, because the run
+        // the newlines were part of collapses to the same single space.
+        let collapses_and_drops = CharacterCountOptions {
+            treats_consecutive_whitespace_as_single: true,
+            ignores_newlines: true,
+            ..Default::default()
+        };
+        assert_eq!(count(collapses_and_drops), 7);
+
+        // The two drops together leave nothing to collapse.
+        assert_eq!(count(ignores_both), 5);
+    }
+
+    #[test]
+    fn the_unit_changes_what_is_counted() {
+        let text = "aaa \t \u{1F431}\n\r\n c";
+        let count = |unit: CharacterUnit| {
+            CharacterCountOptions { unit, ..Default::default() }.count(text).expect("countable")
+        };
+        assert_eq!(count(CharacterUnit::GraphemeCluster), 11);
+        // The CRLF is two scalars where it was one cluster.
+        assert_eq!(count(CharacterUnit::UnicodeScalar), 12);
+        // …and the cat is two UTF-16 units where it was one scalar.
+        assert_eq!(count(CharacterUnit::Utf16), 13);
+    }
+
+    #[test]
+    fn normalization_is_applied_before_the_unit_is_read() {
+        // A decomposed "Ä": one grapheme cluster, two scalars.
+        let text = "A\u{308}";
+        let scalars = |form| {
+            CharacterCountOptions {
+                unit: CharacterUnit::UnicodeScalar,
+                normalization_form: form,
+                ..Default::default()
+            }
+            .count(text)
+            .expect("countable")
+        };
+        assert_eq!(scalars(None), 2);
+        assert_eq!(scalars(Some(Normalization::Nfc)), 1);
+        // The grapheme count does not move either way.
+        assert_eq!(
+            CharacterCountOptions::default().count(text).expect("countable"),
+            1
+        );
+    }
+
+    #[test]
+    fn the_byte_unit_can_fail() {
+        let text = "abc\u{72AC}\u{725B}";
+        let bytes = |encoding| {
+            CharacterCountOptions { unit: CharacterUnit::Byte, encoding, ..Default::default() }
+                .count(text)
+        };
+        assert_eq!(bytes(TextEncoding::UTF8), Some(9));
+        assert_eq!(
+            bytes(TextEncoding::from_identifier("shift_jis").unwrap()),
+            Some(7)
+        );
+        // The one failure the count can report: ASCII cannot spell these.
+        assert_eq!(bytes(TextEncoding::from_identifier("us-ascii").unwrap()), None);
+
+        // An empty document is zero bytes, not a failure.
+        assert_eq!(bytes(TextEncoding::from_identifier("us-ascii").unwrap()), None);
+        let empty = CharacterCountOptions {
+            unit: CharacterUnit::Byte,
+            encoding: TextEncoding::from_identifier("us-ascii").unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(empty.count(""), Some(0));
+    }
+
+    #[test]
+    fn the_line_endings_the_count_drops_are_icurs_r_not_the_editors_six() {
+        // `\R` also covers the vertical tab and the form feed, which no
+        // document can be *written* with but which a buffer can certainly hold.
+        let options = CharacterCountOptions { ignores_newlines: true, ..Default::default() };
+        for ending in ["\u{B}", "\u{C}", "\u{85}", "\u{2028}", "\u{2029}", "\r\n"] {
+            let text = format!("a{ending}b");
+            assert_eq!(options.count(&text), Some(2), "{ending:?} was not dropped");
+            // Without the option it is three, so the difference is the ending.
+            assert_eq!(
+                CharacterCountOptions::default().count(&text).expect("countable"),
+                3,
+                "{ending:?}"
+            );
+        }
+
+        // …while *Ignore whitespace* takes the tab and the space separators
+        // and leaves every line ending alone.
+        let spaces = CharacterCountOptions { ignores_whitespaces: true, ..Default::default() };
+        assert_eq!(spaces.count("a\tb"), Some(2));
+        assert_eq!(spaces.count("a\u{3000}b"), Some(2));
+        assert_eq!(spaces.count("a\u{A0}b"), Some(2));
+        // A newline is not a space separator, so it stays.
+        assert_eq!(spaces.count("a\nb"), Some(3));
+        assert_eq!(spaces.count("a\u{2028}b"), Some(3));
     }
 }

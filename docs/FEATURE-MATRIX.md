@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 40,087（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 41,117（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
 
 ---
 
@@ -180,7 +180,7 @@
 | URL 编码 / 解码 | `url_encode` / `url_decode` | ✅ |
 | Unicode 规范化 | `normalize_unicode` | ✅ 经 Text ▸ Unicode Normalizations 菜单（5 项 + 分隔符 + 2 项）；上游 7 种里 4 种可用，3 个 Apple 形态触发时在状态栏说明原因 |
 | 显示选区信息 | `inspect_selection` | ✅ 上游的 **popover**（锚在选中字符上方、点外面或 Escape 关、选区不是一个字符就不弹），内容按 `CharacterInspectorView` 重排：大字形 · 名字 · Code Point（含代理对与 deprecated 徽标）· Block（可切换 `Blocks.txt` 的名字）· Category · Version；多标量改成每个标量一个可折叠行。大字形不是衬线体，见缺口表 |
-| 高级计数 | `inspect_document` | ✅ 计数走 `charinfo::CharacterCount`：Characters 是扩展字形簇、Lines 按上游的行数规则、Words 按 UAX #29（与上游 ICU 的差别见缺口表） |
+| 高级计数 | `advanced_counter` | ✅ 上游的三件：**Start sheet**（三个空白复选框 + *Unit* / *Encoding* / *Normalization* 选项）→ **正文右上角的胶囊**（有选区数选区，否则数整篇；随打字更新）→ 齿轮 **popover** 里的同一份选项面板；右键 *Copy* / *Stop Count*。算法照上游 `String.count(options:)`：忽略换行去 `\R`、忽略空白去 `[\t\p{Zs}]`、连续空白折成一个、规范化、再按字形簇 / 标量 / UTF-16 / 字节数。规范化菜单只有 4 项、胶囊不能拖动，见缺口表 |
 | 编辑颜色代码 | `color_code_dialog` | ✅ 11 种记法 |
 | 插入片段（子菜单） | `menus::install` 按语法动态重建 | ✅ 无范围片段在前 + 按语法分节 |
 | 代码片段编辑器 | `show_settings_pane(Snippets)` | ✅ 两个页签 + 令牌插入菜单 |

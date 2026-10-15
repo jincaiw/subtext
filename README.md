@@ -39,7 +39,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 | 换行符 | LF / CRLF / CR / NEL / LS / PS 六种 |
 | 检查器 | 文稿信息（上游的四段：File / Text Settings / Count / Character）/ 大纲（可折叠 `Tree` + 子序列过滤）/ 警告 |
 | 侧栏 | 文件浏览器 / 文件夹查找 |
-| 面板 | 分屏编辑器、多重替换、按模式排序、编辑颜色代码、快速操作（⌘K）、代码片段、Inspect Character（锚定选区的 popover） |
+| 面板 | 分屏编辑器、多重替换、按模式排序、编辑颜色代码、快速操作（⌘K）、代码片段、Inspect Character（锚定选区的 popover）、高级计数（选项 sheet + 正文上的胶囊） |
 | 窗口框架 | 侧栏 / 内容 / 检查器三栏（分隔线可拖动、宽度记住），状态栏属于内容列，每个分屏带一条导航栏 |
 
 未实现的功能**不会从菜单里消失** —— 它们保留在菜单栏中，触发时在状态栏说明原因。
@@ -55,7 +55,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 593 项测试
+cargo test --workspace # 602 项测试
 ```
 
 要求 Rust 1.85+（edition 2024）。首次构建会编译 GPUI 全家桶，需要几分钟。

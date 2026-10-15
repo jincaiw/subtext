@@ -227,6 +227,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.16 | 文档检查器按上游重排 | 8.15 读窗口层次时发现检查器的行集是自编的；顺带查出三个计数（Characters / Lines / Words）算错 | ✅ |
 | 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
 | 8.18 | 自定义包围 + 五个内置包围的语义 | 文本菜单最后一个占位提示；做它的时候用上游 fixture 发现内置命令一直包的是**行**而不是**选区** | ✅ |
+| 8.19 | 高级计数重做成「选项 + 胶囊」 | 上游是带七个选项的活计数器（sheet → 胶囊 → 齿轮 popover），SubText 是一个静态对话框 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2030,14 +2031,73 @@ SubText 原来调用的是自己写的 `textops::surround_lines` —— 「把�
 `custom_surround_begin/end` 都写成了 `**`。
 行数 39,741 → 40,087。
 
+### 8.19 高级计数按上游重做成「选项 + 胶囊」 ✅
+
+`Text ▸ Advanced Character Count…` 在 SubText 里原来是一个**静态对话框**（标题
+*Document Statistics*，九行固定的数字），而它上游是一个**带选项的活计数器**。
+这一轮把它整个换掉。
+
+#### 上游的三个部件
+
+1. **一个 sheet**（`CharacterCountOptionsSheetView`）：一份选项面板 + 一对按钮，
+   确认按钮写的是 **Start**。
+2. **一颗胶囊**（`AdvancedCharacterCounterView`）：浮在正文右上角，
+   左边是计数、右边一个齿轮；齿轮打开 **popover**，里面是**同一份选项面板** ——
+   一边看数字一边调选项。右键菜单两项：*Copy*（复制那个数字）与 *Stop Count*。
+3. **一份选项面板**（`CharacterCountOptionsView`），三个 whitespace 复选框 +
+   *Unit* 菜单 +（选到 Byte 时）*Encoding* 菜单 +（不是字形簇时）*Normalization* 开关与菜单。
+
+计数本身是**派生的**：有选区数选区，没有就数整篇（上游 `counter.count`），
+所以打字时它自己就跟着走，不需要谁去通知它。
+
+#### 算法：`CharacterCountOptions::count`
+
+上游的 `String.count(options:)`，顺序就是面板上复选框的顺序：
+
+```
+空串 → 0（先于任何变换，所以空文档是 0 字节而不是「失败」）
+忽略换行 → 去掉 \R（\r\n | \n | \v | \f | \r | NEL | LS | PS）
+忽略空白 → 去掉 [\t\p{Zs}]（**不含换行**，这正是两个开关能分开的原因）
+连续空白算一个 → 把 [\t\n\f\r\p{Z}]{2,} 折成一个空格（两个忽略都开时这个开关是禁用的）
+规范化 → 按所选形式
+再按单位数：字形簇 / 标量 / UTF-16 / 字节（字节是唯一会失败的：编不出来就是 nil）
+```
+
+两个容易抄错的点：**ICU 的 `\s` 是 `[\t\n\f\r\p{Z}]`，不是 Rust 的 `\p{White_Space}`**
+（后者多算垂直制表与 NEL），以及 `\R` **比编辑器认得的六种换行符更宽**（多出 `\v` 与 `\f`）。
+两处都写成显式的字符类，并各有一条测试盯着。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 规范化菜单只有 4 项，上游 7 项 | NFKC Case-Fold 与两个 HFS+ 形态是 SubText 没有的 Unicode 数据，`normalize` 对它们是**拒绝而不是近似**。列出来会得到一个静默错误的计数，所以不列。Text ▸ Unicode Normalizations **菜单**仍然列全 7 项并说明那三项为什么不可用。 |
+| 胶囊不能拖动 | 上游的 `DraggableHostingView` 可以把它拖到任何地方；SubText 固定在正文右上角（也就是新开一颗时的位置）。 |
+| 没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
+
+验收：**9 条新测试**（602 = 593 + 9）——core 的
+`the_whitespace_options_narrow_the_count`（上游 `AdvancedCountingTests` 的六个期望）、
+`the_unit_changes_what_is_counted`、`normalization_is_applied_before_the_unit_is_read`、
+`the_byte_unit_can_fail`、`the_line_endings_the_count_drops_are_icurs_r_not_the_editors_six`；
+app 的 `the_byte_unit_is_spelled_out_and_the_rest_are_characters`、
+`the_count_is_grouped_like_the_platform_groups_it`、
+`the_normalization_menu_offers_only_the_forms_this_build_can_apply`、
+`every_unit_and_every_encoding_is_offered`。
+全工作区 **602** 项测试全绿、clippy 零自有警告、两个生成器都幂等、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活且 stdout/stderr 各 0 字节。
+**五种情形截了应用窗口核对**：Start sheet（三个复选框 + Unit 菜单 + 说明 + Cancel/Start）、
+胶囊数选区（`5 character(s)`）、切成 Byte（`5 bytes`）、选到 ASCII 编不出的日文
+（红三角 + `failed`）、齿轮 popover（同一份选项面板）。
+行数 40,087 → 41,117（`count_panel.rs` 508）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（593 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（602 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.18 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.19 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
@@ -2054,6 +2114,9 @@ SubText 原来调用的是自己写的 `textops::surround_lines` —— 「把�
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
+| 高级计数的胶囊不能拖动 | 上游的 `DraggableHostingView` 让用户把它拖到正文的任何地方，还能把它拖到窗口边上。SubText 固定在正文右上角 —— 也就是新开一颗时它出现的位置。 |
+| 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
+| 高级计数的规范化菜单只有 4 项 | 上游列 `standardForms`（5）+ `modifiedForms`（2）。其中 NFKC Case-Fold 与两个 HFS+ 形态是 SubText 没有的 Unicode 数据，`normalize` 对它们是拒绝而不是近似 —— 列出来只会让计数静默地错。Text ▸ Unicode Normalizations 的**菜单**仍然列全 7 项并说明原因。 |
 | Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
 | Inspect Character 没有「闪一下选中范围」 | 上游在弹 popover 前还会 `showFindIndicator(for: selectedRange)` 把选中范围闪一次。GPUI 没有那个 API。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |

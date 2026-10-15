@@ -20,11 +20,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use subtext_core::charinfo::{CharacterCountOptions, CharacterUnit};
 use subtext_core::encoding::{DetectionOptions, EncodingList, FileEncoding, TextEncoding};
 use subtext_core::filedrop::FileDropItem;
 use subtext_core::folderfind::FileScope;
 use subtext_core::line_ending::LineEnding;
 use subtext_core::snippets::Snippet;
+use subtext_core::textops::Normalization;
 
 /// Which pane of the settings window is showing.
 ///
@@ -729,6 +731,23 @@ pub struct Settings {
     /// else to remember.
     pub custom_surround_begin: String,
     pub custom_surround_end: String,
+
+    /// How the *Advanced Character Count* counts, and what it counts.
+    ///
+    /// CotEditor keeps all seven in `UserDefaults` under `count…` keys and its
+    /// options panel reads and writes them one for one; SubText keeps the same
+    /// seven, so the panel is a straight projection of them.
+    pub count_unit: CharacterUnit,
+    /// The *Normalization* checkbox. The form is kept beside it rather than
+    /// inside it, so turning the checkbox off and on again restores the form.
+    pub count_normalizes: bool,
+    pub count_normalization_form: Normalization,
+    pub count_ignores_newlines: bool,
+    pub count_ignores_whitespaces: bool,
+    pub count_treats_consecutive_whitespace_as_single: bool,
+    /// The encoding the byte unit reads, as an identifier — the same shape
+    /// [`Self::default_encoding`] uses.
+    pub count_encoding: String,
 }
 
 impl Default for Settings {
@@ -793,6 +812,14 @@ impl Default for Settings {
             // fields the first time.
             custom_surround_begin: String::new(),
             custom_surround_end: String::new(),
+            // CotEditor's own defaults for the seven count options.
+            count_unit: CharacterUnit::GraphemeCluster,
+            count_normalizes: false,
+            count_normalization_form: Normalization::Nfc,
+            count_ignores_newlines: false,
+            count_ignores_whitespaces: false,
+            count_treats_consecutive_whitespace_as_single: false,
+            count_encoding: "utf-8".to_string(),
         }
     }
 }
@@ -824,6 +851,27 @@ impl Settings {
         FileEncoding {
             encoding,
             with_utf8_bom: encoding == TextEncoding::UTF8 && self.edit.save_utf8_bom,
+        }
+    }
+
+    /// The advanced counter's options, as the seven settings describe them.
+    ///
+    /// Upstream's `UserDefaults.characterCountOptions`. The normalization form
+    /// is only passed on while the checkbox is on, which is what makes the
+    /// checkbox mean "do not normalize" rather than "normalize to the default
+    /// form" — the chosen form stays in the settings either way.
+    pub fn count_options(&self) -> CharacterCountOptions {
+        CharacterCountOptions {
+            unit: self.count_unit,
+            normalization_form: self
+                .count_normalizes
+                .then_some(self.count_normalization_form),
+            ignores_newlines: self.count_ignores_newlines,
+            ignores_whitespaces: self.count_ignores_whitespaces,
+            treats_consecutive_whitespace_as_single: self
+                .count_treats_consecutive_whitespace_as_single,
+            encoding: TextEncoding::from_identifier(&self.count_encoding)
+                .unwrap_or(TextEncoding::UTF8),
         }
     }
 

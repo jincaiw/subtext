@@ -45,6 +45,7 @@ use gpui_kit::component::{
     input::{Editor, Input, InputState},
     list::ListItem,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    popover::Popover,
     resizable_panel,
     tab::{Tab, TabBar},
     tree::{TreeEvent, TreeItem, TreeState, tree},
@@ -83,6 +84,7 @@ use crate::settings::{
     SettingsPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarPane,
 };
 use crate::settings_window::SettingsWindow;
+use crate::count_panel::{CountOptionsView, CountSheet};
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
 
@@ -402,6 +404,16 @@ pub struct Workspace {
     inspect_block_localized: Vec<bool>,
     /// Which of the popover's per-scalar rows are open.
     inspect_scalar_open: Vec<bool>,
+    /// The advanced counter's options panel, while it is up.
+    ///
+    /// Built once when the sheet opens and kept afterwards: the running
+    /// counter's gear shows the same entity, because a second one would be a
+    /// second set of selects to keep in step with the settings.
+    count_options: Option<Entity<CountOptionsView>>,
+    /// Whether the counter is running, which is what shows the capsule.
+    count_running: bool,
+    /// Whether the capsule's gear popover is open.
+    count_options_open: bool,
 }
 
 impl Workspace {
@@ -506,6 +518,9 @@ impl Workspace {
             inspect_character: None,
             inspect_block_localized: Vec::new(),
             inspect_scalar_open: Vec::new(),
+            count_options: None,
+            count_running: false,
+            count_options_open: false,
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -2948,41 +2963,194 @@ impl Workspace {
         rows.into_any_element()
     }
 
-    /// The advanced character counter, which CotEditor puts behind ⌥⌘C.
-    pub fn inspect_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = self.active_text(cx) else {
+    /// `Text ▸ Advanced Character Count…` — upstream's `toggleAdvancedCounter:`.
+    ///
+    /// A toggle: while the counter is running the command stops it, which is
+    /// what upstream's `dismissAdvancedCharacterCounter` does. It is the same
+    /// command the capsule's *Stop Count* runs.
+    pub fn advanced_counter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.count_running {
+            self.stop_advanced_count(cx);
             return;
-        };
-        let encoding = self
-            .documents
-            .get(self.active)
-            .map_or(TextEncoding::UTF8, |document| document.document.encoding());
-        let count = charinfo::CharacterCount::of(&text, encoding);
-        let rows = vec![
-            ("Characters", count.characters.to_string()),
-            ("Characters (no newlines)", count.characters_without_newlines.to_string()),
-            ("Unicode Scalars", count.unicode_scalars.to_string()),
-            ("UTF-16 Units", count.utf16_units.to_string()),
-            ("UTF-8 Bytes", count.utf8_bytes.to_string()),
-            ("Bytes (encoded)", count.encoded_bytes.to_string()),
-            ("Lines", count.lines.to_string()),
-            ("Words", count.words.to_string()),
-            ("Paragraphs", count.paragraphs.to_string()),
-        ];
+        }
+        self.advanced_counter_sheet(window, cx);
+    }
+
+    /// The sheet that starts the counter — upstream's `CharacterCountOptionsSheetView`.
+    ///
+    /// Upstream's menu item has no key equivalent, so there is nothing to bind.
+    fn advanced_counter_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = Workspace::weak(cx);
+        // The panel is built here and kept: the running counter shows the same
+        // entity behind its gear, and two of them would be two sets of selects
+        // to keep in step.
+        let options =
+            cx.new(|cx| CountOptionsView::new(workspace.clone(), &self.settings, window, cx));
+        self.count_options = Some(options.clone());
+        let sheet = cx.new(|cx| CountSheet::new(workspace, options, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
-            let mut body = v_flex().gap_1().p_1();
-            for (label, value) in &rows {
-                body = body.child(
-                    h_flex()
-                        .gap_3()
-                        .justify_between()
-                        .child(div().text_xs().child(label.to_string()))
-                        .child(div().text_xs().child(value.clone())),
-                );
-            }
-            // `Dialog::w` takes pixels; scale by hand, as above.
-            dialog.title("Document Statistics").w(window.rem_size() * 22.).child(body)
+            let submit = sheet.clone();
+            dialog
+                .title("Advanced Character Count")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 30.)
+                .child(sheet.clone())
+                .on_ok(move |_, window, cx| {
+                    submit.update(cx, |sheet, cx| sheet.submit(window, cx));
+                    true
+                })
         });
+    }
+
+    /// Start counting, which is what the sheet's *Start* button does.
+    pub fn start_advanced_count(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.count_running = true;
+        cx.notify();
+    }
+
+    /// Stop counting, and forget the options panel with it.
+    pub fn stop_advanced_count(&mut self, cx: &mut Context<Self>) {
+        self.count_running = false;
+        self.count_options = None;
+        self.count_options_open = false;
+        cx.notify();
+    }
+
+    /// The running counter's capsule.
+    ///
+    /// `None` while the counter is stopped. Upstream floats it over the text at
+    /// the top-right and lets the user drag it anywhere; SubText pins it there
+    /// and does not drag — see the gap table.
+    fn render_count_capsule(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.count_running {
+            return None;
+        }
+        let options = self.settings.count_options();
+        let (text, selection) = {
+            let document = self.active_document()?;
+            let state = document.editor().read(cx);
+            (state.value().to_string(), state.selected_range())
+        };
+        // Upstream counts the selection while there is one and the whole
+        // document otherwise, which is what makes the capsule useful while
+        // editing rather than only after.
+        let count = if selection.is_empty() {
+            options.count(&text)
+        } else {
+            text.get(selection).and_then(|selected| options.count(selected))
+        };
+        let (number, suffix) = crate::count_panel::count_parts(count, options.unit);
+
+        let mut row = h_flex().items_center().gap_2();
+        if count.is_none() {
+            // Upstream's "failed" is drawn with a filled warning triangle.
+            row = row.child(
+                Icon::new(IconName::TriangleAlert)
+                    .xsmall()
+                    .text_color(cx.theme().danger),
+            );
+        }
+        row = row
+            .when(!number.is_empty(), |this| {
+                this.child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(number),
+                )
+            })
+            .child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(suffix),
+            );
+
+        // The gear opens the same options panel the sheet showed, so the count
+        // can be adjusted while it is watched.
+        if let Some(options_view) = self.count_options.clone() {
+            row = row.child(
+                Popover::new("count-options")
+                    .open(self.count_options_open)
+                    .on_open_change({
+                        let workspace = cx.entity().downgrade();
+                        move |open, _, cx| {
+                            let open = *open;
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.count_options_open = open;
+                                    cx.notify();
+                                })
+                                .ok();
+                        }
+                    })
+                    .trigger(
+                        Button::new("count-options-trigger")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Settings)
+                            .accessibility_label("Show options")
+                            .tooltip("Show options"),
+                    )
+                    .content(move |_, _, _| {
+                        div().p_3().child(options_view.clone()).into_any_element()
+                    }),
+            );
+        }
+
+        let capsule = h_flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_1()
+            .rounded_full()
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
+            .shadow_md()
+            .child(row)
+            // Upstream's context menu: the number, then the way out. The copy
+            // is the bare count, not the sentence around it.
+            .context_menu({
+                let count = count.map(crate::count_panel::grouped_count);
+                let stop = cx.entity().downgrade();
+                move |menu, _, _| {
+                    let menu = match &count {
+                        Some(number) => menu
+                            .item(PopupMenuItem::new("Copy").on_click({
+                                let number = number.clone();
+                                move |_, window, cx| {
+                                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                                        number.clone(),
+                                    ));
+                                    let _ = window;
+                                }
+                            }))
+                            .separator(),
+                        None => menu,
+                    };
+                    menu.item(PopupMenuItem::new("Stop Count").on_click({
+                        let workspace = stop.clone();
+                        move |_, _, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.stop_advanced_count(cx);
+                                })
+                                .ok();
+                        }
+                    }))
+                }
+            })
+            .into_any_element();
+
+        Some(
+            div()
+                .absolute()
+                .top(rems(0.5))
+                .right(rems(0.5))
+                .child(capsule)
+                .into_any_element(),
+        )
     }
 
     // ---- windows ---------------------------------------------------------
@@ -5101,15 +5269,23 @@ impl Render for Workspace {
         // sidebar and the inspector run the full height of the window. A bar
         // across the whole window would put it under them too, which is what
         // this used to do.
+        // The advanced counter's capsule floats over the text, which is where
+        // upstream puts it — a `DraggableHostingView` pinned to the top-right
+        // of the editor, over the text rather than beside it. `relative()` is
+        // what makes the `absolute()` capsule inside it measure against this
+        // column rather than against the window.
+        let count_capsule = self.render_count_capsule(cx);
         panels.push(
             resizable_panel().child(
                 v_flex()
+                    .relative()
                     .h_full()
                     .min_h_0()
                     .child(editor_area)
                     .when(self.settings.window.show_status_bar, |this| {
                         this.child(self.render_status_bar(cx))
-                    }),
+                    })
+                    .children(count_capsule),
             ),
         );
         if inspector {
