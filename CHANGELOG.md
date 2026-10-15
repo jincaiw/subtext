@@ -78,6 +78,11 @@
 - **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
   `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
   （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
+- **补全（`Edit ▸ Complete`，⌥⎋）**：此前是占位提示，现在是上游那套 ——
+  在光标处的词上按下，弹出候选列表（文档里以它开头的词 + 语法 `Completion.json` 里
+  以它开头的词），↑↓ 选、Enter/Tab 插入、Esc 或左右方向键取消，继续打字会重新过滤。
+  词里带括号的（`foo()`）插完光标停在括号中间。Mode 面板的
+  *Words in document* / *Words defined in syntax* 两个开关**第一次真的生效**。
 - **高级计数按上游重做**：`Text ▸ Advanced Character Count…` 原来是标题为
   *Document Statistics* 的静态对话框（九行固定的数字），现在是上游那个活计数器 ——
   先开一个 sheet 选选项（三个空白复选框 + *Unit* 菜单，选到 *Byte* 再给一个编码菜单，
@@ -134,6 +139,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
   现在分别按扩展字形簇、上游的行数规则与 UAX #29 词边界算，并把上游
   `StringCountingTests.swift` 的四组向量搬成测试。**`Words` 与上游仍有一处差异**
   （ICU 的分词带词典），已记账。
+- **三个快捷键在生成菜单表时被 base64 吃掉了**：storyboard 里凡是**控制字符**做键位
+  的地方（Interface Builder 不能把控制字符写成 XML 属性），存的是
+  `<string key="keyEquivalent" base64-UTF8="YES">`。提取时没解这层，于是
+  **Edit ▸ Delete（⌘⌫）**、**Text ▸ Delete Line（⇧⌘⌫）** 与
+  **Edit ▸ Complete（⌥⎋）** 三条键位读成了空串，快捷键表一直少三条。
+  `Delete Line` 最刺眼 —— 命令本身早就能用，只是快捷键丢了。生成器现在会解这两个
+  控制字符，快捷键表从 72 条变成 **75 条**。
+- **`Edit ▸ Delete` 此前只是弹一句提示**：它绑的是「Handled by the text engine」，
+  而 AppKit 的文本视图并不绑定 ⌘⌫，所以那条快捷键等于没有。上游的 `delete:` 是
+  「删选区，否则删光标前一个字符」，现在照做（单位是扩展字形簇，`👍🏻` 一次删干净）。
 - **五个内置包围命令包错了对象**：`Surround Selection With` 的 Single Quotes /
   Double Quotes / Parentheses / Braces / Brackets 一直包的是**行**，而上游包的是
   **选区**（`String.surround(in:begin:end:)`）。两个能看见的后果：在 `hello world`
@@ -197,16 +212,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**602** 项测试全部通过（v0.1.0 是 124 项）：
+**614** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 343 |
+| `subtext-core` | 355 |
 | `subtext-app` | 222 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **602** |
+| **合计** | **614** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
@@ -220,7 +235,7 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 **菜单与快捷键**
 
 - 完整的应用菜单栏：258 个菜单项、28 个顶层菜单，结构与 CotEditor 逐项一致。
-- 72 条快捷键，键位与 CotEditor 一致（`secondary` 在 macOS 上是 ⌘，
+- 75 条快捷键，键位与 CotEditor 一致（`secondary` 在 macOS 上是 ⌘，
   在 Windows / Linux 上是 Ctrl）。
 - 182 个类型化动作，分 10 个命名空间。
 - `tools/generate_menu.py`：从 `resources/menu.json` 生成 `menu.rs` 与 `keymap.rs`，

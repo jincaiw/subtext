@@ -9,6 +9,7 @@
 
 pub mod charinfo;
 pub mod colorcode;
+pub mod completion;
 pub mod document;
 pub mod encoding;
 pub mod fileattrs;
@@ -26,6 +27,7 @@ pub mod unicode_tables;
 
 pub use charinfo::{CharacterCount, CharacterInfo, CharacterReport, Count, GeneralCategory, ScalarInfo};
 pub use colorcode::{Color, ColorCodeType};
+pub use completion::{CompletionSources, candidates, partial_word_range, should_complete_automatically};
 pub use document::{Document, DocumentError, FileStatus};
 pub use encoding::{Bom, DecodedFile, Detection, FileEncoding, TextEncoding};
 pub use fileattrs::{FileAttributes, FilePermissions, format_timestamp};

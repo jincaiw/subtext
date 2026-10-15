@@ -64,6 +64,8 @@ pub fn default_bindings() -> Vec<KeyBinding> {
     KeyBinding::new("secondary-v", actions::edit::Paste, None),
     // Edit > Paste Exactly
     KeyBinding::new("alt-secondary-v", actions::edit::PasteAsIs, None),
+    // Edit > Delete
+    KeyBinding::new("secondary-backspace", actions::edit::Delete, None),
     // Edit > Select > Select All
     KeyBinding::new("secondary-a", actions::edit::SelectAll, None),
     // Edit > Select > Select Line
@@ -76,6 +78,8 @@ pub fn default_bindings() -> Vec<KeyBinding> {
     KeyBinding::new("ctrl-shift-down", actions::edit::SelectColumnDown, None),
     // Edit > Select > Split Selection by Lines
     KeyBinding::new("ctrl-shift-l", actions::edit::SplitSelectionByLines, None),
+    // Edit > Complete
+    KeyBinding::new("alt-escape", actions::edit::Complete, None),
     // Edit > Insert Backslash
     KeyBinding::new("secondary-¥", actions::edit::InputBackSlash, None),
     // Edit > Insert Yen Mark
@@ -132,6 +136,8 @@ pub fn default_bindings() -> Vec<KeyBinding> {
     KeyBinding::new("ctrl-secondary-down", actions::text::MoveLineDown, None),
     // Text > Lines > Duplicate Line
     KeyBinding::new("shift-secondary-d", actions::text::DuplicateLine, None),
+    // Text > Lines > Delete Line
+    KeyBinding::new("shift-secondary-backspace", actions::text::DeleteLine, None),
     // Text > Lines > Join Lines
     KeyBinding::new("shift-secondary-j", actions::text::JoinLines, None),
     // Text > Inspect Character
@@ -207,12 +213,14 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
     ("Edit > Copy as Rich Text", "⇧⌘C", "shift command", "C", "shift-secondary-c"),
     ("Edit > Paste", "⌘V", "command", "v", "secondary-v"),
     ("Edit > Paste Exactly", "⌥⌘V", "option command", "v", "alt-secondary-v"),
+    ("Edit > Delete", "⌘⌫", "command", "⌫", "secondary-backspace"),
     ("Edit > Select > Select All", "⌘A", "command", "a", "secondary-a"),
     ("Edit > Select > Select Line", "⇧⌘A", "shift command", "A", "shift-secondary-a"),
     ("Edit > Select > Select Word", "⌘D", "command", "d", "secondary-d"),
     ("Edit > Select > Select Column Up", "⌃⇧↑", "control shift", "↑", "ctrl-shift-up"),
     ("Edit > Select > Select Column Down", "⌃⇧↓", "control shift", "↓", "ctrl-shift-down"),
     ("Edit > Select > Split Selection by Lines", "⌃⇧L", "control shift", "L", "ctrl-shift-l"),
+    ("Edit > Complete", "⌥⎋", "option", "⎋", "alt-escape"),
     ("Edit > Insert Backslash", "⌘¥", "command", "¥", "secondary-¥"),
     ("Edit > Insert Yen Mark", "⌘Y", "command", "y", "secondary-y"),
     ("Edit > Spelling and Grammar > Show Spelling and Grammar", "⇧⌘;", "shift command", ":", "shift-secondary-;"),
@@ -241,6 +249,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
     ("Text > Lines > Move Up", "⌃⌘↑", "control command", "↑", "ctrl-secondary-up"),
     ("Text > Lines > Move Down", "⌃⌘↓", "control command", "↓", "ctrl-secondary-down"),
     ("Text > Lines > Duplicate Line", "⇧⌘D", "shift command", "D", "shift-secondary-d"),
+    ("Text > Lines > Delete Line", "⇧⌘⌫", "shift command", "⌫", "shift-secondary-backspace"),
     ("Text > Lines > Join Lines", "⇧⌘J", "shift command", "J", "shift-secondary-j"),
     ("Text > Inspect Character", "⌥⌘I", "option command", "i", "alt-secondary-i"),
     ("Text > Edit Color Code…", "⌃⌘H", "control command", "h", "ctrl-secondary-h"),
@@ -279,7 +288,7 @@ mod tests {
     /// rather than at the first keypress. Building the table is the test.
     #[test]
     fn every_binding_parses() {
-        assert_eq!(default_bindings().len(), 72);
+        assert_eq!(default_bindings().len(), 75);
     }
 
     /// Two commands on one keystroke is a bug unless it is CotEditor's bug.

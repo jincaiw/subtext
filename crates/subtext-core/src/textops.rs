@@ -427,6 +427,43 @@ pub fn duplicate_lines(text: &str, selection: &Range<usize>) -> Edit {
     Edit { text: out, selection: new_start..new_end }
 }
 
+/// Delete the selection, or the character before the caret when there is none.
+///
+/// CotEditor's `Edit ▸ Delete`, which is `NSTextView.delete:` behind ⌘⌫. That
+/// action deletes backwards, so the shortcut does what ⌫ does — the menu's key
+/// equivalent wins over AppKit's own `deleteToBeginningOfLine:`, and this is
+/// the shortcut the menu actually shows.
+///
+/// "Character" is one extended grapheme cluster, so ⌘⌫ after `👍🏻` takes the
+/// whole thing rather than half of it.
+pub fn delete_backward(text: &str, selection: &Range<usize>) -> Edit {
+    let (start, end) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    let start = floor_char_boundary(text, start);
+    let end = ceil_char_boundary(text, end);
+
+    // A selection is deleted outright.
+    if start < end {
+        let mut out = String::with_capacity(text.len());
+        out.push_str(&text[..start]);
+        out.push_str(&text[end..]);
+        return Edit { text: out, selection: start..start };
+    }
+
+    // A bare caret deletes the character before it, and does nothing at the
+    // start of the document.
+    let Some(previous) = text[..start].grapheme_indices(true).next_back() else {
+        return Edit::unchanged(text.to_string(), selection.clone());
+    };
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..previous.0]);
+    out.push_str(&text[start..]);
+    Edit { text: out, selection: previous.0..previous.0 }
+}
+
 /// Delete every selected line.
 pub fn delete_lines(text: &str, selection: &Range<usize>) -> Edit {
     let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
@@ -2104,6 +2141,36 @@ mod tests {
         for form in Normalization::MODIFIED.into_iter().chain([Normalization::NfkcCaseFold]) {
             assert_eq!(normalize(text, &(0..text.len()), form).text, text);
         }
+    }
+
+    #[test]
+    fn delete_takes_the_selection_or_the_character_before_the_caret() {
+        // A selection goes, and the caret lands where it began.
+        let edit = delete_backward("hello world", &(5..11));
+        assert_eq!(edit.text, "hello");
+        assert_eq!(edit.selection, 5..5);
+
+        // A bare caret takes the character before it.
+        let edit = delete_backward("hello", &(5..5));
+        assert_eq!(edit.text, "hell");
+        assert_eq!(edit.selection, 4..4);
+
+        // At the start of the document there is nothing to take.
+        let edit = delete_backward("hello", &(0..0));
+        assert_eq!(edit.text, "hello");
+        assert_eq!(edit.selection, 0..0);
+    }
+
+    #[test]
+    fn delete_takes_a_whole_character_not_a_code_point() {
+        // `👍🏻` is one character of two scalars, so ⌘⌫ takes both of them.
+        let text = "x👍🏻";
+        let edit = delete_backward(text, &(text.len()..text.len()));
+        assert_eq!(edit.text, "x");
+        // A CRLF is one character of two scalars too.
+        let text = "a\r\nb";
+        let edit = delete_backward(text, &(3..3));
+        assert_eq!(edit.text, "ab");
     }
 
     #[test]

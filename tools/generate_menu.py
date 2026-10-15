@@ -88,12 +88,21 @@ SHIFTED_SYMBOLS = {
     "*": "8",
 }
 
-# Cocoa's private-use codes for the arrow keys.
+# Cocoa's private-use codes for the arrow keys, and the two control characters
+# the storyboard spells out in base64.
+#
+# A key equivalent that is a control character cannot be written as an XML
+# attribute, so Interface Builder stores it as `<string key="keyEquivalent"
+# base64-UTF8="YES">`. `CA` is 0x08 and `Gw` is 0x1B, and reading those three
+# entries without decoding them is how the Delete, Delete Line and Complete
+# shortcuts went missing from the generated table.
 NAMED_KEYS = {
     "\uf700": "up",
     "\uf701": "down",
     "\uf702": "left",
     "\uf703": "right",
+    "\x08": "backspace",
+    "\x1b": "escape",
 }
 
 # How the arrow keys are drawn in a shortcut label.
@@ -102,6 +111,8 @@ KEY_GLYPHS = {
     "down": "↓",
     "left": "←",
     "right": "→",
+    "backspace": "⌫",
+    "escape": "⎋",
 }
 
 # Storyboard modifier name -> GPUI spelling, and -> the macOS glyph.

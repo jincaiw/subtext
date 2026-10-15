@@ -228,6 +228,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
 | 8.18 | 自定义包围 + 五个内置包围的语义 | 文本菜单最后一个占位提示；做它的时候用上游 fixture 发现内置命令一直包的是**行**而不是**选区** | ✅ |
 | 8.19 | 高级计数重做成「选项 + 胶囊」 | 上游是带七个选项的活计数器（sheet → 胶囊 → 齿轮 popover），SubText 是一个静态对话框 | ✅ |
+| 8.20 | 补全 + 三个被 base64 吃掉的快捷键 | `Edit ▸ Complete` 是占位提示，Mode 面板的三个补全开关没人读；顺带发现 ⌘⌫ / ⇧⌘⌫ / ⌥⎋ 三条键位在 storyboard 里是 base64 存的，一直没被读出来 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2090,14 +2091,85 @@ app 的 `the_byte_unit_is_spelled_out_and_the_rest_are_characters`、
 （红三角 + `failed`）、齿轮 popover（同一份选项面板）。
 行数 40,087 → 41,117（`count_panel.rs` 508）。
 
+### 8.20 补全 —— 以及三个被 base64 吃掉的快捷键 ✅
+
+`Edit ▸ Complete`（⌥⎋）此前在状态栏说「That selection command is not implemented yet」，
+Mode 面板里那三个补全开关（*Standard words* / *Words in document* / *Words defined in
+syntax*）**没有任何代码读** —— 与 BOM 开关、状态栏六开关同一类缺陷。这一轮把补全做出来，
+三个开关里的两个真的生效了。
+
+#### 上游的候选算法
+
+`EditorTextView.completions(forPartialWordRange:indexOfSelectedItem:)`，两个来源：
+
+```
+partialWord = 光标处的词
+文档里的词   ← 正则 \b<转义的 partial>\w+\b 扫全文（**大小写敏感**）
+语法定义的词 ← 语法 Completion.json 里以 partial 开头（**大小写不敏感**）
+去重 → 只剩一个候选且它就是输入本身时不显示
+```
+
+**要补全的那一段**（`rangeForUserCompletion`）是两段叠出来的，两段都**实测**过
+（`clang`/`swiftc` 起一个真的 `NSTextView` 问它）：
+
+1. **AppKit 自己的**：光标前那串字母、数字、`_`、**`.`**。实测 `a.b` 给整串、
+   `@inter` 给 `inter`、组合附标跟着它附着的字母走。
+2. **上游再往左扩**，条件是「补全还接得下去」：字母数字、`_`、以及**语法补全词的
+   首字符**。它的集合里**没有 `.`**，所以这一段其实是**缩短** AppKit 的答案 ——
+   `a.b` 只补 `b`。实测也确认了：`@inter` 即使语法里有 `@interface` 也只补 `inter`，
+   因为「没有该停的字符」时它原样返回 AppKit 的答案。
+
+插入后：**词里有括号就选中括号里面**（`foo()` → 光标停在括号中间），
+上游 `insertCompletion` 的贪心正则语义。
+
+#### 顺带查出：三个快捷键被 base64 吃掉了
+
+Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不能写成 XML 属性，
+就存成 `<string key="keyEquivalent" base64-UTF8="YES">`。当初提取 `menu.json` 时没解这层，
+于是三条键位读成了空串，`keymap.rs` 里一直少三条：
+
+| 菜单项 | 上游 | 之前 | 现在 |
+| --- | --- | --- | --- |
+| Edit ▸ Delete | ⌘⌫（`CA` = 0x08） | 无 | ✅ |
+| Edit ▸ Delete Line | ⇧⌘⌫（`CA`） | 无 | ✅ |
+| Edit ▸ Complete | ⌥⎋（`Gw` = 0x1B） | 无 | ✅ |
+
+**`Delete Line` 那条最刺眼**：命令本身早就能用，只是快捷键丢了。
+生成器的 `NAMED_KEYS` 现在多两个控制字符（`backspace` / `escape`），
+快捷键表从 72 条变成 **75 条**。
+
+`Edit ▸ Delete` 也顺手做实了：它此前在状态栏说「Handled by the text engine」，
+而 AppKit 的文本视图**并不**绑定 ⌘⌫ —— 绑上它反而会把按键变成一句提示。
+上游的 `delete:` 就是「删选区，否则删光标前一个字符」，所以 SubText 现在真的删
+（`textops::delete_backward`，单位是**扩展字形簇**：⌘⌫ 在 `👍🏻` 后面一次删掉整个）。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小。 |
+| 没有 IME 合成态的判断 | 上游 `performCompletion` 会先问 `hasMarkedText()`，正在拼字时不弹。GPUI 的编辑器不暴露这个状态。 |
+| `Standard words` 依旧是关的 | AppKit 的系统词表在系统文本引擎里，Rust 侧够不着 —— Mode 面板早就把它禁用并写了理由，这一轮没有改变这一点。 |
+| 自动补全（*Suggest completions while typing*）未做 | 上游在 `insertText` 后 250ms 防抖、且要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半；那个开关仍是禁用的（面板里写明了）。 |
+
+验收：**12 条新测试**（614 = 602 + 12）——core 的 `completion` 10 条
+（词范围的两段与四个实测向量、语法首字符决定停在哪里、文档词与语法词、一字符符号
+不搜全文、去重与顺序、单候选等于输入、无来源、括号内定位、自动补全的守卫）与
+`textops` 的 2 条（删选区/删前一个字符、按字形簇删）。
+全工作区 **614** 项测试全绿、clippy 零自有警告、生成器幂等、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活且 stdout/stderr 各 0 字节。
+**截了应用窗口核对**：在 `foo fooBar food` 的光标后按 ⌥⎋，弹出三行候选、
+首行高亮、贴在光标下方。
+行数 41,117 → 41,805（`completion.rs` 361）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（602 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（614 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.19 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.20 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
@@ -2114,6 +2186,9 @@ app 的 `the_byte_unit_is_spelled_out_and_the_rest_are_characters`、
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
+| 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小，但一个字符的前缀在大文件里可以有很多行。 |
+| 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器不暴露这个状态。 |
+| 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |
 | 高级计数的胶囊不能拖动 | 上游的 `DraggableHostingView` 让用户把它拖到正文的任何地方，还能把它拖到窗口边上。SubText 固定在正文右上角 —— 也就是新开一颗时它出现的位置。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | 高级计数的规范化菜单只有 4 项 | 上游列 `standardForms`（5）+ `modifiedForms`（2）。其中 NFKC Case-Fold 与两个 HFS+ 形态是 SubText 没有的 Unicode 数据，`normalize` 对它们是拒绝而不是近似 —— 列出来只会让计数静默地错。Text ▸ Unicode Normalizations 的**菜单**仍然列全 7 项并说明原因。 |

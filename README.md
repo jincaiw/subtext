@@ -31,7 +31,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 | 维度 | 状态 |
 | --- | --- |
 | 菜单项 | 258 / 258 一致（28 个顶层菜单） |
-| 快捷键 | 72 / 72 一致 |
+| 快捷键 | 75 / 75 一致 |
 | 语法定义 | 70 个 `.cotsyntax` 全部可解析 |
 | 主题 | 14 个 `.cottheme` 全部可解析 |
 | 文本操作 | 38 个全部实现（注释、缩进、排序、大小写、全半角、URL、Unicode 规范化…） |
@@ -55,7 +55,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 602 项测试
+cargo test --workspace # 614 项测试
 ```
 
 要求 Rust 1.85+（edition 2024）。首次构建会编译 GPUI 全家桶，需要几分钟。

@@ -61,6 +61,7 @@ use gpui_kit::{
     rems,
 };
 
+use subtext_core::completion;
 use subtext_core::scripts::{InputType, Invocation, Item as ScriptItem, OutputType};
 use subtext_core::{
     Document, DroppedFile, FileEncoding, LineEnding, Normalization, TextEncoding, charinfo,
@@ -274,6 +275,21 @@ struct Status {
     at: std::time::Instant,
 }
 
+/// The completion popup, while it is up.
+///
+/// Only the *anchor* is kept: the partial word's start, and which row is
+/// highlighted. The candidates themselves are derived from the buffer and the
+/// caret on every frame, which is what makes typing filter the list without
+/// anything having to tell the popup to re-read anything — and why the popup
+/// cannot show a word that is no longer there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Completion {
+    /// Where the partial word begins.
+    start: usize,
+    /// The highlighted candidate.
+    selected: usize,
+}
+
 /// What the Outline inspector's tree was last built from.
 ///
 /// The inspector is a virtualized list, so its items have to be *pushed* into
@@ -414,6 +430,8 @@ pub struct Workspace {
     count_running: bool,
     /// Whether the capsule's gear popover is open.
     count_options_open: bool,
+    /// The word completion popup, while it is up.
+    completion: Option<Completion>,
 }
 
 impl Workspace {
@@ -521,6 +539,7 @@ impl Workspace {
             count_options: None,
             count_running: false,
             count_options_open: false,
+            completion: None,
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -3017,6 +3036,194 @@ impl Workspace {
         cx.notify();
     }
 
+    /// `Edit ▸ Delete` — `NSTextView.delete:` behind ⌘⌫.
+    ///
+    /// The text engine handles a bare ⌫ on its own; this is the menu's own
+    /// shortcut, which deletes backwards as well rather than to the beginning
+    /// of the line, because the menu's key equivalent wins over AppKit's
+    /// standard binding.
+    pub fn delete_backward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.text_op(window, cx, |text, selection, _| textops::delete_backward(text, selection));
+    }
+
+    /// `Edit ▸ Complete` (⌥⎋) — upstream's `complete:`.
+    ///
+    /// Upstream calls `NSTextView.complete(_:)` and lets AppKit draw the list.
+    /// SubText draws its own, anchored to the caret, and offers the same
+    /// candidates.
+    pub fn complete(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.completion = None;
+        match self.completions_at_caret(cx) {
+            Some((partial, _)) => {
+                self.completion = Some(Completion { start: partial.start, selected: 0 });
+                cx.notify();
+            }
+            // Upstream's `completions(forPartialWordRange:)` returns nil or an
+            // empty list and AppKit then shows nothing at all. SubText says
+            // why, which is the same rule the rest of the unimplemented
+            // commands follow.
+            None => self.set_status("No completions for this word", cx),
+        }
+    }
+
+    /// The candidates for the word at the caret.
+    ///
+    /// `None` when there is no word to complete, no source switched on, or
+    /// nothing to offer.
+    fn completions_at_caret(
+        &self,
+        cx: &App,
+    ) -> Option<(Range<usize>, Vec<String>)> {
+        let text = self.active_text(cx)?;
+        let caret = self.active_selection(cx).start.min(text.len());
+        let document = self.active_document()?;
+        let syntax_words: Vec<String> = self
+            .syntaxes
+            .by_name(&document.syntax)
+            .map(|syntax| syntax.completions.iter().map(|item| item.text.clone()).collect())
+            .unwrap_or_default();
+        let first_letters: Vec<char> =
+            syntax_words.iter().filter_map(|word| word.chars().next()).collect();
+        let partial = completion::partial_word_range(&text, caret, &first_letters);
+
+        // The three Mode-pane switches, which until this round nothing read.
+        let sources = completion::CompletionSources {
+            standard: self.settings.mode.completion_standard_words,
+            document: self.settings.mode.completion_document_words,
+            syntax: self.settings.mode.completion_syntax_words,
+        };
+        let candidates = completion::candidates(&text, &partial, sources, &syntax_words);
+        (!candidates.is_empty()).then_some((partial, candidates))
+    }
+
+    /// What the popup should be showing right now.
+    ///
+    /// The popup belongs to the *word* it was opened on: typing another
+    /// character of that word extends it and re-filters the list, while moving
+    /// to a different word abandons the popup.
+    fn completion_popup(&self, cx: &App) -> Option<(Range<usize>, Vec<String>)> {
+        let anchor = self.completion.as_ref()?;
+        let (partial, candidates) = self.completions_at_caret(cx)?;
+        (partial.start == anchor.start).then_some((partial, candidates))
+    }
+
+    /// Move the highlight, wrapping at both ends as AppKit's list does.
+    fn move_completion(&mut self, down: bool, cx: &mut Context<Self>) {
+        let Some((_, candidates)) = self.completion_popup(cx) else {
+            return;
+        };
+        let Some(state) = self.completion.as_mut() else {
+            return;
+        };
+        let count = candidates.len();
+        state.selected = if down {
+            (state.selected + 1) % count
+        } else {
+            (state.selected + count - 1) % count
+        };
+        cx.notify();
+    }
+
+    /// Put the highlighted candidate in place of the partial word.
+    ///
+    /// Upstream's `insertCompletion(_:forPartialWordRange:movement:isFinal:)`:
+    /// the word replaces the partial, and a word with a parenthesised part
+    /// leaves the caret inside it.
+    fn apply_completion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((partial, candidates)) = self.completion_popup(cx) else {
+            self.completion = None;
+            return;
+        };
+        let Some(word) = self
+            .completion
+            .and_then(|state| candidates.get(state.selected).cloned())
+        else {
+            self.completion = None;
+            return;
+        };
+        self.completion = None;
+
+        let selection = completion::selection_after_insert(&word, &partial);
+        self.text_op(window, cx, move |text, _, _| {
+            let mut out = String::with_capacity(text.len() + word.len());
+            out.push_str(&text[..partial.start]);
+            out.push_str(&word);
+            out.push_str(&text[partial.end..]);
+            textops::Edit { text: out, selection }
+        });
+    }
+
+    /// Dismiss the popup without inserting anything.
+    fn cancel_completion(&mut self, cx: &mut Context<Self>) {
+        if self.completion.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The completion popup itself: a list anchored to the word being completed.
+    ///
+    /// The list is not virtualized. It is a transient popup whose length is
+    /// bounded by the words sharing a prefix, and its rows are one line of text
+    /// each — see the gap table.
+    fn render_completion(&self, rem: gpui_kit::Pixels, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (partial, candidates) = self.completion_popup(cx)?;
+        let selected = self.completion.map_or(0, |state| state.selected).min(candidates.len() - 1);
+        let editor = self.active_document()?.editor().clone();
+        // Anchored to the *end* of the partial word — the caret.
+        let anchor = editor.read(cx).range_to_bounds(&(partial.end..partial.end))?;
+
+        let mut rows = v_flex().w_full();
+        for (index, candidate) in candidates.iter().enumerate() {
+            rows = rows.child(
+                div()
+                    .id(("completion", index))
+                    .w_full()
+                    .px_2()
+                    .py_0p5()
+                    .truncate()
+                    .when(index == selected, |this| {
+                        this.bg(cx.theme().accent)
+                            .text_color(cx.theme().accent_foreground)
+                    })
+                    // A click picks a row, which is what a pointer user expects
+                    // of a list that has a highlight.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            if let Some(state) = this.completion.as_mut() {
+                                state.selected = index;
+                            }
+                            this.apply_completion(window, cx);
+                        }),
+                    )
+                    .child(candidate.clone()),
+            );
+        }
+
+        Some(
+            Positioner::side(anchor)
+                .placement(Placement::Bottom)
+                // `Positioner` takes pixels, so the design scale is applied
+                // by hand here the way `Dialog::w` does.
+                .offset(rem * 0.25)
+                .margin(rem * 0.5)
+                .occlude()
+                .child(
+                    v_flex()
+                        .id("completion-list")
+                        .min_w(rems(12.))
+                        .max_w(rems(28.))
+                        .max_h(rems(14.))
+                        .overflow_y_scroll()
+                        .p_1()
+                        .popover_style(cx)
+                        .shadow_md()
+                        .child(rows),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// The running counter's capsule.
     ///
     /// `None` while the counter is stopped. Upstream floats it over the text at
@@ -5207,6 +5414,38 @@ impl Render for Workspace {
             // a popover that stole the caret would end the edit it is meant to
             // describe — so the editor would otherwise be first in line.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                // The completion popup takes the keys a list needs, and lets
+                // everything else through: typing another character has to
+                // reach the editor, because that is what re-filters the list.
+                if this.completion.is_some() {
+                    match event.keystroke.key.as_str() {
+                        "up" => {
+                            this.move_completion(false, cx);
+                            window.prevent_default();
+                            return;
+                        }
+                        "down" => {
+                            this.move_completion(true, cx);
+                            window.prevent_default();
+                            return;
+                        }
+                        "enter" | "tab" => {
+                            this.apply_completion(window, cx);
+                            window.prevent_default();
+                            return;
+                        }
+                        "escape" => {
+                            this.cancel_completion(cx);
+                            window.prevent_default();
+                            return;
+                        }
+                        // A horizontal move abandons the list and moves the
+                        // caret, which is AppKit's "treat as cancelled"
+                        // movement — so the key is *not* taken from the editor.
+                        "left" | "right" | "home" | "end" => this.cancel_completion(cx),
+                        _ => {}
+                    }
+                }
                 if this.inspect_character.is_some() && event.keystroke.key == "escape" {
                     this.inspect_character = None;
                     window.prevent_default();
@@ -5363,6 +5602,22 @@ impl Render for Workspace {
         // `.semitransient`: the first click outside dismisses it, and that
         // click does not reach what is underneath. The full-size element behind
         // the popover is that dismissal.
+        // The completion popup, on the same layer and for the same reason: it
+        // is anchored to a rectangle in the editor and has to be painted over
+        // it. It is added first so the Inspect Character popover, if both were
+        // somehow up, would be the one on top.
+        if let Some(completion) = self.render_completion(window.rem_size(), cx) {
+            root = root.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    // A click anywhere else dismisses it, as a popup's overlay
+                    // does. The list itself is a later child, so it is on top.
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.cancel_completion(cx)))
+                    .child(completion),
+            );
+        }
+
         if let Some(popover) = self.render_inspect_character(window.rem_size(), cx) {
             root = root.child(
                 div()

@@ -83,8 +83,11 @@ impl Workspace {
             // so the text engine handles them while the editor has focus. The
             // menu items still reach it: GPUI dispatches a menu command down
             // the same focus path a keystroke takes.
-            "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "PasteAsIs" | "Delete" | "SelectAll"
+            "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "PasteAsIs" | "SelectAll"
             | "CopyWithStyle" => self.notice("Handled by the text engine", cx),
+            // The menu's own ⌘⌫, which AppKit's text view does not bind: it
+            // deletes backwards, exactly as `delete:` does upstream.
+            "Delete" => self.delete_backward(window, cx),
             "SelectWord" => self.select_word(cx),
             "SelectParagraph" => self.select_line(cx),
             "SelectEnclosingSymbols" => self.select_enclosing_symbols(cx),
@@ -99,7 +102,8 @@ impl Workspace {
                 "Column selection needs the text layout engine's visual rows, which SubText's editor does not expose",
                 cx,
             ),
-            "Complete" | "ShowUnicodeInputPanel" => {
+            "Complete" => self.complete(window, cx),
+            "ShowUnicodeInputPanel" => {
                 self.notice("That selection command is not implemented yet", cx)
             }
 

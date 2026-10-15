@@ -1,2111 +1,2111 @@
 [
- {
-  "path": "",
-  "title": "CotEditor",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "About CotEditor",
-  "mods": [],
-  "key": "",
-  "action": "showAboutPanel:"
- },
- {
-  "path": "CotEditor",
-  "title": "Donate to CotEditor…",
-  "mods": [],
-  "key": "",
-  "action": "showDonationWindow:"
- },
- {
-  "path": "CotEditor",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "Settings…",
-  "mods": [
-   "command"
-  ],
-  "key": ",",
-  "action": "showSettingsWindow:"
- },
- {
-  "path": "CotEditor",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "Services",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "Hide CotEditor",
-  "mods": [
-   "command"
-  ],
-  "key": "h",
-  "action": "hide:"
- },
- {
-  "path": "CotEditor",
-  "title": "Hide Others",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "h",
-  "action": "hideOtherApplications:"
- },
- {
-  "path": "CotEditor",
-  "title": "Show All",
-  "mods": [],
-  "key": "",
-  "action": "unhideAllApplications:"
- },
- {
-  "path": "CotEditor",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "CotEditor",
-  "title": "Quit CotEditor",
-  "mods": [
-   "command"
-  ],
-  "key": "q",
-  "action": "terminate:"
- },
- {
-  "path": "",
-  "title": "File",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File",
-  "title": "New",
-  "mods": [
-   "command"
-  ],
-  "key": "n",
-  "action": "newDocument:"
- },
- {
-  "path": "File",
-  "title": "New Window",
-  "mods": [
-   "command"
-  ],
-  "key": "N",
-  "action": "newDocumentAsWindow:"
- },
- {
-  "path": "File",
-  "title": "New Tab",
-  "mods": [
-   "command"
-  ],
-  "key": "t",
-  "action": "newDocumentAsTab:"
- },
- {
-  "path": "File",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File",
-  "title": "Open…",
-  "mods": [
-   "command"
-  ],
-  "key": "o",
-  "action": "openDocument:"
- },
- {
-  "path": "File",
-  "title": "Open Recent",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File > Open Recent",
-  "title": "Clear Menu",
-  "mods": [],
-  "key": "",
-  "action": "clearRecentDocuments:"
- },
- {
-  "path": "File",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File",
-  "title": "Close",
-  "mods": [
-   "command"
-  ],
-  "key": "w",
-  "action": "performClose:"
- },
- {
-  "path": "File",
-  "title": "Save",
-  "mods": [
-   "command"
-  ],
-  "key": "s",
-  "action": "saveDocument:"
- },
- {
-  "path": "File",
-  "title": "Save As…",
-  "mods": [
-   "command"
-  ],
-  "key": "S",
-  "action": "saveDocumentAs:"
- },
- {
-  "path": "File",
-  "title": "Revert to Saved",
-  "mods": [],
-  "key": "",
-  "action": "revertDocumentToSaved:"
- },
- {
-  "path": "File",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File",
-  "title": "Show in Finder",
-  "mods": [],
-  "key": "",
-  "action": "showInFinder:"
- },
- {
-  "path": "File",
-  "title": "Copy File Path",
-  "mods": [
-   "option"
-  ],
-  "key": "",
-  "action": "copyPath:"
- },
- {
-  "path": "File",
-  "title": "Share…",
-  "mods": [],
-  "key": "",
-  "action": "shareDocument:"
- },
- {
-  "path": "File",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "File",
-  "title": "Page Setup…",
-  "mods": [
-   "command"
-  ],
-  "key": "P",
-  "action": "runPageLayout:"
- },
- {
-  "path": "File",
-  "title": "Print…",
-  "mods": [
-   "command"
-  ],
-  "key": "p",
-  "action": "printDocument:"
- },
- {
-  "path": "",
-  "title": "Edit",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "Undo",
-  "mods": [
-   "command"
-  ],
-  "key": "z",
-  "action": "undo:"
- },
- {
-  "path": "Edit",
-  "title": "Redo",
-  "mods": [
-   "command"
-  ],
-  "key": "Z",
-  "action": "redo:"
- },
- {
-  "path": "Edit",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "Cut",
-  "mods": [
-   "command"
-  ],
-  "key": "x",
-  "action": "cut:"
- },
- {
-  "path": "Edit",
-  "title": "Copy",
-  "mods": [
-   "command"
-  ],
-  "key": "c",
-  "action": "copy:"
- },
- {
-  "path": "Edit",
-  "title": "Copy as Rich Text",
-  "mods": [
-   "command"
-  ],
-  "key": "C",
-  "action": "copyWithStyle:"
- },
- {
-  "path": "Edit",
-  "title": "Paste",
-  "mods": [
-   "command"
-  ],
-  "key": "v",
-  "action": "paste:"
- },
- {
-  "path": "Edit",
-  "title": "Paste Exactly",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "v",
-  "action": "pasteAsIs:"
- },
- {
-  "path": "Edit",
-  "title": "Delete",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": "delete:"
- },
- {
-  "path": "Edit",
-  "title": "Select",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Select",
-  "title": "Select All",
-  "mods": [
-   "command"
-  ],
-  "key": "a",
-  "action": "selectAll:"
- },
- {
-  "path": "Edit > Select",
-  "title": "Select Line",
-  "mods": [
-   "command",
-   "shift"
-  ],
-  "key": "A",
-  "action": "selectParagraph:"
- },
- {
-  "path": "Edit > Select",
-  "title": "Select Word",
-  "mods": [
-   "command"
-  ],
-  "key": "d",
-  "action": "selectWord:"
- },
- {
-  "path": "Edit > Select",
-  "title": "Select Enclosing Symbols",
-  "mods": [],
-  "key": "",
-  "action": "selectEnclosingSymbols:"
- },
- {
-  "path": "Edit > Select",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Select",
-  "title": "Select Column Up",
-  "mods": [
-   "shift",
-   "control"
-  ],
-  "key": "",
-  "action": "selectColumnUp:"
- },
- {
-  "path": "Edit > Select",
-  "title": "Select Column Down",
-  "mods": [
-   "shift",
-   "control"
-  ],
-  "key": "",
-  "action": "selectColumnDown:"
- },
- {
-  "path": "Edit > Select",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Select",
-  "title": "Split Selection by Lines",
-  "mods": [
-   "control"
-  ],
-  "key": "L",
-  "action": "splitSelectionByLines:"
- },
- {
-  "path": "Edit",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "Complete",
-  "mods": [
-   "option"
-  ],
-  "key": "",
-  "action": "complete:"
- },
- {
-  "path": "Edit",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "Insert Backslash",
-  "mods": [
-   "command"
-  ],
-  "key": "¥",
-  "action": "inputBackSlash:"
- },
- {
-  "path": "Edit",
-  "title": "Insert Yen Mark",
-  "mods": [
-   "command"
-  ],
-  "key": "y",
-  "action": "inputYenMark:"
- },
- {
-  "path": "Edit",
-  "title": "Insert by Unicode Code Point…",
-  "mods": [],
-  "key": "",
-  "action": "showUnicodeInputPanel:"
- },
- {
-  "path": "Edit",
-  "title": "Insert from iPhone or iPad",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit",
-  "title": "Spelling and Grammar",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "Show Spelling and Grammar",
-  "mods": [
-   "command"
-  ],
-  "key": ":",
-  "action": "showGuessPanel:"
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "Check Document Now",
-  "mods": [
-   "command"
-  ],
-  "key": ";",
-  "action": "checkSpelling:"
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "Check Spelling While Typing",
-  "mods": [],
-  "key": "",
-  "action": "toggleContinuousSpellChecking:"
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "Check Grammar With Spelling",
-  "mods": [],
-  "key": "",
-  "action": "toggleGrammarChecking:"
- },
- {
-  "path": "Edit > Spelling and Grammar",
-  "title": "Correct Spelling Automatically",
-  "mods": [],
-  "key": "",
-  "action": "toggleAutomaticSpellingCorrection:"
- },
- {
-  "path": "Edit",
-  "title": "Substitutions",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Replace Quotes",
-  "mods": [],
-  "key": "",
-  "action": "replaceQuotesInSelection:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Straighten Quotes",
-  "mods": [],
-  "key": "",
-  "action": "straightenQuotesInSelection:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Replace Dashes",
-  "mods": [],
-  "key": "",
-  "action": "replaceDashesInSelection:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Replace Text",
-  "mods": [],
-  "key": "",
-  "action": "replaceTextInSelection:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Show Substitutions",
-  "mods": [],
-  "key": "",
-  "action": "orderFrontSubstitutionsPanel:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Smart Copy/Paste",
-  "mods": [],
-  "key": "",
-  "action": "toggleSmartInsertDelete:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Smart Quotes",
-  "mods": [],
-  "key": "",
-  "action": "toggleAutomaticQuoteSubstitution:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Smart Dashes",
-  "mods": [],
-  "key": "",
-  "action": "toggleAutomaticDashSubstitution:"
- },
- {
-  "path": "Edit > Substitutions",
-  "title": "Text Replacement",
-  "mods": [],
-  "key": "",
-  "action": "toggleAutomaticTextReplacement:"
- },
- {
-  "path": "Edit",
-  "title": "Speech",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Edit > Speech",
-  "title": "Start Speaking",
-  "mods": [],
-  "key": "",
-  "action": "startSpeaking:"
- },
- {
-  "path": "Edit > Speech",
-  "title": "Stop Speaking",
-  "mods": [],
-  "key": "",
-  "action": "stopSpeaking:"
- },
- {
-  "path": "",
-  "title": "Format",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Line Endings",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Text Encoding",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Syntax",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Reset Syntax Analysis",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "r",
-  "action": "recolorAll:"
- },
- {
-  "path": "Format",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Font",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Font",
-  "title": "Show Fonts",
-  "mods": [],
-  "key": "",
-  "action": "orderFrontFontPanel:"
- },
- {
-  "path": "Format > Font",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Font",
-  "title": "Font Type",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Font",
-  "title": "Standard",
-  "mods": [],
-  "key": "",
-  "action": "makeFontStandard:"
- },
- {
-  "path": "Format > Font",
-  "title": "Monospaced",
-  "mods": [],
-  "key": "",
-  "action": "makeFontMonospaced:"
- },
- {
-  "path": "Format > Font",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Font",
-  "title": "Bigger",
-  "mods": [
-   "command"
-  ],
-  "key": "+",
-  "action": "biggerFont:"
- },
- {
-  "path": "Format > Font",
-  "title": "Smaller",
-  "mods": [
-   "command"
-  ],
-  "key": "-",
-  "action": "smallerFont:"
- },
- {
-  "path": "Format > Font",
-  "title": "Reset to Default",
-  "mods": [
-   "command"
-  ],
-  "key": "0",
-  "action": "resetFont:"
- },
- {
-  "path": "Format > Font",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Font",
-  "title": "Antialias",
-  "mods": [],
-  "key": "",
-  "action": "toggleAntialias:"
- },
- {
-  "path": "Format > Font",
-  "title": "Ligatures",
-  "mods": [],
-  "key": "",
-  "action": "toggleLigatures:"
- },
- {
-  "path": "Format",
-  "title": "Theme",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Tab Width",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Tab Width",
-  "title": "2",
-  "mods": [],
-  "key": "",
-  "action": "changeTabWidth:"
- },
- {
-  "path": "Format > Tab Width",
-  "title": "4",
-  "mods": [],
-  "key": "",
-  "action": "changeTabWidth:"
- },
- {
-  "path": "Format > Tab Width",
-  "title": "8",
-  "mods": [],
-  "key": "",
-  "action": "changeTabWidth:"
- },
- {
-  "path": "Format > Tab Width",
-  "title": "Custom…",
-  "mods": [],
-  "key": "",
-  "action": "customizeTabWidth:"
- },
- {
-  "path": "Format > Tab Width",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Tab Width",
-  "title": "Use Spaces for Indentation",
-  "mods": [],
-  "key": "",
-  "action": "toggleAutoTabExpand:"
- },
- {
-  "path": "Format",
-  "title": "Show Invisibles",
-  "mods": [],
-  "key": "",
-  "action": "toggleInvisibleChars:"
- },
- {
-  "path": "Format",
-  "title": "Show Indent Guides",
-  "mods": [],
-  "key": "",
-  "action": "toggleIndentGuides:"
- },
- {
-  "path": "Format",
-  "title": "Show Page Guide",
-  "mods": [],
-  "key": "",
-  "action": "togglePageGuide:"
- },
- {
-  "path": "Format",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Writing Direction",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Orientation",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Horizontal",
-  "mods": [],
-  "key": "",
-  "action": "makeLayoutOrientationHorizontal:"
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Vertical",
-  "mods": [],
-  "key": "",
-  "action": "makeLayoutOrientationVertical:"
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Direction",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Left to Right",
-  "mods": [],
-  "key": "",
-  "action": "makeWritingDirectionLeftToRight:"
- },
- {
-  "path": "Format > Writing Direction",
-  "title": "Right to Left",
-  "mods": [],
-  "key": "",
-  "action": "makeWritingDirectionRightToLeft:"
- },
- {
-  "path": "Format",
-  "title": "Wrap Lines",
-  "mods": [],
-  "key": "",
-  "action": "toggleLineWrap:"
- },
- {
-  "path": "Format",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Format",
-  "title": "Prevent Editing",
-  "mods": [],
-  "key": "",
-  "action": "toggleEditable:"
- },
- {
-  "path": "",
-  "title": "View",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Show Tab Bar",
-  "mods": [
-   "command"
-  ],
-  "key": "T",
-  "action": "toggleTabBar:"
- },
- {
-  "path": "View",
-  "title": "Hide Toolbar",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "t",
-  "action": "toggleToolbarShown:"
- },
- {
-  "path": "View",
-  "title": "Customize Toolbar…",
-  "mods": [],
-  "key": "",
-  "action": "runToolbarCustomizationPalette:"
- },
- {
-  "path": "View",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Show Quick Actions…",
-  "mods": [
-   "command"
-  ],
-  "key": "k",
-  "action": "showQuickActions:"
- },
- {
-  "path": "View",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Sidebar",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View > Sidebar",
-  "title": "File Browser",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "1",
-  "action": "showFileBrowser:"
- },
- {
-  "path": "View > Sidebar",
-  "title": "Folder Find",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "2",
-  "action": "showFolderFinder:"
- },
- {
-  "path": "View > Sidebar",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View > Sidebar",
-  "title": "Show Sidebar",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "s",
-  "action": "toggleSidebar:"
- },
- {
-  "path": "View",
-  "title": "Inspector",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View > Inspector",
-  "title": "Document Inspector",
-  "mods": [],
-  "key": "",
-  "action": "showDocumentInspector:"
- },
- {
-  "path": "View > Inspector",
-  "title": "Outline",
-  "mods": [],
-  "key": "",
-  "action": "showOutlineInspector:"
- },
- {
-  "path": "View > Inspector",
-  "title": "Warnings",
-  "mods": [],
-  "key": "",
-  "action": "showWarningsInspector:"
- },
- {
-  "path": "View > Inspector",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View > Inspector",
-  "title": "Show Inspector",
-  "mods": [
-   "command"
-  ],
-  "key": "i",
-  "action": "toggleInspector:"
- },
- {
-  "path": "View",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Show Navigation Bar",
-  "mods": [],
-  "key": "",
-  "action": "toggleNavigationBar:"
- },
- {
-  "path": "View",
-  "title": "Show Line Numbers",
-  "mods": [],
-  "key": "",
-  "action": "toggleLineNumber:"
- },
- {
-  "path": "View",
-  "title": "Show Status Bar",
-  "mods": [],
-  "key": "",
-  "action": "toggleStatusBar:"
- },
- {
-  "path": "View",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Move Focus to Next Editor",
-  "mods": [
-   "control"
-  ],
-  "key": "`",
-  "action": "focusNextEditor:"
- },
- {
-  "path": "View",
-  "title": "Move Focus to Previous Editor",
-  "mods": [
-   "shift",
-   "control"
-  ],
-  "key": "`",
-  "action": "focusPreviousEditor:"
- },
- {
-  "path": "View",
-  "title": "Split Editor",
-  "mods": [],
-  "key": "",
-  "action": "openSplitTextView:"
- },
- {
-  "path": "View",
-  "title": "Close Split Editor",
-  "mods": [],
-  "key": "",
-  "action": "closeSplitTextView:"
- },
- {
-  "path": "View",
-  "title": "Stack Editors Vertically",
-  "mods": [],
-  "key": "",
-  "action": "toggleSplitOrientation:"
- },
- {
-  "path": "View",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "View",
-  "title": "Enter Full Screen",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "f",
-  "action": "toggleFullScreen:"
- },
- {
-  "path": "",
-  "title": "Text",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text",
-  "title": "Insert Snippet",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Insert Snippet",
-  "title": "Edit Snippets…",
-  "mods": [],
-  "key": "",
-  "action": "showSnippetEditor:"
- },
- {
-  "path": "Text",
-  "title": "Comment",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Comment",
-  "title": "Toggle Comment",
-  "mods": [
-   "command"
-  ],
-  "key": "/",
-  "action": "toggleComment:"
- },
- {
-  "path": "Text > Comment",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Comment",
-  "title": "Inline Comment",
-  "mods": [],
-  "key": "",
-  "action": "inlineCommentOut:"
- },
- {
-  "path": "Text > Comment",
-  "title": "Block Comment",
-  "mods": [],
-  "key": "",
-  "action": "blockCommentOut:"
- },
- {
-  "path": "Text > Comment",
-  "title": "Uncomment",
-  "mods": [],
-  "key": "",
-  "action": "uncomment:"
- },
- {
-  "path": "Text",
-  "title": "Indentation",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Indentation",
-  "title": "Shift Right",
-  "mods": [
-   "command"
-  ],
-  "key": "]",
-  "action": "shiftRight:"
- },
- {
-  "path": "Text > Indentation",
-  "title": "Shift Left",
-  "mods": [
-   "command"
-  ],
-  "key": "[",
-  "action": "shiftLeft:"
- },
- {
-  "path": "Text > Indentation",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Indentation",
-  "title": "Convert Indentation to Spaces",
-  "mods": [],
-  "key": "",
-  "action": "convertIndentationToSpaces:"
- },
- {
-  "path": "Text > Indentation",
-  "title": "Convert Indentation to Tabs",
-  "mods": [],
-  "key": "",
-  "action": "convertIndentationToTabs:"
- },
- {
-  "path": "Text",
-  "title": "Surround Selection With",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Single Quotes",
-  "mods": [
-   "command"
-  ],
-  "key": "'",
-  "action": "surroundSelectionWithSingleQuotes:"
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Double Quotes",
-  "mods": [
-   "command"
-  ],
-  "key": "\"",
-  "action": "surroundSelectionWithDoubleQuotes:"
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Parentheses",
-  "mods": [
-   "command"
-  ],
-  "key": "(",
-  "action": "surroundSelectionWithParentheses:"
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Braces",
-  "mods": [],
-  "key": "",
-  "action": "surroundSelectionWithBraces:"
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Brackets",
-  "mods": [],
-  "key": "",
-  "action": "surroundSelectionWithSquareBrackets:"
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Surround Selection With",
-  "title": "Custom…",
-  "mods": [
-   "command"
-  ],
-  "key": "L",
-  "action": "surroundSelection:"
- },
- {
-  "path": "Text",
-  "title": "Trim Trailing Whitespace",
-  "mods": [],
-  "key": "",
-  "action": "trimTrailingWhitespace:"
- },
- {
-  "path": "Text",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text",
-  "title": "Lines",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Lines",
-  "title": "Move Up",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "",
-  "action": "moveLineUp:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Move Down",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "",
-  "action": "moveLineDown:"
- },
- {
-  "path": "Text > Lines",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Lines",
-  "title": "Sort",
-  "mods": [],
-  "key": "",
-  "action": "sortLinesAscending:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Sort by Pattern…",
-  "mods": [],
-  "key": "",
-  "action": "patternSort:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Reverse",
-  "mods": [],
-  "key": "",
-  "action": "reverseLines:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Shuffle",
-  "mods": [],
-  "key": "",
-  "action": "shuffleLines:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Delete Duplicates",
-  "mods": [],
-  "key": "",
-  "action": "deleteDuplicateLine:"
- },
- {
-  "path": "Text > Lines",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Lines",
-  "title": "Duplicate Line",
-  "mods": [
-   "command"
-  ],
-  "key": "D",
-  "action": "duplicateLine:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Delete Line",
-  "mods": [
-   "command",
-   "shift"
-  ],
-  "key": "",
-  "action": "deleteLine:"
- },
- {
-  "path": "Text > Lines",
-  "title": "Join Lines",
-  "mods": [
-   "command"
-  ],
-  "key": "J",
-  "action": "joinLines:"
- },
- {
-  "path": "Text",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text",
-  "title": "Transformations",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Transformations",
-  "title": "Make Upper Case",
-  "mods": [],
-  "key": "",
-  "action": "uppercaseWord:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Make Lower Case",
-  "mods": [],
-  "key": "",
-  "action": "lowercaseWord:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Capitalize",
-  "mods": [],
-  "key": "",
-  "action": "capitalizeWord:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Convert to Full Width",
-  "mods": [],
-  "key": "",
-  "action": "exchangeFullwidth:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Convert to Half Width",
-  "mods": [],
-  "key": "",
-  "action": "exchangeHalfwidth:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Convert Alphanumeric Text to Full Width",
-  "mods": [],
-  "key": "",
-  "action": "exchangeFullwidthRoman:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "Convert Alphanumeric Text to Half Width",
-  "mods": [],
-  "key": "",
-  "action": "exchangeHalfwidthRoman:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text > Transformations",
-  "title": "URL Encode",
-  "mods": [],
-  "key": "",
-  "action": "encodeURL:"
- },
- {
-  "path": "Text > Transformations",
-  "title": "URL Decode",
-  "mods": [],
-  "key": "",
-  "action": "decodeURL:"
- },
- {
-  "path": "Text",
-  "title": "Unicode Normalizations",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Text",
-  "title": "Inspect Character",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "i",
-  "action": "showSelectionInfo:"
- },
- {
-  "path": "Text",
-  "title": "Advanced Character Count…",
-  "mods": [],
-  "key": "",
-  "action": "toggleAdvancedCounter:"
- },
- {
-  "path": "Text",
-  "title": "Edit Color Code…",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "h",
-  "action": "editColorCode:"
- },
- {
-  "path": "",
-  "title": "Find",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Find…",
-  "mods": [
-   "command"
-  ],
-  "key": "f",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Find Next",
-  "mods": [
-   "command"
-  ],
-  "key": "g",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Find Previous",
-  "mods": [
-   "command"
-  ],
-  "key": "G",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Find All",
-  "mods": [
-   "command"
-  ],
-  "key": "F",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Select All Find Matches",
-  "mods": [],
-  "key": "",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Use Selection for Find",
-  "mods": [
-   "command"
-  ],
-  "key": "e",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Use Selection for Replace",
-  "mods": [
-   "command"
-  ],
-  "key": "E",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Jump to Selection",
-  "mods": [
-   "command"
-  ],
-  "key": "j",
-  "action": "centerSelectionInVisibleArea:"
- },
- {
-  "path": "Find",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Replace",
-  "mods": [],
-  "key": "",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Replace and Find Next",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "g",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Replace All",
-  "mods": [],
-  "key": "",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Multiple Replace",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find > Multiple Replace",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find > Multiple Replace",
-  "title": "Manage Multiple Replace…",
-  "mods": [],
-  "key": "",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Highlight All",
-  "mods": [
-   "command"
-  ],
-  "key": "H",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "Remove Highlights",
-  "mods": [
-   "command",
-   "control"
-  ],
-  "key": "H",
-  "action": "performTextFinderAction:"
- },
- {
-  "path": "Find",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Open Outline Menu",
-  "mods": [],
-  "key": "",
-  "action": "openOutlineMenu:"
- },
- {
-  "path": "Find",
-  "title": "Select Previous Outline Item",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "",
-  "action": "selectPrevItemOfOutlineMenu:"
- },
- {
-  "path": "Find",
-  "title": "Select Next Outline Item",
-  "mods": [
-   "command",
-   "option"
-  ],
-  "key": "",
-  "action": "selectNextItemOfOutlineMenu:"
- },
- {
-  "path": "Find",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Find",
-  "title": "Go to Line…",
-  "mods": [
-   "command"
-  ],
-  "key": "l",
-  "action": "gotoLocation:"
- },
- {
-  "path": "",
-  "title": "Window",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Window",
-  "title": "Minimize",
-  "mods": [
-   "command"
-  ],
-  "key": "m",
-  "action": "performMiniaturize:"
- },
- {
-  "path": "Window",
-  "title": "Zoom",
-  "mods": [],
-  "key": "",
-  "action": "performZoom:"
- },
- {
-  "path": "Window",
-  "title": "Keep on Top",
-  "mods": [],
-  "key": "",
-  "action": "toggleKeepOnTop:"
- },
- {
-  "path": "Window",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Window",
-  "title": "Bring All to Front",
-  "mods": [],
-  "key": "",
-  "action": "arrangeInFront:"
- },
- {
-  "path": "Window",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Window",
-  "title": "Console",
-  "mods": [],
-  "key": "",
-  "action": "showConsolePanel:"
- },
- {
-  "path": "",
-  "title": "Script",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "",
-  "title": "Help",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Help",
-  "title": "CotEditor Help",
-  "mods": [
-   "command"
-  ],
-  "key": "?",
-  "action": "showHelp:"
- },
- {
-  "path": "Help",
-  "title": "CotEditor Scripting Guide",
-  "mods": [],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Help > CotEditor Scripting Guide",
-  "title": "About Scripting",
-  "mods": [],
-  "key": "",
-  "action": "openHelpAnchor:"
- },
- {
-  "path": "Help > CotEditor Scripting Guide",
-  "title": "AppleScript Dictionary",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": "openAppleScriptDictionary:"
- },
- {
-  "path": "Help",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Help",
-  "title": "What’s New in CotEditor",
-  "mods": [],
-  "key": "",
-  "action": "showWhatsNew:"
- },
- {
-  "path": "Help",
-  "title": "Release Notes",
-  "mods": [],
-  "key": "",
-  "action": "openHelpAnchor:"
- },
- {
-  "path": "Help",
-  "title": "-",
-  "mods": [
-   "command"
-  ],
-  "key": "",
-  "action": null
- },
- {
-  "path": "Help",
-  "title": "Create Issue Report",
-  "mods": [],
-  "key": "",
-  "action": "createBugReport:"
- },
- {
-  "path": "Help",
-  "title": "Report Issue",
-  "mods": [
-   "option"
-  ],
-  "key": "",
-  "action": "reportBug:"
- },
- {
-  "path": "Help",
-  "title": "CotEditor Web Site",
-  "mods": [],
-  "key": "",
-  "action": "openWebSite:"
- }
+  {
+    "path": "",
+    "title": "CotEditor",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "About CotEditor",
+    "mods": [],
+    "key": "",
+    "action": "showAboutPanel:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "Donate to CotEditor…",
+    "mods": [],
+    "key": "",
+    "action": "showDonationWindow:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "Settings…",
+    "mods": [
+      "command"
+    ],
+    "key": ",",
+    "action": "showSettingsWindow:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "Services",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "Hide CotEditor",
+    "mods": [
+      "command"
+    ],
+    "key": "h",
+    "action": "hide:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "Hide Others",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "h",
+    "action": "hideOtherApplications:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "Show All",
+    "mods": [],
+    "key": "",
+    "action": "unhideAllApplications:"
+  },
+  {
+    "path": "CotEditor",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "CotEditor",
+    "title": "Quit CotEditor",
+    "mods": [
+      "command"
+    ],
+    "key": "q",
+    "action": "terminate:"
+  },
+  {
+    "path": "",
+    "title": "File",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File",
+    "title": "New",
+    "mods": [
+      "command"
+    ],
+    "key": "n",
+    "action": "newDocument:"
+  },
+  {
+    "path": "File",
+    "title": "New Window",
+    "mods": [
+      "command"
+    ],
+    "key": "N",
+    "action": "newDocumentAsWindow:"
+  },
+  {
+    "path": "File",
+    "title": "New Tab",
+    "mods": [
+      "command"
+    ],
+    "key": "t",
+    "action": "newDocumentAsTab:"
+  },
+  {
+    "path": "File",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File",
+    "title": "Open…",
+    "mods": [
+      "command"
+    ],
+    "key": "o",
+    "action": "openDocument:"
+  },
+  {
+    "path": "File",
+    "title": "Open Recent",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File > Open Recent",
+    "title": "Clear Menu",
+    "mods": [],
+    "key": "",
+    "action": "clearRecentDocuments:"
+  },
+  {
+    "path": "File",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File",
+    "title": "Close",
+    "mods": [
+      "command"
+    ],
+    "key": "w",
+    "action": "performClose:"
+  },
+  {
+    "path": "File",
+    "title": "Save",
+    "mods": [
+      "command"
+    ],
+    "key": "s",
+    "action": "saveDocument:"
+  },
+  {
+    "path": "File",
+    "title": "Save As…",
+    "mods": [
+      "command"
+    ],
+    "key": "S",
+    "action": "saveDocumentAs:"
+  },
+  {
+    "path": "File",
+    "title": "Revert to Saved",
+    "mods": [],
+    "key": "",
+    "action": "revertDocumentToSaved:"
+  },
+  {
+    "path": "File",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File",
+    "title": "Show in Finder",
+    "mods": [],
+    "key": "",
+    "action": "showInFinder:"
+  },
+  {
+    "path": "File",
+    "title": "Copy File Path",
+    "mods": [
+      "option"
+    ],
+    "key": "",
+    "action": "copyPath:"
+  },
+  {
+    "path": "File",
+    "title": "Share…",
+    "mods": [],
+    "key": "",
+    "action": "shareDocument:"
+  },
+  {
+    "path": "File",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "File",
+    "title": "Page Setup…",
+    "mods": [
+      "command"
+    ],
+    "key": "P",
+    "action": "runPageLayout:"
+  },
+  {
+    "path": "File",
+    "title": "Print…",
+    "mods": [
+      "command"
+    ],
+    "key": "p",
+    "action": "printDocument:"
+  },
+  {
+    "path": "",
+    "title": "Edit",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "Undo",
+    "mods": [
+      "command"
+    ],
+    "key": "z",
+    "action": "undo:"
+  },
+  {
+    "path": "Edit",
+    "title": "Redo",
+    "mods": [
+      "command"
+    ],
+    "key": "Z",
+    "action": "redo:"
+  },
+  {
+    "path": "Edit",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "Cut",
+    "mods": [
+      "command"
+    ],
+    "key": "x",
+    "action": "cut:"
+  },
+  {
+    "path": "Edit",
+    "title": "Copy",
+    "mods": [
+      "command"
+    ],
+    "key": "c",
+    "action": "copy:"
+  },
+  {
+    "path": "Edit",
+    "title": "Copy as Rich Text",
+    "mods": [
+      "command"
+    ],
+    "key": "C",
+    "action": "copyWithStyle:"
+  },
+  {
+    "path": "Edit",
+    "title": "Paste",
+    "mods": [
+      "command"
+    ],
+    "key": "v",
+    "action": "paste:"
+  },
+  {
+    "path": "Edit",
+    "title": "Paste Exactly",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "v",
+    "action": "pasteAsIs:"
+  },
+  {
+    "path": "Edit",
+    "title": "Delete",
+    "mods": [
+      "command"
+    ],
+    "key": "\b",
+    "action": "delete:"
+  },
+  {
+    "path": "Edit",
+    "title": "Select",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select All",
+    "mods": [
+      "command"
+    ],
+    "key": "a",
+    "action": "selectAll:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select Line",
+    "mods": [
+      "command",
+      "shift"
+    ],
+    "key": "A",
+    "action": "selectParagraph:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select Word",
+    "mods": [
+      "command"
+    ],
+    "key": "d",
+    "action": "selectWord:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select Enclosing Symbols",
+    "mods": [],
+    "key": "",
+    "action": "selectEnclosingSymbols:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select Column Up",
+    "mods": [
+      "shift",
+      "control"
+    ],
+    "key": "",
+    "action": "selectColumnUp:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Select Column Down",
+    "mods": [
+      "shift",
+      "control"
+    ],
+    "key": "",
+    "action": "selectColumnDown:"
+  },
+  {
+    "path": "Edit > Select",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Select",
+    "title": "Split Selection by Lines",
+    "mods": [
+      "control"
+    ],
+    "key": "L",
+    "action": "splitSelectionByLines:"
+  },
+  {
+    "path": "Edit",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "Complete",
+    "mods": [
+      "option"
+    ],
+    "key": "\u001b",
+    "action": "complete:"
+  },
+  {
+    "path": "Edit",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "Insert Backslash",
+    "mods": [
+      "command"
+    ],
+    "key": "¥",
+    "action": "inputBackSlash:"
+  },
+  {
+    "path": "Edit",
+    "title": "Insert Yen Mark",
+    "mods": [
+      "command"
+    ],
+    "key": "y",
+    "action": "inputYenMark:"
+  },
+  {
+    "path": "Edit",
+    "title": "Insert by Unicode Code Point…",
+    "mods": [],
+    "key": "",
+    "action": "showUnicodeInputPanel:"
+  },
+  {
+    "path": "Edit",
+    "title": "Insert from iPhone or iPad",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit",
+    "title": "Spelling and Grammar",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "Show Spelling and Grammar",
+    "mods": [
+      "command"
+    ],
+    "key": ":",
+    "action": "showGuessPanel:"
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "Check Document Now",
+    "mods": [
+      "command"
+    ],
+    "key": ";",
+    "action": "checkSpelling:"
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "Check Spelling While Typing",
+    "mods": [],
+    "key": "",
+    "action": "toggleContinuousSpellChecking:"
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "Check Grammar With Spelling",
+    "mods": [],
+    "key": "",
+    "action": "toggleGrammarChecking:"
+  },
+  {
+    "path": "Edit > Spelling and Grammar",
+    "title": "Correct Spelling Automatically",
+    "mods": [],
+    "key": "",
+    "action": "toggleAutomaticSpellingCorrection:"
+  },
+  {
+    "path": "Edit",
+    "title": "Substitutions",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Replace Quotes",
+    "mods": [],
+    "key": "",
+    "action": "replaceQuotesInSelection:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Straighten Quotes",
+    "mods": [],
+    "key": "",
+    "action": "straightenQuotesInSelection:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Replace Dashes",
+    "mods": [],
+    "key": "",
+    "action": "replaceDashesInSelection:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Replace Text",
+    "mods": [],
+    "key": "",
+    "action": "replaceTextInSelection:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Show Substitutions",
+    "mods": [],
+    "key": "",
+    "action": "orderFrontSubstitutionsPanel:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Smart Copy/Paste",
+    "mods": [],
+    "key": "",
+    "action": "toggleSmartInsertDelete:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Smart Quotes",
+    "mods": [],
+    "key": "",
+    "action": "toggleAutomaticQuoteSubstitution:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Smart Dashes",
+    "mods": [],
+    "key": "",
+    "action": "toggleAutomaticDashSubstitution:"
+  },
+  {
+    "path": "Edit > Substitutions",
+    "title": "Text Replacement",
+    "mods": [],
+    "key": "",
+    "action": "toggleAutomaticTextReplacement:"
+  },
+  {
+    "path": "Edit",
+    "title": "Speech",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Edit > Speech",
+    "title": "Start Speaking",
+    "mods": [],
+    "key": "",
+    "action": "startSpeaking:"
+  },
+  {
+    "path": "Edit > Speech",
+    "title": "Stop Speaking",
+    "mods": [],
+    "key": "",
+    "action": "stopSpeaking:"
+  },
+  {
+    "path": "",
+    "title": "Format",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Line Endings",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Text Encoding",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Syntax",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Reset Syntax Analysis",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "r",
+    "action": "recolorAll:"
+  },
+  {
+    "path": "Format",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Font",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Font",
+    "title": "Show Fonts",
+    "mods": [],
+    "key": "",
+    "action": "orderFrontFontPanel:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Font",
+    "title": "Font Type",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Font",
+    "title": "Standard",
+    "mods": [],
+    "key": "",
+    "action": "makeFontStandard:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "Monospaced",
+    "mods": [],
+    "key": "",
+    "action": "makeFontMonospaced:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Font",
+    "title": "Bigger",
+    "mods": [
+      "command"
+    ],
+    "key": "+",
+    "action": "biggerFont:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "Smaller",
+    "mods": [
+      "command"
+    ],
+    "key": "-",
+    "action": "smallerFont:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "Reset to Default",
+    "mods": [
+      "command"
+    ],
+    "key": "0",
+    "action": "resetFont:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Font",
+    "title": "Antialias",
+    "mods": [],
+    "key": "",
+    "action": "toggleAntialias:"
+  },
+  {
+    "path": "Format > Font",
+    "title": "Ligatures",
+    "mods": [],
+    "key": "",
+    "action": "toggleLigatures:"
+  },
+  {
+    "path": "Format",
+    "title": "Theme",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Tab Width",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "2",
+    "mods": [],
+    "key": "",
+    "action": "changeTabWidth:"
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "4",
+    "mods": [],
+    "key": "",
+    "action": "changeTabWidth:"
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "8",
+    "mods": [],
+    "key": "",
+    "action": "changeTabWidth:"
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "Custom…",
+    "mods": [],
+    "key": "",
+    "action": "customizeTabWidth:"
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Tab Width",
+    "title": "Use Spaces for Indentation",
+    "mods": [],
+    "key": "",
+    "action": "toggleAutoTabExpand:"
+  },
+  {
+    "path": "Format",
+    "title": "Show Invisibles",
+    "mods": [],
+    "key": "",
+    "action": "toggleInvisibleChars:"
+  },
+  {
+    "path": "Format",
+    "title": "Show Indent Guides",
+    "mods": [],
+    "key": "",
+    "action": "toggleIndentGuides:"
+  },
+  {
+    "path": "Format",
+    "title": "Show Page Guide",
+    "mods": [],
+    "key": "",
+    "action": "togglePageGuide:"
+  },
+  {
+    "path": "Format",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Writing Direction",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Orientation",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Horizontal",
+    "mods": [],
+    "key": "",
+    "action": "makeLayoutOrientationHorizontal:"
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Vertical",
+    "mods": [],
+    "key": "",
+    "action": "makeLayoutOrientationVertical:"
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Direction",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Left to Right",
+    "mods": [],
+    "key": "",
+    "action": "makeWritingDirectionLeftToRight:"
+  },
+  {
+    "path": "Format > Writing Direction",
+    "title": "Right to Left",
+    "mods": [],
+    "key": "",
+    "action": "makeWritingDirectionRightToLeft:"
+  },
+  {
+    "path": "Format",
+    "title": "Wrap Lines",
+    "mods": [],
+    "key": "",
+    "action": "toggleLineWrap:"
+  },
+  {
+    "path": "Format",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Format",
+    "title": "Prevent Editing",
+    "mods": [],
+    "key": "",
+    "action": "toggleEditable:"
+  },
+  {
+    "path": "",
+    "title": "View",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Show Tab Bar",
+    "mods": [
+      "command"
+    ],
+    "key": "T",
+    "action": "toggleTabBar:"
+  },
+  {
+    "path": "View",
+    "title": "Hide Toolbar",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "t",
+    "action": "toggleToolbarShown:"
+  },
+  {
+    "path": "View",
+    "title": "Customize Toolbar…",
+    "mods": [],
+    "key": "",
+    "action": "runToolbarCustomizationPalette:"
+  },
+  {
+    "path": "View",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Show Quick Actions…",
+    "mods": [
+      "command"
+    ],
+    "key": "k",
+    "action": "showQuickActions:"
+  },
+  {
+    "path": "View",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Sidebar",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View > Sidebar",
+    "title": "File Browser",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "1",
+    "action": "showFileBrowser:"
+  },
+  {
+    "path": "View > Sidebar",
+    "title": "Folder Find",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "2",
+    "action": "showFolderFinder:"
+  },
+  {
+    "path": "View > Sidebar",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View > Sidebar",
+    "title": "Show Sidebar",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "s",
+    "action": "toggleSidebar:"
+  },
+  {
+    "path": "View",
+    "title": "Inspector",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View > Inspector",
+    "title": "Document Inspector",
+    "mods": [],
+    "key": "",
+    "action": "showDocumentInspector:"
+  },
+  {
+    "path": "View > Inspector",
+    "title": "Outline",
+    "mods": [],
+    "key": "",
+    "action": "showOutlineInspector:"
+  },
+  {
+    "path": "View > Inspector",
+    "title": "Warnings",
+    "mods": [],
+    "key": "",
+    "action": "showWarningsInspector:"
+  },
+  {
+    "path": "View > Inspector",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View > Inspector",
+    "title": "Show Inspector",
+    "mods": [
+      "command"
+    ],
+    "key": "i",
+    "action": "toggleInspector:"
+  },
+  {
+    "path": "View",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Show Navigation Bar",
+    "mods": [],
+    "key": "",
+    "action": "toggleNavigationBar:"
+  },
+  {
+    "path": "View",
+    "title": "Show Line Numbers",
+    "mods": [],
+    "key": "",
+    "action": "toggleLineNumber:"
+  },
+  {
+    "path": "View",
+    "title": "Show Status Bar",
+    "mods": [],
+    "key": "",
+    "action": "toggleStatusBar:"
+  },
+  {
+    "path": "View",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Move Focus to Next Editor",
+    "mods": [
+      "control"
+    ],
+    "key": "`",
+    "action": "focusNextEditor:"
+  },
+  {
+    "path": "View",
+    "title": "Move Focus to Previous Editor",
+    "mods": [
+      "shift",
+      "control"
+    ],
+    "key": "`",
+    "action": "focusPreviousEditor:"
+  },
+  {
+    "path": "View",
+    "title": "Split Editor",
+    "mods": [],
+    "key": "",
+    "action": "openSplitTextView:"
+  },
+  {
+    "path": "View",
+    "title": "Close Split Editor",
+    "mods": [],
+    "key": "",
+    "action": "closeSplitTextView:"
+  },
+  {
+    "path": "View",
+    "title": "Stack Editors Vertically",
+    "mods": [],
+    "key": "",
+    "action": "toggleSplitOrientation:"
+  },
+  {
+    "path": "View",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "View",
+    "title": "Enter Full Screen",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "f",
+    "action": "toggleFullScreen:"
+  },
+  {
+    "path": "",
+    "title": "Text",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text",
+    "title": "Insert Snippet",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Insert Snippet",
+    "title": "Edit Snippets…",
+    "mods": [],
+    "key": "",
+    "action": "showSnippetEditor:"
+  },
+  {
+    "path": "Text",
+    "title": "Comment",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Comment",
+    "title": "Toggle Comment",
+    "mods": [
+      "command"
+    ],
+    "key": "/",
+    "action": "toggleComment:"
+  },
+  {
+    "path": "Text > Comment",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Comment",
+    "title": "Inline Comment",
+    "mods": [],
+    "key": "",
+    "action": "inlineCommentOut:"
+  },
+  {
+    "path": "Text > Comment",
+    "title": "Block Comment",
+    "mods": [],
+    "key": "",
+    "action": "blockCommentOut:"
+  },
+  {
+    "path": "Text > Comment",
+    "title": "Uncomment",
+    "mods": [],
+    "key": "",
+    "action": "uncomment:"
+  },
+  {
+    "path": "Text",
+    "title": "Indentation",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Indentation",
+    "title": "Shift Right",
+    "mods": [
+      "command"
+    ],
+    "key": "]",
+    "action": "shiftRight:"
+  },
+  {
+    "path": "Text > Indentation",
+    "title": "Shift Left",
+    "mods": [
+      "command"
+    ],
+    "key": "[",
+    "action": "shiftLeft:"
+  },
+  {
+    "path": "Text > Indentation",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Indentation",
+    "title": "Convert Indentation to Spaces",
+    "mods": [],
+    "key": "",
+    "action": "convertIndentationToSpaces:"
+  },
+  {
+    "path": "Text > Indentation",
+    "title": "Convert Indentation to Tabs",
+    "mods": [],
+    "key": "",
+    "action": "convertIndentationToTabs:"
+  },
+  {
+    "path": "Text",
+    "title": "Surround Selection With",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Single Quotes",
+    "mods": [
+      "command"
+    ],
+    "key": "'",
+    "action": "surroundSelectionWithSingleQuotes:"
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Double Quotes",
+    "mods": [
+      "command"
+    ],
+    "key": "\"",
+    "action": "surroundSelectionWithDoubleQuotes:"
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Parentheses",
+    "mods": [
+      "command"
+    ],
+    "key": "(",
+    "action": "surroundSelectionWithParentheses:"
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Braces",
+    "mods": [],
+    "key": "",
+    "action": "surroundSelectionWithBraces:"
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Brackets",
+    "mods": [],
+    "key": "",
+    "action": "surroundSelectionWithSquareBrackets:"
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Surround Selection With",
+    "title": "Custom…",
+    "mods": [
+      "command"
+    ],
+    "key": "L",
+    "action": "surroundSelection:"
+  },
+  {
+    "path": "Text",
+    "title": "Trim Trailing Whitespace",
+    "mods": [],
+    "key": "",
+    "action": "trimTrailingWhitespace:"
+  },
+  {
+    "path": "Text",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text",
+    "title": "Lines",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Move Up",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "",
+    "action": "moveLineUp:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Move Down",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "",
+    "action": "moveLineDown:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Sort",
+    "mods": [],
+    "key": "",
+    "action": "sortLinesAscending:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Sort by Pattern…",
+    "mods": [],
+    "key": "",
+    "action": "patternSort:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Reverse",
+    "mods": [],
+    "key": "",
+    "action": "reverseLines:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Shuffle",
+    "mods": [],
+    "key": "",
+    "action": "shuffleLines:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Delete Duplicates",
+    "mods": [],
+    "key": "",
+    "action": "deleteDuplicateLine:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Duplicate Line",
+    "mods": [
+      "command"
+    ],
+    "key": "D",
+    "action": "duplicateLine:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Delete Line",
+    "mods": [
+      "command",
+      "shift"
+    ],
+    "key": "\b",
+    "action": "deleteLine:"
+  },
+  {
+    "path": "Text > Lines",
+    "title": "Join Lines",
+    "mods": [
+      "command"
+    ],
+    "key": "J",
+    "action": "joinLines:"
+  },
+  {
+    "path": "Text",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text",
+    "title": "Transformations",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Make Upper Case",
+    "mods": [],
+    "key": "",
+    "action": "uppercaseWord:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Make Lower Case",
+    "mods": [],
+    "key": "",
+    "action": "lowercaseWord:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Capitalize",
+    "mods": [],
+    "key": "",
+    "action": "capitalizeWord:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Convert to Full Width",
+    "mods": [],
+    "key": "",
+    "action": "exchangeFullwidth:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Convert to Half Width",
+    "mods": [],
+    "key": "",
+    "action": "exchangeHalfwidth:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Convert Alphanumeric Text to Full Width",
+    "mods": [],
+    "key": "",
+    "action": "exchangeFullwidthRoman:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "Convert Alphanumeric Text to Half Width",
+    "mods": [],
+    "key": "",
+    "action": "exchangeHalfwidthRoman:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "URL Encode",
+    "mods": [],
+    "key": "",
+    "action": "encodeURL:"
+  },
+  {
+    "path": "Text > Transformations",
+    "title": "URL Decode",
+    "mods": [],
+    "key": "",
+    "action": "decodeURL:"
+  },
+  {
+    "path": "Text",
+    "title": "Unicode Normalizations",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Text",
+    "title": "Inspect Character",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "i",
+    "action": "showSelectionInfo:"
+  },
+  {
+    "path": "Text",
+    "title": "Advanced Character Count…",
+    "mods": [],
+    "key": "",
+    "action": "toggleAdvancedCounter:"
+  },
+  {
+    "path": "Text",
+    "title": "Edit Color Code…",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "h",
+    "action": "editColorCode:"
+  },
+  {
+    "path": "",
+    "title": "Find",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Find…",
+    "mods": [
+      "command"
+    ],
+    "key": "f",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Find Next",
+    "mods": [
+      "command"
+    ],
+    "key": "g",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Find Previous",
+    "mods": [
+      "command"
+    ],
+    "key": "G",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Find All",
+    "mods": [
+      "command"
+    ],
+    "key": "F",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Select All Find Matches",
+    "mods": [],
+    "key": "",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Use Selection for Find",
+    "mods": [
+      "command"
+    ],
+    "key": "e",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Use Selection for Replace",
+    "mods": [
+      "command"
+    ],
+    "key": "E",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Jump to Selection",
+    "mods": [
+      "command"
+    ],
+    "key": "j",
+    "action": "centerSelectionInVisibleArea:"
+  },
+  {
+    "path": "Find",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Replace",
+    "mods": [],
+    "key": "",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Replace and Find Next",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "g",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Replace All",
+    "mods": [],
+    "key": "",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Multiple Replace",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find > Multiple Replace",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find > Multiple Replace",
+    "title": "Manage Multiple Replace…",
+    "mods": [],
+    "key": "",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Highlight All",
+    "mods": [
+      "command"
+    ],
+    "key": "H",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "Remove Highlights",
+    "mods": [
+      "command",
+      "control"
+    ],
+    "key": "H",
+    "action": "performTextFinderAction:"
+  },
+  {
+    "path": "Find",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Open Outline Menu",
+    "mods": [],
+    "key": "",
+    "action": "openOutlineMenu:"
+  },
+  {
+    "path": "Find",
+    "title": "Select Previous Outline Item",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "",
+    "action": "selectPrevItemOfOutlineMenu:"
+  },
+  {
+    "path": "Find",
+    "title": "Select Next Outline Item",
+    "mods": [
+      "command",
+      "option"
+    ],
+    "key": "",
+    "action": "selectNextItemOfOutlineMenu:"
+  },
+  {
+    "path": "Find",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Find",
+    "title": "Go to Line…",
+    "mods": [
+      "command"
+    ],
+    "key": "l",
+    "action": "gotoLocation:"
+  },
+  {
+    "path": "",
+    "title": "Window",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Window",
+    "title": "Minimize",
+    "mods": [
+      "command"
+    ],
+    "key": "m",
+    "action": "performMiniaturize:"
+  },
+  {
+    "path": "Window",
+    "title": "Zoom",
+    "mods": [],
+    "key": "",
+    "action": "performZoom:"
+  },
+  {
+    "path": "Window",
+    "title": "Keep on Top",
+    "mods": [],
+    "key": "",
+    "action": "toggleKeepOnTop:"
+  },
+  {
+    "path": "Window",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Window",
+    "title": "Bring All to Front",
+    "mods": [],
+    "key": "",
+    "action": "arrangeInFront:"
+  },
+  {
+    "path": "Window",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Window",
+    "title": "Console",
+    "mods": [],
+    "key": "",
+    "action": "showConsolePanel:"
+  },
+  {
+    "path": "",
+    "title": "Script",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "",
+    "title": "Help",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Help",
+    "title": "CotEditor Help",
+    "mods": [
+      "command"
+    ],
+    "key": "?",
+    "action": "showHelp:"
+  },
+  {
+    "path": "Help",
+    "title": "CotEditor Scripting Guide",
+    "mods": [],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Help > CotEditor Scripting Guide",
+    "title": "About Scripting",
+    "mods": [],
+    "key": "",
+    "action": "openHelpAnchor:"
+  },
+  {
+    "path": "Help > CotEditor Scripting Guide",
+    "title": "AppleScript Dictionary",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": "openAppleScriptDictionary:"
+  },
+  {
+    "path": "Help",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Help",
+    "title": "What’s New in CotEditor",
+    "mods": [],
+    "key": "",
+    "action": "showWhatsNew:"
+  },
+  {
+    "path": "Help",
+    "title": "Release Notes",
+    "mods": [],
+    "key": "",
+    "action": "openHelpAnchor:"
+  },
+  {
+    "path": "Help",
+    "title": "-",
+    "mods": [
+      "command"
+    ],
+    "key": "",
+    "action": null
+  },
+  {
+    "path": "Help",
+    "title": "Create Issue Report",
+    "mods": [],
+    "key": "",
+    "action": "createBugReport:"
+  },
+  {
+    "path": "Help",
+    "title": "Report Issue",
+    "mods": [
+      "option"
+    ],
+    "key": "",
+    "action": "reportBug:"
+  },
+  {
+    "path": "Help",
+    "title": "CotEditor Web Site",
+    "mods": [],
+    "key": "",
+    "action": "openWebSite:"
+  }
 ]
