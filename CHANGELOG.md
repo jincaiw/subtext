@@ -67,6 +67,17 @@
   含 setuid/setgid/sticky）/ Owner，日期按本机时区格式化。
 - **`Icon::rotate` 让分屏方向回到「一个符号转 -90°」**，与上游的
   `.rotationEffect(.degrees(isVertical ? -90 : 0))` 同形。
+- **Inspect Character 改成锚定选中字符的 popover**：原来是模态对话框加十行平铺的
+  键值，现在是上游那样 —— 贴在字符上方（装不下翻到下方）、点外面或按 Escape 关掉、
+  选区不是一个字符就不弹。内容也按 `CharacterInspectorView` 重排：一个大字形、
+  名字（多标量时写 `<a letter consisting of N characters>`，无名时写 *Unknown*），
+  然后是 Code Point（含代理对，deprecated 时带徽标）/ Block（点一下换成
+  `Blocks.txt` 的名字）/ Category / Version；多标量的字符改成每个标量一个可折叠行。
+  变体字符（`✔️`、`👍🏻`）名字后面括号里写 *Emoji Style* / *Skin Tone I-II*，
+  控制字符的大字形画的是 Control Picture（`␀`、`␊`、`␡`）并改用次级色。
+- **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
+  `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
+  （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
 
 **运行时填充的菜单**
 
@@ -110,6 +121,9 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
   现在分别按扩展字形簇、上游的行数规则与 UAX #29 词边界算，并把上游
   `StringCountingTests.swift` 的四组向量搬成测试。**`Words` 与上游仍有一处差异**
   （ICU 的分词带词典），已记账。
+- **多标量字符的 Inspect Character 一打开就崩**：每个标量一行的展开状态是按标量序号
+  取的，而选中时只建了 Block 名的那个向量，于是 `index out of bounds` 直接把进程
+  abort。两个向量现在一起按标量数建好，取值也改成越界时当作收起。
 - **状态栏的六个开关没有代码读**：Window 面板 *Status Bar* 一节的  *Show lines / characters / words / location / line / column* 六项，此前改了没有任何
   反应 —— 与上面那条 BOM 开关是同一类缺陷（界面在，行为不在）。状态栏按上游重写后
   六个开关各自生效，关掉的项不再出现。
@@ -164,16 +178,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**579** 项测试全部通过（v0.1.0 是 124 项）：
+**588** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 326 |
+| `subtext-core` | 335 |
 | `subtext-app` | 216 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **579** |
+| **合计** | **588** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

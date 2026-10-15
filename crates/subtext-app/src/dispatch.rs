@@ -318,7 +318,7 @@ impl Workspace {
             "DecodeUrl" => self.text_op(window, cx, |text, selection, _| {
                 textops::url_decode(text, selection)
             }),
-            "ShowSelectionInfo" => self.inspect_selection(window, cx),
+            "ShowSelectionInfo" => self.inspect_selection(cx),
             "ToggleAdvancedCounter" => self.inspect_document(window, cx),
             "EditColorCode" => self.color_code_dialog(window, cx),
             "ShowSnippetEditor" => self.show_settings_pane(SettingsPane::Snippets, cx),

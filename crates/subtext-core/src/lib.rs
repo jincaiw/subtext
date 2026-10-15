@@ -22,6 +22,7 @@ pub mod multireplace;
 pub mod scripts;
 pub mod snippets;
 pub mod textops;
+pub mod unicode_tables;
 
 pub use charinfo::{CharacterCount, CharacterInfo, CharacterReport, Count, GeneralCategory, ScalarInfo};
 pub use colorcode::{Color, ColorCodeType};

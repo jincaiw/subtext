@@ -188,6 +188,23 @@ pub struct ScalarInfo {
     /// [`block_name`].
     pub block: Option<&'static str>,
     pub category: GeneralCategory,
+    /// The glyph to draw in place of an invisible control character, from the
+    /// Unicode Control Pictures block — space is `␠`, DELETE is `␡`. Upstream's
+    /// `Unicode.Scalar.pictureRepresentation`, and the reason its big glyph is
+    /// drawn in the secondary colour for a control character.
+    pub picture: Option<char>,
+    /// `Unicode.Scalar.Properties.isDeprecated`.
+    pub is_deprecated: bool,
+    /// The Unicode version that assigned the scalar, as `(major, minor)`.
+    /// `None` for a scalar Unicode has not assigned.
+    pub age: Option<(u8, u8)>,
+    /// What the scalar varies, when it is a variation selector or a skin-tone
+    /// modifier: `Text Style`, `Emoji Style`, `Skin Tone III`, `Variant`.
+    /// Upstream's `Unicode.Scalar.variantDescription`.
+    pub variant_description: Option<&'static str>,
+    /// The UTF-16 surrogate pair as two code points, for a scalar outside the
+    /// Basic Multilingual Plane.
+    pub surrogate_code_points: Option<(String, String)>,
 }
 
 impl ScalarInfo {
@@ -201,6 +218,11 @@ impl ScalarInfo {
                 .or_else(|| control_character_name(value)),
             block: block_name(value),
             category: GeneralCategory::of(c),
+            picture: picture_representation(value),
+            is_deprecated: crate::unicode_tables::is_deprecated(value),
+            age: crate::unicode_tables::age(value),
+            variant_description: variant_description(value),
+            surrogate_code_points: surrogate_code_points(c),
         }
     }
 
@@ -213,16 +235,76 @@ impl ScalarInfo {
     pub fn display_block(&self) -> &str {
         self.block.map_or("No Block", display_block_name)
     }
+
+    /// The Code Point row: the code point, with the surrogate pair beside it
+    /// when the scalar needs one — upstream writes `U+1F600 (D83D DE00)`.
+    pub fn code_point_with_surrogates(&self) -> String {
+        match &self.surrogate_code_points {
+            Some((lead, trail)) => format!("{} ({lead} {trail})", self.code_point),
+            None => self.code_point.clone(),
+        }
+    }
+
+    /// The Version row: `Unicode 1.1`, or nothing where Unicode has not
+    /// assigned the scalar.
+    pub fn version(&self) -> Option<String> {
+        self.age.map(|(major, minor)| format!("Unicode {major}.{minor}"))
+    }
 }
 
-/// The **Character** section of the document inspector.
+/// The control-picture glyph for an invisible control character.
+///
+/// Upstream's `Unicode.Scalar.pictureRepresentation`: the C0 range plus space
+/// map into the Control Pictures block at a fixed offset, and DELETE has a
+/// picture of its own.
+fn picture_representation(value: u32) -> Option<char> {
+    match value {
+        0x0000..=0x0020 => char::from_u32(value + 0x2400),
+        0x007F => char::from_u32(0x2421),
+        _ => None,
+    }
+}
+
+/// What a variation selector or a skin-tone modifier varies.
+fn variant_description(value: u32) -> Option<&'static str> {
+    match value {
+        0xFE0E => Some("Text Style"),
+        0xFE0F => Some("Emoji Style"),
+        0x1F3FB => Some("Skin Tone I-II"),
+        0x1F3FC => Some("Skin Tone III"),
+        0x1F3FD => Some("Skin Tone IV"),
+        0x1F3FE => Some("Skin Tone V"),
+        0x1F3FF => Some("Skin Tone VI"),
+        _ if crate::unicode_tables::is_variation_selector(value) => Some("Variant"),
+        _ => None,
+    }
+}
+
+/// The surrogate pair of a scalar outside the Basic Multilingual Plane.
+///
+/// `None` for a scalar that fits in one UTF-16 code unit — upstream's
+/// `isSurrogatePair`, which is what decides whether the Code Point row shows a
+/// pair at all.
+fn surrogate_code_points(c: char) -> Option<(String, String)> {
+    let mut units = [0u16; 2];
+    match *c.encode_utf16(&mut units) {
+        [lead, trail] => Some((format!("{lead:04X}"), format!("{trail:04X}"))),
+        _ => None,
+    }
+}
+
+/// The **Character** section of the document inspector, and the whole of the
+/// Inspect Character panel.
 ///
 /// Upstream keeps `EditorCounter.Result.character`: the first selected
 /// *character* — one extended grapheme cluster — and only while the selection
-/// is exactly one of them. The section is drawn from that character's scalars,
-/// and shows nothing at all when there are none.
+/// is exactly one of them. Both surfaces are drawn from that character's
+/// scalars, and both show nothing at all when there are none.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterReport {
+    /// The character itself, as text. Empty when the selection is not one
+    /// character.
+    pub character: String,
     /// One entry per scalar value, in order. Empty means "not selected", which
     /// is what an empty selection, a multi-character selection and a selection
     /// that does not sit on character boundaries all give.
@@ -235,9 +317,10 @@ impl CharacterReport {
     pub fn of(selected: &str) -> Self {
         let mut characters = selected.graphemes(true);
         match (characters.next(), characters.next()) {
-            (Some(character), None) => {
-                Self { scalars: character.chars().map(ScalarInfo::of).collect() }
-            }
+            (Some(character), None) => Self {
+                character: character.to_string(),
+                scalars: character.chars().map(ScalarInfo::of).collect(),
+            },
             _ => Self::default(),
         }
     }
@@ -259,6 +342,47 @@ impl CharacterReport {
     /// The code points, in order, as the section's Code Point(s) row lists them.
     pub fn code_points(&self) -> Vec<&str> {
         self.scalars.iter().map(|scalar| scalar.code_point.as_str()).collect()
+    }
+
+    /// Whether the character is one scalar wearing a variant selector.
+    ///
+    /// Upstream's `Character.isVariant`: exactly two scalars, the second a
+    /// variation selector or a skin-tone modifier. Such a character is *not*
+    /// "complex" — it has a name of its own, with the variant in parentheses.
+    pub fn is_variant(&self) -> bool {
+        self.scalars.len() == 2 && self.scalars[1].variant_description.is_some()
+    }
+
+    /// Whether the character is several scalars and not a variant.
+    ///
+    /// Upstream's `Character.isComplex`. Such a character has no name, and the
+    /// panel says how many scalars it is made of instead.
+    pub fn is_complex(&self) -> bool {
+        self.scalars.len() > 1 && !self.is_variant()
+    }
+
+    /// The headline: the character's name, with its variant in parentheses, or
+    /// a note that it is several characters, or nothing when Unicode names none
+    /// of them. Upstream's `Character.localizedDescription`.
+    pub fn description(&self) -> Option<String> {
+        if self.is_complex() {
+            return Some(format!("<a letter consisting of {} characters>", self.scalars.len()));
+        }
+        let name = self.scalars.first()?.name.as_deref()?;
+        Some(match self.scalars.last().and_then(|scalar| scalar.variant_description) {
+            Some(variant) => format!("{name} ({variant})"),
+            None => name.to_string(),
+        })
+    }
+
+    /// The big glyph the panel draws beside the detail.
+    ///
+    /// Upstream's `Character.pictureCharacter`: a control character is drawn as
+    /// its Control Picture rather than as an invisible glyph — and only a
+    /// single-scalar character has one, which is the `ignore CRLF` note in its
+    /// source. `None` means "draw the character itself".
+    pub fn picture(&self) -> Option<char> {
+        if self.scalars.len() == 1 { self.scalars[0].picture } else { None }
     }
 }
 
@@ -1085,6 +1209,7 @@ mod tests {
         let report = CharacterReport::of("😀");
         assert_eq!(report.code_points(), vec!["U+1F600"]);
         assert!(report.is_single_scalar());
+        assert_eq!(report.character, "😀");
 
         // A flag is one character of two scalars: the code points are listed
         // and the three single-scalar rows are not.
@@ -1101,6 +1226,100 @@ mod tests {
         // points and none of the single-scalar rows.
         assert_eq!(CharacterReport::of("\r\n").code_points(), vec!["U+000D", "U+000A"]);
         assert!(!CharacterReport::of("\r\n").is_single_scalar());
+    }
+
+    #[test]
+    fn an_invisible_control_character_is_drawn_as_its_picture() {
+        // Upstream's `pictureRepresentation`, which is why the big glyph is
+        // greyed for a control character: the picture is a stand-in, the
+        // character itself would be invisible.
+        assert_eq!(ScalarInfo::of('\u{0}').picture, Some('␀'));
+        assert_eq!(ScalarInfo::of('\n').picture, Some('␊'));
+        assert_eq!(ScalarInfo::of(' ').picture, Some('␠'));
+        assert_eq!(ScalarInfo::of('\u{7F}').picture, Some('␡'));
+        assert_eq!(ScalarInfo::of('A').picture, None);
+
+        // Only a single-scalar character has one.
+        assert_eq!(CharacterReport::of("\r\n").picture(), None);
+        assert_eq!(CharacterReport::of("A").picture(), None);
+        assert_eq!(CharacterReport::of("\t").picture(), Some('␉'));
+    }
+
+    #[test]
+    fn a_variant_is_not_a_complex_character() {
+        // Two scalars, the second a variation selector: the character keeps its
+        // name and gains the variant in parentheses.
+        let check = CharacterReport::of("✔\u{FE0F}");
+        assert!(check.is_variant());
+        assert!(!check.is_complex());
+        assert_eq!(check.description().as_deref(), Some("HEAVY CHECK MARK (Emoji Style)"));
+
+        // The text-style selector is the other half of that pair.
+        let text = CharacterReport::of("✔\u{FE0E}");
+        assert_eq!(text.description().as_deref(), Some("HEAVY CHECK MARK (Text Style)"));
+
+        // A skin-tone modifier is a variant too.
+        let thumb = CharacterReport::of("👍🏻");
+        assert!(thumb.is_variant());
+        assert_eq!(thumb.description().as_deref(), Some("THUMBS UP SIGN (Skin Tone I-II)"));
+
+        // A general variation selector has no name of its own.
+        assert_eq!(CharacterReport::of("A\u{FE00}").description().as_deref(), Some("LATIN CAPITAL LETTER A (Variant)"));
+    }
+
+    #[test]
+    fn a_complex_character_says_how_many_scalars_it_is() {
+        // A pirate flag: four scalars, none of them a trailing variant.
+        let pirate = CharacterReport::of("🏴\u{200D}☠\u{FE0F}");
+        assert_eq!(pirate.scalars.len(), 4);
+        assert!(pirate.is_complex());
+        assert!(!pirate.is_variant());
+        assert_eq!(pirate.description().as_deref(), Some("<a letter consisting of 4 characters>"));
+
+        // Two regional indicators are two scalars, and neither is a variant.
+        let flags = CharacterReport::of("🇦🇦");
+        assert!(flags.is_complex());
+        assert_eq!(flags.description().as_deref(), Some("<a letter consisting of 2 characters>"));
+    }
+
+    #[test]
+    fn an_unnamed_character_has_no_headline() {
+        // A private-use scalar has no name, so the panel says "Unknown" — the
+        // `description` is what tells it to.
+        assert_eq!(CharacterReport::of("\u{E000}").description(), None);
+        // A control character does have one, by convention.
+        assert_eq!(CharacterReport::of("\n").description().as_deref(), Some("LINE FEED"));
+    }
+
+    #[test]
+    fn the_code_point_row_shows_the_surrogate_pair() {
+        let grinning = ScalarInfo::of('😀');
+        assert_eq!(grinning.surrogate_code_points, Some(("D83D".into(), "DE00".into())));
+        assert_eq!(grinning.code_point_with_surrogates(), "U+1F600 (D83D DE00)");
+
+        // A scalar that fits in one UTF-16 code unit has no pair to show.
+        let ascii = ScalarInfo::of('A');
+        assert_eq!(ascii.surrogate_code_points, None);
+        assert_eq!(ascii.code_point_with_surrogates(), "U+0041");
+    }
+
+    #[test]
+    fn the_version_row_is_the_unicode_version_that_assigned_the_scalar() {
+        assert_eq!(ScalarInfo::of('A').version().as_deref(), Some("Unicode 1.1"));
+        assert_eq!(ScalarInfo::of('€').version().as_deref(), Some("Unicode 2.1"));
+        assert_eq!(ScalarInfo::of('😀').version().as_deref(), Some("Unicode 6.1"));
+        // An unassigned scalar has no version, which is the empty row. The
+        // private-use planes are *assigned* — they are 2.0 — so the example has
+        // to be a real gap in Unicode's coverage.
+        let unassigned = ScalarInfo::of('\u{34000}');
+        assert_eq!(unassigned.age, None);
+        assert_eq!(unassigned.version(), None);
+    }
+
+    #[test]
+    fn the_deprecated_flag_is_unicode_s_own() {
+        assert!(ScalarInfo::of('\u{149}').is_deprecated);
+        assert!(!ScalarInfo::of('A').is_deprecated);
     }
 
     #[test]

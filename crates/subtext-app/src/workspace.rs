@@ -35,8 +35,10 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::input::InputEvent;
 use gpui_kit::base::AccordionTrigger;
 use gpui_kit::base::StyledExt as _;
+use gpui_kit::base::{Placement, Positioner};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
+    WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::{DialogClose, DialogFooter},
     h_flex, h_resizable,
@@ -52,7 +54,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
+    KeyDownEvent, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    WeakEntity, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, percentage, px,
     rems,
 };
@@ -384,6 +387,20 @@ pub struct Workspace {
     /// *somewhere*: the accordion rebuilds its own state on every frame, and
     /// the inspector redraws on every keystroke.
     inspector_sections: [bool; INSPECTOR_SECTION_COUNT],
+    /// The Inspect Character popover, while it is up: the selection it was
+    /// opened for, and what that selection is.
+    ///
+    /// Held together so the surface cannot outlive its subject — the popover is
+    /// only drawn while the selection is still the one it describes.
+    inspect_character: Option<(Range<usize>, charinfo::CharacterReport)>,
+    /// Whether each Block row of that popover is showing the name the interface
+    /// uses rather than the one `Blocks.txt` gives.
+    ///
+    /// One per row, because upstream keeps `isBlockNameLocalized` as `@State`
+    /// inside `ScalarDetailView`, so every row remembers its own.
+    inspect_block_localized: Vec<bool>,
+    /// Which of the popover's per-scalar rows are open.
+    inspect_scalar_open: Vec<bool>,
 }
 
 impl Workspace {
@@ -485,6 +502,9 @@ impl Workspace {
             menus_built_for: None,
             scripts: Vec::new(),
             inspector_sections: [true; INSPECTOR_SECTION_COUNT],
+            inspect_character: None,
+            inspect_block_localized: Vec::new(),
+            inspect_scalar_open: Vec::new(),
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -2553,49 +2573,323 @@ impl Workspace {
 
     // ---- inspectors ------------------------------------------------------
 
-    /// The Text ▸ Inspect Character panel.
-    pub fn inspect_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = self.active_text(cx) else {
-            return;
-        };
+    /// `Text ▸ Inspect Character` (⌃⌘I) — upstream's `showSelectionInfo`.
+    ///
+    /// Upstream shows this as a **popover anchored to the selected character**
+    /// (`present(_:asPopoverRelativeTo:of:preferredEdge: .minY, behavior:
+    /// .semitransient)`), not as a window: it is a question about one character,
+    /// and a modal dialog for it interrupts the editing it is meant to serve.
+    ///
+    /// Upstream's guard is `textView.selectsSingleCharacter` followed by an
+    /// `assertionFailure()`, so in a release build a multi-character selection
+    /// simply does nothing. SubText says why instead of swallowing the
+    /// keystroke — the menu item cannot grey itself out, for the reason
+    /// `Straighten Quotes` cannot either (see the gap table).
+    pub fn inspect_selection(&mut self, cx: &mut Context<Self>) {
+        let text = self.active_text(cx);
         let selection = self.active_selection(cx);
-        if selection.is_empty() || selection.end > text.len() {
-            self.set_status("Select a character first", cx);
+        let selected = text.as_deref().and_then(|text| text.get(selection.clone()));
+        let report = selected.map_or_else(charinfo::CharacterReport::default, |selected| {
+            charinfo::CharacterReport::of(selected)
+        });
+        if report.is_empty() {
+            self.set_status("Select a single character to inspect", cx);
             return;
         }
-        let character = text[selection.clone()].chars().next().unwrap_or(' ');
-        let encoding = self
-            .documents
-            .get(self.active)
-            .map_or(TextEncoding::UTF8, |document| document.document.encoding());
-        let info = charinfo::CharacterInfo::new(character, encoding);
 
-        let rows = vec![
-            ("Character", info.character.to_string()),
-            ("Name", info.scalar.display_name().to_string()),
-            ("Code Point", info.code_point().to_string()),
-            ("Category", info.scalar.category.to_string()),
-            ("Block", info.scalar.display_block().to_string()),
-            ("UTF-8", info.utf8.clone()),
-            ("UTF-16", info.utf16.clone()),
-            ("Decimal", info.decimal().to_string()),
-            ("HTML Entity", info.html_entity.clone()),
-            ("Width", info.width.to_string()),
-        ];
-        window.open_dialog(cx, move |dialog, window, _| {
-            let mut body = v_flex().gap_1().p_1();
-            for (label, value) in &rows {
-                body = body.child(
-                    h_flex()
-                        .gap_3()
-                        .justify_between()
-                        .child(div().text_xs().child(label.to_string()))
-                        .child(div().text_xs().child(value.clone())),
+        // One toggle per row: upstream keeps `isBlockNameLocalized` as `@State`
+        // *inside* `ScalarDetailView`, so each row remembers its own. The
+        // per-scalar rows start closed, which is what a `DisclosureGroup` with
+        // no `isExpanded` binding does.
+        self.inspect_block_localized = vec![true; report.scalars.len()];
+        self.inspect_scalar_open = vec![false; report.scalars.len()];
+        self.inspect_character = Some((selection, report));
+        cx.notify();
+    }
+
+    /// The Inspect Character popover — upstream's `CharacterInspectorView`.
+    ///
+    /// `None` while it is not up, and also once the selection is no longer the
+    /// one it describes: a surface anchored to a selection must not outlive it,
+    /// which is what upstream's `.semitransient` behaviour amounts to here.
+    fn render_inspect_character(
+        &self,
+        rem: gpui_kit::Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (range, report) = self.inspect_character.as_ref()?;
+        let editor = self.active_document()?.editor().clone();
+        let anchor = {
+            let state = editor.read(cx);
+            if state.selected_range() != *range {
+                return None;
+            }
+            // `None` while the character is scrolled out of view — there is
+            // nothing on screen to point at.
+            state.range_to_bounds(range)?
+        };
+
+        let detail = self.render_character_detail(report, cx);
+
+        // The glyph is drawn large, and greyed when it is a *picture* of an
+        // invisible control character rather than the character itself —
+        // upstream's `textColor = pictureCharacter != nil ? .tertiaryLabelColor
+        // : .labelColor`. It is a serif face upstream; the theme has one
+        // proportional family and no serif, so the interface font is used.
+        let glyph = report.picture().map_or_else(
+            || (report.character.clone(), false),
+            |picture| (picture.to_string(), true),
+        );
+        let surface = h_flex()
+            .items_start()
+            .gap_3()
+            .p_3()
+            .popover_style(cx)
+            .shadow_md()
+            .child(
+                div()
+                    .flex_none()
+                    .min_w(rems(4.))
+                    .text_size(rems(4.))
+                    .text_color(if glyph.1 {
+                        cx.theme().muted_foreground
+                    } else {
+                        cx.theme().foreground
+                    })
+                    .child(glyph.0),
+            )
+            .child(detail);
+
+        Some(
+            Positioner::side(anchor)
+                // Upstream's `preferredEdge: .minY` — above the character.
+                // `Positioner` flips it below when there is no room, which is
+                // what AppKit does with the same preference.
+                .placement(Placement::Top)
+                // `Positioner` takes pixels, so the design scale is applied
+                // by hand here the way `Dialog::w` and `resizable_panel().size()`
+                // do.
+                .offset(rem * 0.5)
+                .margin(rem * 0.5)
+                .occlude()
+                .child(surface)
+                .into_any_element(),
+        )
+    }
+
+    /// The right-hand column of the Inspect Character popover: the headline,
+    /// then either one scalar's detail or one collapsible row per scalar.
+    fn render_character_detail(
+        &self,
+        report: &charinfo::CharacterReport,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut detail = v_flex().gap_1();
+        match report.description() {
+            Some(description) => {
+                detail = detail.child(
+                    div()
+                        .when(!report.is_complex(), |this| {
+                            this.font_weight(FontWeight::SEMIBOLD)
+                        })
+                        .child(description),
                 );
             }
-            // `Dialog::w` takes pixels; scale by hand, as above.
-            dialog.title("Inspect Character").w(window.rem_size() * 22.).child(body)
-        });
+            // Upstream's "Unknown": the character has no Unicode name to show.
+            None => {
+                detail = detail
+                    .child(div().text_color(cx.theme().muted_foreground).child("Unknown"));
+            }
+        }
+
+        if report.is_single_scalar() {
+            detail = detail.child(self.render_scalar_detail(&report.scalars[0], 0, true, cx));
+        }
+
+        // A character of several scalars gets a row each, so the panel can say
+        // what every part of it is. Upstream shows only the block and the
+        // category there — the code point and the version are in the row's own
+        // label and in the single-scalar case.
+        if report.scalars.len() > 1 {
+            let mut rows = v_flex().gap_1();
+            for (index, scalar) in report.scalars.iter().enumerate() {
+                rows = rows.child(self.render_scalar_row(index, scalar, cx));
+            }
+            detail = detail.child(rows);
+        }
+
+        detail.into_any_element()
+    }
+
+    /// One collapsible row of a multi-scalar character.
+    fn render_scalar_row(
+        &self,
+        index: usize,
+        scalar: &charinfo::ScalarInfo,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let workspace = cx.entity().downgrade();
+        let open = self.inspect_scalar_open.get(index).copied().unwrap_or(false);
+        let trigger = AccordionTrigger::new(("inspect-scalar", index))
+            .open(open)
+            .h_flex()
+            .w_full()
+            .gap_1()
+            .on_change(move |open, _, _, cx| {
+                workspace
+                    .update(cx, |this, cx| {
+                        if let Some(row) = this.inspect_scalar_open.get_mut(index) {
+                            *row = open;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+            })
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .xsmall()
+                    .flex_none()
+                    .text_color(cx.theme().muted_foreground)
+                    .rotate(percentage(if open { 0.25 } else { 0. })),
+            )
+            // Upstream's label is the code point, in tabular figures so the
+            // column of them lines up, then the name in medium weight.
+            .child(
+                div()
+                    .flex_none()
+                    .min_w(rems(3.5))
+                    .child(scalar.code_point.clone()),
+            )
+            .child(div().font_weight(FontWeight::MEDIUM).child(scalar.display_name().to_string()));
+
+        v_flex()
+            .w_full()
+            .child(trigger)
+            .when(open, |this| {
+                this.child(
+                    h_flex()
+                        .items_start()
+                        .gap_2()
+                        .pb_1()
+                        .child(
+                            div()
+                                .flex_none()
+                                .min_w(rems(2.))
+                                .text_size(rems(1.75))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(
+                                    scalar.picture.map_or_else(
+                                        || {
+                                            char::from_u32(scalar.value)
+                                                .map(String::from)
+                                                .unwrap_or_default()
+                                        },
+                                        String::from,
+                                    ),
+                                ),
+                        )
+                        .child(self.render_scalar_detail(scalar, index, false, cx)),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// A `Grid` of label/value rows — upstream's `ScalarDetailView`.
+    ///
+    /// `with_code_point` is its `items:` set: `.all` for the single-scalar case,
+    /// `[.block, .category]` for a row of a multi-scalar character.
+    fn render_scalar_detail(
+        &self,
+        scalar: &charinfo::ScalarInfo,
+        index: usize,
+        with_code_point: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut rows = v_flex().gap_0p5();
+        let row = |label: &str, value: AnyElement, cx: &App| {
+            h_flex()
+                .items_start()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_none()
+                        .min_w(rems(4.5))
+                        .text_right()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{label}:")),
+                )
+                .child(div().min_w_0().child(value))
+        };
+
+        if with_code_point {
+            let code_point = scalar.code_point_with_surrogates();
+            rows = rows.child(row(
+                "Code Point",
+                h_flex()
+                    .gap_1()
+                    .child(code_point)
+                    // Upstream's `DeprecatedBadge`: a bordered word beside the
+                    // code point, only when Unicode has deprecated the scalar.
+                    .when(scalar.is_deprecated, |this| {
+                        this.child(
+                            div()
+                                .px_0p5()
+                                .rounded(cx.theme().radius)
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .text_color(cx.theme().muted_foreground)
+                                .text_xs()
+                                .child("deprecated"),
+                        )
+                    })
+                    .into_any_element(),
+                cx,
+            ));
+        }
+
+        // The block is a button, not a value: clicking it swaps the name the
+        // interface uses for the one `Blocks.txt` gives. An unassigned scalar
+        // has no block to toggle, so it stays a muted word.
+        let localized = self.inspect_block_localized.get(index).copied().unwrap_or(true);
+        let block = match scalar.block {
+            Some(block) if localized => charinfo::display_block_name(block).to_string(),
+            Some(block) => block.to_string(),
+            None => "No Block".to_string(),
+        };
+        let mut block_value = Button::new(("inspect-block", index))
+            .ghost()
+            .xsmall()
+            .label(block)
+            .tooltip("Show the Unicode block name");
+        if scalar.block.is_none() {
+            block_value = block_value.disabled(true);
+        }
+        rows = rows.child(row(
+            "Block",
+            block_value
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(localized) = this.inspect_block_localized.get_mut(index) {
+                        *localized = !*localized;
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+            cx,
+        ));
+
+        rows = rows.child(row(
+            "Category",
+            div().child(scalar.category.to_string()).into_any_element(),
+            cx,
+        ));
+
+        // The version is drawn only when Unicode has assigned the scalar, which
+        // is upstream's `if let age`.
+        if let Some(version) = scalar.version() {
+            rows = rows.child(row("Version", div().child(version).into_any_element(), cx));
+        }
+
+        rows.into_any_element()
     }
 
     /// The advanced character counter, which CotEditor puts behind ⌥⌘C.
@@ -4682,7 +4976,19 @@ impl Render for Workspace {
         let mut root = v_flex()
             .size_full()
             .bg(cx.theme().background)
-            .text_color(cx.theme().foreground);
+            .text_color(cx.theme().foreground)
+            // Escape dismisses the Inspect Character popover. The capture phase
+            // is the only place the workspace can see that key: the popover
+            // deliberately does not take focus — upstream's does not either, and
+            // a popover that stole the caret would end the edit it is meant to
+            // describe — so the editor would otherwise be first in line.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.inspect_character.is_some() && event.keystroke.key == "escape" {
+                    this.inspect_character = None;
+                    window.prevent_default();
+                    cx.notify();
+                }
+            }));
 
         if self.settings.window.show_toolbar {
             root = root.child(self.render_toolbar(cx));
@@ -4819,6 +5125,34 @@ impl Render for Workspace {
         // inside the content column (above) and the navigation bar inside each
         // editor pane (`render_editor_area`). A bar at this level would span the
         // sidebar and the inspector as well, which neither of upstream's does.
+        //
+        // The Inspect Character popover is the last child, so it is laid out
+        // after everything it points at and painted over it. Upstream's is
+        // `.semitransient`: the first click outside dismisses it, and that
+        // click does not reach what is underneath. The full-size element behind
+        // the popover is that dismissal.
+        if let Some(popover) = self.render_inspect_character(window.rem_size(), cx) {
+            root = root.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .occlude()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.inspect_character = None;
+                                    cx.notify();
+                                }),
+                            ),
+                    )
+                    .child(popover),
+            );
+        }
+
         root
     }
 }

@@ -225,6 +225,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.14 | 默认编码是一个「文件编码」 | 上游选的是 `FileEncoding`（codec + BOM）；SubText 选 codec，BOM 开关是死的 | ✅ |
 | 8.15 | 文档窗口的状态栏与导航栏 | 上游两者都不在窗口这一层：状态栏属于内容列、导航栏属于每个分屏 | ✅ |
 | 8.16 | 文档检查器按上游重排 | 8.15 读窗口层次时发现检查器的行集是自编的；顺带查出三个计数（Characters / Lines / Words）算错 | ✅ |
+| 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1857,14 +1858,107 @@ stdout/stderr 各 0 字节。**并且第一次真正看到了界面**：用 `CGW
 取窗口号 + `screencapture -l` 截了应用窗口，逐段核对了四段的每一行、
 折叠态（`File` 收起后行消失、三角转回朝右）与单标量 / 多标量两种 Character 段。
 
+### 8.17 Inspect Character 改成锚定选区的 popover ✅
+
+§8.16 补 `ScalarInfo` 时顺手发现：`Text ▸ Inspect Character`（⌃⌘I）在 SubText 里是一个
+**模态对话框**，十行平铺的键值；上游不是窗口，也不长这样。
+
+#### 上游是一个 popover
+
+```swift
+// EditorTextViewController.showSelectionInfo
+guard self.textView.selectsSingleCharacter,
+      let character = self.textView.selectedString.first
+else { return assertionFailure() }
+
+let view = NSHostingView(rootView: CharacterInspectorView(character).padding(14))
+...
+present(popoverController, asPopoverRelativeTo: positioningRect,
+        of: textView, preferredEdge: .minY, behavior: .semitransient)
+```
+
+四个要点，SubText 现在都有了：
+
+1. **锚在选中字符上**，`preferredEdge: .minY`（在上方，装不下时翻到下方）。
+   用 `Positioner::side(range_to_bounds(selection)).placement(Top)`，
+   `Align::Center` 是它的默认值 —— 与 `preferredEdge: .minY` 同形。
+2. **`.semitransient`**：点外面就关，且那一次点击不落到下面。
+   popover 底下铺一层整窗的接收层，它的 mouse-down 关掉 popover。
+3. **Escape 关**。popover 故意不抢焦点（上游也不抢，抢了就把正在编辑的会话打断），
+   所以 Escape 只能在**捕获阶段**从工作区根上拿 —— 与命令面板同一手法。
+4. **选区不是一个字符就什么都不做**（上游是 `assertionFailure()`）。
+   SubText 在状态栏说明原因而不是吞掉按键，与 `Straighten Quotes` 同一条理由：
+   菜单项只有固定的 `disabled`，跟着选区动就得每次重建 258 项菜单栏。
+
+#### 面板的内容（`CharacterInspectorView`）
+
+```
+[大字形 64pt]  <名字>，或 <a letter consisting of N characters>，或 Unknown
+               Code Point:  U+0041 ／ U+1F600 (D83D DE00) ／ + deprecated 徽标
+               Block:       Basic Latin          ← 按钮，点一下换成 Blocks.txt 的名字
+               Category:    Uppercase Letter (Lu)
+               Version:     Unicode 1.1          ← 只在 Unicode 给这个标量定了版本时
+```
+
+- **多标量**时改成每个标量一个可折叠行（默认收起），展开后给字形 + Block + Category；
+  单标量才给 Code Point 与 Version —— 上游的 `items: [.block, .category]`。
+- **变体**（两个标量、第二个是变体选择符或肤色修饰符）不算「复杂」：
+  名字保留，后面括号里写 `Emoji Style` / `Text Style` / `Skin Tone I-II`…。
+- **控制字符**的大字形画的是 Control Picture（`␀`、`␊`、`␡`）并改用次级色，
+  因为字符本身看不见。
+- **deprecated 徽标**：`Unicode.Scalar.Properties.isDeprecated` 为真时，Code Point 旁边
+  一个描边小字。
+
+#### 新表：`unicode_tables.rs`（生成文件）
+
+面板要三个属性，Rust 标准库与树里任何 crate 都没有：`age`（哪个 Unicode 版本收的）、
+`isDeprecated`、`isVariationSelector`。**Swift 的标准库三个都有，而它正是上游读的那份
+数据**，所以新写 `tools/generate_unicode_tables.swift` 从它生成
+`crates/subtext-core/src/unicode_tables.rs`（age 1787 段、deprecated 8 段、
+variation selector 4 段，各是「极大同值区间」+ 二分查找）。生成的文件入库，
+所以**构建 SubText 不需要 Swift**；生成器自己带测试守卫（区间升序不重叠 + 几个实测值）。
+
+这与 `menu.rs` / `keymap.rs` 是同一条路：**必须一致的东西做成数据，原样复用**。
+
+#### 顺带修掉一个真 bug（探针发现的）
+
+`render_scalar_row` 里按 `index` 取 `inspect_scalar_open[index]`，而 `inspect_selection`
+只初始化了 `inspect_block_localized` —— 多标量的字符一选中就
+`index out of bounds: the len is 0 but the index is 0`，整个进程 abort。
+`inspect_selection` 现在把两个向量一起按标量数建好，取值处也改成
+`.get(index).copied().unwrap_or(false)`。**这是这一轮唯一的 panic**，
+是截图探针跑多标量用例时抓到的 —— 只看「进程存活」看不出来，因为它崩在交互之后。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`，64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体。 |
+| 字形没有文本选择的装饰 | 上游把每个 code point 放进描边框、`textSelection(.enabled)`。GPUI 的 `div` 不可选。 |
+| 面板宽度不是内容自适应 | 上游 `intrinsicContentSize` 定宽；GPUI 里由内容与 `Positioner` 的视口夹取共同决定。 |
+| 没有 `⌘I` 之外的入口 | 上游的 popover 还会 `showFindIndicator` 闪一下选中范围；GPUI 没有那个 API。 |
+
+验收：**9 条新测试**（588 = 579 + 9）——core 的 `unicode_tables` 2 条（区间升序不重叠、
+几个实测值）、`charinfo` 7 条（控制字符的 Control Picture、变体不是复杂字符、
+复杂字符报标量数、无名角色没有标题、Code Point 行的代理对、Version 行、
+deprecated 标志）。
+全工作区 **588** 项测试全绿、clippy 零自有警告、生成器幂等（`menu.rs` `d72a9524` /
+`keymap.rs` `75c5c9e0` 未变；`unicode_tables.rs` 连跑两次 sha256 不变）、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活 8 秒且 stdout/stderr 各 0 字节。
+**五种情形逐一截了应用窗口核对**：ASCII（`A`）、变体（`✔️` → `HEAVY CHECK MARK
+(Emoji Style)` + 两行标量）、复杂（`🏴☠️` → `<a letter consisting of 4 characters>`
++ 四行标量）、控制字符（`\0` → 灰的 `␀` + `NULL`）、未分配（`U+34000` → `Unknown`
++ 代理对 `D890 DC00` + `No Block` 禁用按钮 + 没有 Version 行）。
+行数 37,284 → 39,741（`unicode_tables.rs` 1903、`charinfo.rs` 1439、`workspace.rs` 5429）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（579 项 / 零警告） |
-| 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 之后重跑一遍**：release 二进制与 `dist/SubText.app` 各存活 7 秒、输出为空（侧栏 + 检查器 + 导航栏 + 状态栏全开，开一份含大纲的 Rust 文件）。**§8.16 之后又跑一遍**，同形（调试二进制存活 9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（588 项 / 零警告） |
+| 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.16 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.17 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
@@ -1881,6 +1975,9 @@ stdout/stderr 各 0 字节。**并且第一次真正看到了界面**：用 `CGW
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
+| Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
+| Inspect Character 没有「闪一下选中范围」 | 上游在弹 popover 前还会 `showFindIndicator(for: selectedRange)` 把选中范围闪一次。GPUI 没有那个 API。 |
+| `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
 | 文档检查器没有 `Tags` 行 | **§8.16 重排后剩下的唯一一行缺口。** 上游从 `com.apple.metadata:_kMDItemUserTags` 扩展属性读标签，值是 **binary plist**：`PropertyListDecoder` 解成 `[String]`，每项 `"名字\n颜色序号"`（序号 0–7 → none/gray/green/purple/blue/yellow/red/orange）。Rust 侧要么写一个 bplist 解析器、要么加新依赖（`plist`），而 `xattr` 与那套调色板又都只有 macOS 有。这一轮没做，`Tags` 行也**没有画** —— 一行永远填不上的比没有这一行更糟。 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
 | 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
