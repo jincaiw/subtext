@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use subtext_core::encoding::{DetectionOptions, EncodingList, TextEncoding};
+use subtext_core::encoding::{DetectionOptions, EncodingList, FileEncoding, TextEncoding};
 use subtext_core::filedrop::FileDropItem;
 use subtext_core::folderfind::FileScope;
 use subtext_core::line_ending::LineEnding;
@@ -401,7 +401,13 @@ pub struct EditOptions {
     /// How long to wait before highlighting every instance, in seconds.
     pub selection_instance_highlight_delay: f32,
 
-    /// Add a byte-order mark when saving as UTF-8.
+    /// The mark half of the default file encoding.
+    ///
+    /// CotEditor's `saveUTF8BOM`, and it has **no control of its own**: the
+    /// Format pane's *Default text encoding* picker selects a `FileEncoding`,
+    /// and picking *Unicode (UTF-8) with BOM* sets this. Read through
+    /// [`Settings::default_file_encoding`] rather than directly, so a stored
+    /// flag can never disagree with the codec it belongs to.
     pub save_utf8_bom: bool,
     /// Whether the editor is read-only.
     pub editable: bool,
@@ -781,7 +787,41 @@ impl Default for Settings {
 impl Settings {
     /// The encoding new documents are created with.
     pub fn encoding(&self) -> TextEncoding {
-        TextEncoding::from_identifier(&self.default_encoding).unwrap_or(TextEncoding::UTF8)
+        self.default_file_encoding().encoding
+    }
+
+    /// The *file* encoding new documents are created with: the codec **and**
+    /// whether it is written with a byte-order mark.
+    ///
+    /// Upstream stores the two halves separately — `encoding` and
+    /// `saveUTF8BOM` — and composes them in `EncodingManager.defaultEncoding`,
+    /// which is what this does. The halves are separate because the mark is a
+    /// property of the file rather than a second codec; they are read together
+    /// because the picker that sets them selects a `FileEncoding`, and a
+    /// document created from *Unicode (UTF-8) with BOM* must be written with the
+    /// mark.
+    ///
+    /// The `with_utf8_bom` half is guarded by the codec, which is
+    /// [`FileEncoding`]'s own invariant: upstream's getter reads
+    /// `withBOM = (availableEncoding == .utf8) && saveUTF8BOM`, so a stored
+    /// flag cannot leak onto an encoding that has no such mark.
+    pub fn default_file_encoding(&self) -> FileEncoding {
+        let encoding = TextEncoding::from_identifier(&self.default_encoding)
+            .unwrap_or(TextEncoding::UTF8);
+        FileEncoding {
+            encoding,
+            with_utf8_bom: encoding == TextEncoding::UTF8 && self.edit.save_utf8_bom,
+        }
+    }
+
+    /// Set both halves of the default file encoding at once.
+    ///
+    /// One door, because the picker selects one thing: writing them from two
+    /// places is how a settings file ends up claiming "UTF-8 without a mark"
+    /// while `save_utf8_bom` says otherwise.
+    pub fn set_default_file_encoding(&mut self, encoding: FileEncoding) {
+        self.default_encoding = encoding.encoding.identifier().to_string();
+        self.edit.save_utf8_bom = encoding.with_utf8_bom;
     }
 
     /// The encodings the detector may try, in the order the list puts them.
@@ -938,6 +978,40 @@ mod tests {
         let json = serde_json::to_vec(&Settings::default()).expect("serializable");
         let back: Settings = serde_json::from_slice(&json).expect("a complete file must parse");
         assert_eq!(back, Settings::default());
+    }
+
+    /// The default *file* encoding is the two halves the Format picker sets in
+    /// one gesture.
+    ///
+    /// Upstream keeps `encoding` and `saveUTF8BOM` in separate defaults and
+    /// composes them in `EncodingManager.defaultEncoding`; the composition is
+    /// where the guard lives, because a settings file can be hand-edited into
+    /// claiming a mark on a codec that has no such thing.
+    #[test]
+    fn the_default_file_encoding_pairs_the_codec_with_its_mark() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.default_file_encoding(), FileEncoding::of(TextEncoding::UTF8));
+
+        settings.set_default_file_encoding(FileEncoding::utf8_with_bom());
+        assert_eq!(settings.default_file_encoding(), FileEncoding::utf8_with_bom());
+        assert!(settings.edit.save_utf8_bom, "the mark half was not written");
+        assert_eq!(settings.encoding(), TextEncoding::UTF8);
+
+        // Picking another codec clears the mark: only UTF-8 has this one.
+        let shift_jis = TextEncoding::from_identifier("shift_jis").expect("registered");
+        settings.set_default_file_encoding(FileEncoding::of(shift_jis));
+        assert!(!settings.edit.save_utf8_bom, "the mark leaked onto another codec");
+        assert_eq!(settings.default_file_encoding(), FileEncoding::of(shift_jis));
+
+        // …and a file that claims otherwise anyway is read with the mark
+        // dropped, which is upstream's `withBOM = (availableEncoding == .utf8)
+        // && saveUTF8BOM`.
+        settings.edit.save_utf8_bom = true;
+        assert_eq!(
+            settings.default_file_encoding(),
+            FileEncoding::of(shift_jis),
+            "a stray flag was honoured on a codec that cannot carry a mark"
+        );
     }
 
     #[test]

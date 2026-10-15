@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 35,033（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 35,202（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -107,6 +107,7 @@
 | 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：列表来自用户的优先级列表（默认 38 条 + 9 个分隔符），按组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…`。上游 60 条里 22 条无 codec 如实缺席、8 条为超集近似，逐条见 PLAN §8.9f |
 | 编码（重新解释） | `reinterpret_encoding` | 🔁 能力在，但没有入口 —— 上游的菜单里也没有这一项 |
 | 编码自动探测 | `Document::open` / `revert` 的 `DetectionOptions` | ✅ 与上游同序：BOM → 声明（`refer_to_encoding_tag`）→ **按用户的优先级列表逐个试** → 默认编码。没有统计猜测（§8.11 删掉了 `chardetng`） |
+| 默认编码（新建文档） | `Settings::default_file_encoding` → `Document::untitled` | ✅ 选的是**文件编码**（codec + 字节序标记），选择器列用户列表并在 UTF-8 之后紧跟 *Unicode (UTF-8) with BOM*、分隔符画成横线；新建文档带上所选编码的标记（UTF-16/32 的标记本来就属于编码本身）。上游是 `EncodingManager.defaultEncoding`（§8.14） |
 | 编码列表编辑 | `encoding_list_sheet`（*Edit List…* / `Customize Encodings List…`） | ✅ 增删改序：Add 菜单（分隔符 + 尚未列入的可用编码，按名排序）、Delete（UTF-8 与默认编码拒绝并给出原因）、上移/下移、Restore Defaults；OK 才写回设置，Cancel 丢弃。那份列表同时驱动编码菜单与探测优先级。手势与上游不同（箭头代替拖拽、按钮代替 Delete 键），见 PLAN §8.11 |
 | 语法（设置） | `set_syntax` | ✅ 经 Format ▸ Syntax 菜单（None 在前 + 分隔符 + 全部语法，当前项打勾） |
 | 标准字体 | `set_font(None)` | ✅ |
@@ -297,11 +298,11 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 130 | 64% |
+| ✅ 完整实现 | 约 131 | 64% |
 | 🔁 等价实现（委托或改写） | 约 24 | 12% |
 | ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
 | ⏳ 未实现（菜单保留 + 提示） | 约 28 | 14% |
-| **合计** | **202** | **100%** |
+| **合计** | **203** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。
 未实现的功能不是「从菜单里删掉」，而是「保留 + 说明」——

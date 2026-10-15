@@ -33,6 +33,10 @@
 - **侧栏与检查器可以拖动改宽**，宽度会记住：上游是 `NSSplitViewController`，
   两条分隔线都能拖且位置自动保存，现在 SubText 也是。侧栏 11–24 rem、检查器 12–26 rem，
   文档区吃掉富余。
+- **默认编码是一个「文件编码」**：`Format` 面板的 *Default text encoding* 选的是
+  codec **加** 是否写字节序标记，选择器里因此有了 *Unicode (UTF-8) with BOM*
+  （紧跟 UTF-8），列表的分隔符画成横线。新建文档带上所选编码的标记 ——
+  包括 UTF-16 / UTF-32 本来就该有的那一个。
 
 **运行时填充的菜单**
 
@@ -65,6 +69,13 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 修复
 
+- **「保存 UTF-8 时加字节序标记」这个开关是死的，而且上游没有这个开关**：
+  SubText 的 Edit 面板里有一个 *Add a byte-order mark when saving as UTF-8*，
+  但新建文档一律写 `Bom::None`，打开它没有任何效果；而 CotEditor 的 Edit 面板只有
+  四节（Indentation / Whitespace / Comment / Content parse），根本没有这一段。
+  `saveUTF8BOM` 在上游是 Format 面板默认编码的「标记那一半」，不是独立开关。
+  现在它随默认编码一起设，新建文档真的带上标记（UTF-16 / UTF-32 的标记也一并修正），
+  那个自造的开关删掉了。
 - **设置文件里任何一个嵌套对象不完整，整份设置会被静默重置**：`Settings` 上有
   `#[serde(default)]`，但六个 `*Options` 结构都没有。容器级的那个只覆盖「顶层键缺失」，
   一个**存在但不完整**的嵌套对象会让反序列化整体失败，而读取路径是
@@ -104,16 +115,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**556** 项测试全部通过（v0.1.0 是 124 项）：
+**559** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 304 |
-| `subtext-app` | 215 |
+| `subtext-core` | 306 |
+| `subtext-app` | 216 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **556** |
+| **合计** | **559** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

@@ -477,7 +477,7 @@ impl Workspace {
 
     fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let document =
-            Document::untitled(self.settings.encoding(), self.settings.default_line_ending);
+            Document::untitled(self.settings.default_file_encoding(), self.settings.default_line_ending);
         let syntax_name = self
             .settings
             .default_syntax
@@ -2315,7 +2315,7 @@ impl Workspace {
                     return;
                 }
                 let mut document =
-                    Document::untitled(self.settings.encoding(), self.settings.default_line_ending);
+                    Document::untitled(self.settings.default_file_encoding(), self.settings.default_line_ending);
                 document.set_text(output, true);
                 let syntax = self
                     .settings

@@ -890,38 +890,48 @@ impl FileEncoding {
         }
     }
 
+    /// `list` as a flat sequence: the UTF-8-with-BOM item spliced in just after
+    /// UTF-8, and `None` wherever the list holds a separator.
+    ///
+    /// This is what a picker needs — upstream's *Default text encoding* picker
+    /// draws its separators as `Divider()`s — and it is the single place the
+    /// splice happens, so the menu and the picker cannot disagree about it.
+    ///
+    /// Upstream does the splice inside `EncodingManager.fileEncodings(from:)`,
+    /// once, so that a user's reordered list still gets the pair together: the
+    /// two are always handled as a set, and only the UTF-8 entry can produce
+    /// the second one.
+    pub fn menu_items(list: &EncodingList) -> Vec<Option<Self>> {
+        list.0
+            .iter()
+            .flat_map(|item| match item {
+                None => vec![None],
+                Some(encoding) => {
+                    let plain = Self::of(*encoding);
+                    if *encoding == TextEncoding::UTF8 {
+                        vec![Some(plain), Some(Self::utf8_with_bom())]
+                    } else {
+                        vec![Some(plain)]
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// `list` as the `Format ▸ Text Encoding` menu lists it: cut into groups at
     /// its separators, with the UTF-8-with-BOM item spliced in just after
     /// UTF-8.
     ///
-    /// Upstream does the splice inside `EncodingManager.fileEncodings(from:)`,
-    /// once, so that a user's reordered list still gets the pair together — the
-    /// two are always handled as a set, and only the UTF-8 entry can produce
-    /// the second one.
-    ///
     /// The separators become cuts between groups because that is what the menu
-    /// builder wants; upstream maps the flat list item by item instead. Cutting
-    /// and re-joining is the same sequence of items for every list, including
-    /// the awkward ones — a leading separator, a trailing one, two in a row —
-    /// which is what `the_separators_survive_the_cut_and_join` checks.
+    /// builder wants. Cutting [`menu_items`](Self::menu_items) rather than
+    /// mapping the list a second time is what makes the menu and the picker the
+    /// same sequence of entries by construction — including for the awkward
+    /// lists, a leading separator, a trailing one, or two in a row, which is
+    /// what `the_separators_survive_the_cut_and_join` checks.
     pub fn menu_groups(list: &EncodingList) -> Vec<Vec<Self>> {
-        list.0
+        Self::menu_items(list)
             .split(|item| item.is_none())
-            .map(|group| {
-                group
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .flat_map(|encoding| {
-                        let plain = Self::of(encoding);
-                        if encoding == TextEncoding::UTF8 {
-                            vec![plain, Self::utf8_with_bom()]
-                        } else {
-                            vec![plain]
-                        }
-                    })
-                    .collect()
-            })
+            .map(|group| group.iter().flatten().copied().collect())
             .collect()
     }
 }
@@ -1697,6 +1707,12 @@ mod tests {
     /// the same sequence of menu items as mapping it item by item — including
     /// where the awkward cases land, which is what makes the two
     /// representations interchangeable.
+    ///
+    /// The picker reads [`FileEncoding::menu_items`] and the menu reads
+    /// [`FileEncoding::menu_groups`]; `menu_groups` is *defined* as
+    /// `menu_items` cut at its separators, so the assertion that both equal the
+    /// independent oracle above is what proves the two surfaces offer the same
+    /// encodings in the same order.
     #[test]
     fn the_separators_survive_the_cut_and_join() {
         let utf8 = Some("utf-8");
@@ -1712,6 +1728,11 @@ mod tests {
             vec![None, utf8, None, None, shift, None],
         ] {
             let list = list(&items);
+            assert_eq!(
+                FileEncoding::menu_items(&list),
+                flat(&list),
+                "{items:?} did not survive the splice"
+            );
             assert_eq!(
                 joined(&FileEncoding::menu_groups(&list)),
                 flat(&list),

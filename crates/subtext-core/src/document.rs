@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::encoding::{Bom, DecodedFile, Detection, DetectionOptions, TextEncoding};
+use crate::encoding::{Bom, DecodedFile, Detection, DetectionOptions, FileEncoding, TextEncoding};
 use crate::line_ending::{self, LineEnding};
 
 #[derive(Debug, thiserror::Error)]
@@ -49,12 +49,20 @@ pub struct Document {
 
 impl Document {
     /// A new, empty, unsaved document.
-    pub fn untitled(default_encoding: TextEncoding, default_line_ending: LineEnding) -> Self {
+    ///
+    /// `default_encoding` is a [`FileEncoding`] rather than a bare codec,
+    /// because the byte-order mark is half of what the user chose: CotEditor's
+    /// *Default text encoding* picker selects a `FileEncoding`, and picking
+    /// *Unicode (UTF-8) with BOM* is a promise about the file this document will
+    /// become. The mark comes from the encoding itself —
+    /// [`FileEncoding::bom`] gives UTF-16 and UTF-32 their marks too, which is
+    /// what upstream's `hasBOM` does.
+    pub fn untitled(default_encoding: FileEncoding, default_line_ending: LineEnding) -> Self {
         Self {
             path: None,
             text: String::new(),
-            encoding: default_encoding,
-            bom: Bom::None,
+            encoding: default_encoding.encoding,
+            bom: default_encoding.bom(),
             line_ending: default_line_ending,
             detection: Detection::Default,
             dirty: false,
@@ -308,10 +316,52 @@ mod tests {
         path
     }
 
+    /// A new document is created in the default *file* encoding, mark and all.
+    ///
+    /// The mark is half of what the user chose: CotEditor's *Default text
+    /// encoding* picker selects a `FileEncoding`, so *Unicode (UTF-8) with BOM*
+    /// is a promise about the file this document will become. It used to be
+    /// dropped on the floor — `untitled` took a bare codec and always set
+    /// `Bom::None`, so the setting was inert.
+    #[test]
+    fn a_new_document_carries_the_mark_of_its_default_encoding() {
+        let plain = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
+        assert_eq!(plain.bom(), Bom::None);
+        assert_eq!(plain.encoding(), TextEncoding::UTF8);
+
+        let with_bom = Document::untitled(FileEncoding::utf8_with_bom(), LineEnding::LF);
+        assert_eq!(with_bom.bom(), Bom::Utf8, "the mark the user asked for was dropped");
+
+        // A UTF-16 default carries its mark without anyone asking for one, which
+        // is what upstream's `FileEncoding.hasBOM` does.
+        let utf16 = Document::untitled(FileEncoding::of(TextEncoding::UTF16_LE), LineEnding::LF);
+        assert_eq!(utf16.bom(), Bom::Utf16Le);
+    }
+
+    /// …and the mark reaches the file, then comes back.
+    #[test]
+    fn the_default_mark_is_written_to_disk() {
+        let path = temp_path("bom-default.txt");
+        let mut document = Document::untitled(FileEncoding::utf8_with_bom(), LineEnding::LF);
+        document.set_text("hello\n", true);
+        document.save(Some(path.clone())).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..3], &[0xEF, 0xBB, 0xBF], "no mark on disk");
+        assert_eq!(bytes.len(), 3 + "hello\n".len());
+
+        let reopened =
+            Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
+        assert_eq!(reopened.bom(), Bom::Utf8);
+        assert_eq!(reopened.text(), "hello\n");
+
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn save_then_open_round_trips_everything() {
         let path = temp_path("round-trip.txt");
-        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::CRLF);
+        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::CRLF);
         document.set_text("first\r\nsecond\r\n", true);
         document.set_line_ending(LineEnding::CRLF);
         document.save(Some(path.clone())).unwrap();
@@ -327,7 +377,7 @@ mod tests {
 
     #[test]
     fn line_ending_change_rewrites_the_buffer() {
-        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         document.set_text("a\nb\nc", false);
         document.set_line_ending(LineEnding::CRLF);
         assert_eq!(document.text(), "a\r\nb\r\nc");
@@ -336,7 +386,7 @@ mod tests {
 
     #[test]
     fn unsaved_document_is_untitled_and_clean() {
-        let document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        let document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         assert!(document.is_untitled());
         assert!(!document.is_dirty());
         assert_eq!(document.file_status(), FileStatus::Untitled);
@@ -359,7 +409,7 @@ mod tests {
 
     #[test]
     fn convert_encoding_does_not_change_the_text() {
-        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         document.set_text("日本語", false);
         document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::None);
         assert_eq!(document.text(), "日本語");
@@ -368,7 +418,7 @@ mod tests {
 
     #[test]
     fn bom_is_dropped_for_encodings_that_cannot_carry_one() {
-        let mut document = Document::untitled(TextEncoding::UTF8, LineEnding::LF);
+        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::Utf8);
         assert_eq!(document.bom(), Bom::None);
     }

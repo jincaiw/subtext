@@ -44,7 +44,7 @@ use gpui_kit::{
 
 use subtext_core::filedrop::FileDropItem;
 use subtext_core::snippets::Snippet;
-use subtext_core::{LineEnding, TextEncoding};
+use subtext_core::{FileEncoding, LineEnding};
 
 use crate::encoding_list_sheet::EncodingListSheet;
 use crate::keymap;
@@ -904,22 +904,16 @@ impl SettingsWindow {
                     .child(note("seconds", cx)),
             );
 
-        let saving = v_flex()
-            .gap_1()
-            .child(edit_switch("save-utf8-bom", "Add a byte-order mark when saving as UTF-8", edit.save_utf8_bom, cx, |settings, checked| settings.edit.save_utf8_bom = checked))
-            .child(note(
-                "Switches whose behaviour SubText does not implement yet are drawn disabled \
-                 rather than quietly ignored.",
-                cx,
-            ));
-
+        // Upstream's Edit pane is these four sections and no more. There is no
+        // "Saving" section: the byte-order mark is not an Edit-pane switch in
+        // CotEditor at all — `saveUTF8BOM` is the mark half of the *Format*
+        // pane's default file encoding, and that is where it is set.
         v_flex()
             .gap_6()
             .child(section("Indentation", indentation))
             .child(section("Whitespace", whitespace))
             .child(section("Comment", comment))
             .child(section("Content parse", content_parse))
-            .child(section("Saving", saving))
             .into_any_element()
     }
 
@@ -1112,28 +1106,39 @@ impl SettingsWindow {
         // The picker offers the user's own list, because that is the list the
         // encoding menu offers and the one detection works through — a default
         // the user cannot see anywhere else would be a setting they cannot
-        // reason about. A settings file can still hold a spelling the list does
-        // not: one of the encodings the Add menu can put back, chosen in an
-        // earlier build, or one the user has since taken out. It still decodes
-        // with it, so the picker has to show it rather than come up blank. Same
-        // rule as the encoding menu's: the encoding in force goes to the top
-        // when the list lacks it.
-        let mut encodings: Vec<TextEncoding> = settings.encoding_list.encodings().collect();
-        let current = settings.encoding();
-        if !encodings.contains(&current) {
-            encodings.insert(0, current);
+        // reason about. It is the *file* encoding that is picked, so the list
+        // carries the UTF-8-with-BOM item too and its separators are drawn as
+        // rules, which is what upstream's `ForEach(self.encodingManager
+        // .fileEncodings)` does.
+        //
+        // A settings file can still hold a spelling the list does not: one of
+        // the encodings the Add menu can put back, chosen in an earlier build,
+        // or one the user has since taken out. It still decodes with it, so the
+        // picker has to show it rather than come up blank. Same rule as the
+        // encoding menu's: the encoding in force goes to the top when the list
+        // lacks it.
+        let current = settings.default_file_encoding();
+        let mut items = FileEncoding::menu_items(&settings.encoding_list);
+        if !items.iter().flatten().any(|item| *item == current) {
+            items.insert(0, Some(current));
         }
-        let encoding_index = encodings.iter().position(|e| *e == current);
-        let encoding_items = encodings.iter().map(|e| SharedString::from(e.name)).collect::<Vec<_>>();
-        let default_encoding = pick_list(
+        let encoding_index = items.iter().position(|item| *item == Some(current));
+        let encoding_items = items
+            .iter()
+            .map(|item| item.map(|encoding| SharedString::from(encoding.name())))
+            .collect::<Vec<_>>();
+        let default_encoding = pick_list_with_gaps(
             "default-encoding",
             encoding_items,
             encoding_index,
             cx,
             cx.listener(move |this, index: &usize, _, cx| {
-                let identifier = encodings.get(*index).map(|e| e.identifier().to_string());
-                if let Some(identifier) = identifier {
-                    this.edit(cx, move |settings| settings.default_encoding = identifier);
+                let picked = items.get(*index).copied().flatten();
+                if let Some(picked) = picked {
+                    // One door for both halves: *Unicode (UTF-8) with BOM* sets
+                    // the codec and the mark together, which is what makes a new
+                    // document come out with the mark on it.
+                    this.edit(cx, move |settings| settings.set_default_file_encoding(picked));
                 }
             }),
         );
@@ -2084,12 +2089,27 @@ type ListClick = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
 /// A bordered, scrollable list of mutually exclusive choices.
 ///
 /// Used where CotEditor uses a list rather than a popup — the syntax list, the
-/// theme list, the encoding list. Each row is a `Button` in its `selected`
-/// state, so selection is drawn by the design system and announced by the
-/// accessibility layer.
+/// theme list. Each row is a `Button` in its `selected` state, so selection is
+/// drawn by the design system and announced by the accessibility layer.
 fn pick_list(
     id: &'static str,
     items: Vec<SharedString>,
+    selected: Option<usize>,
+    cx: &App,
+    on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    pick_list_with_gaps(id, items.into_iter().map(Some).collect(), selected, cx, on_click)
+}
+
+/// The same list, with a rule where the caller passes `None`.
+///
+/// Upstream's *Default text encoding* picker is the encoding priority list, and
+/// that list holds separators — it draws them as `Divider()`s between the
+/// groups. The rows keep their position in `items` as their index, so a gap
+/// does not shift the values the click handler sees.
+fn pick_list_with_gaps(
+    id: &'static str,
+    items: Vec<Option<SharedString>>,
     selected: Option<usize>,
     cx: &App,
     on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
@@ -2102,6 +2122,10 @@ fn pick_list(
     let mut rows = v_flex().gap_0p5().p_1();
 
     for (index, label) in items.into_iter().enumerate() {
+        let Some(label) = label else {
+            rows = rows.child(divider(cx));
+            continue;
+        };
         let on_click = on_click.clone();
         rows = rows.child(
             // The list is not reorderable, so the index is a stable identity
