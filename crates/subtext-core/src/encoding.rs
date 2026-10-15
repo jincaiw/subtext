@@ -1058,6 +1058,24 @@ impl DecodedFile {
     }
 
     /// Serialize back to bytes, re-attaching the BOM when the document has one.
+    /// Encode for writing, and say whether anything had to be substituted.
+    ///
+    /// The flag is CotEditor's `LossyEncodingError`: a document whose text its
+    /// encoding cannot spell must not be written silently, because what lands
+    /// on disk is then not what the user typed. Its own answer is to ask; the
+    /// caller decides here.
+    pub fn encode_checked(&self) -> (Vec<u8>, bool) {
+        let (body, lossy) = self.encoding.encode(&self.text);
+        let mark = self.bom.bytes();
+        if mark.is_empty() {
+            return (body, lossy);
+        }
+        let mut out = Vec::with_capacity(mark.len() + body.len());
+        out.extend_from_slice(mark);
+        out.extend_from_slice(&body);
+        (out, lossy)
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let (body, _) = self.encoding.encode(&self.text);
         let mark = self.bom.bytes();

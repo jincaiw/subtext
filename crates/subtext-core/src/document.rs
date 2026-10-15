@@ -15,6 +15,15 @@ pub enum DocumentError {
     Write { path: PathBuf, #[source] source: std::io::Error },
     #[error("{0} is not valid UTF-8 and no other encoding matched")]
     Undecodable(PathBuf),
+    /// The text holds characters the document's encoding cannot spell.
+    ///
+    /// CotEditor's `LossyEncodingError`, whose own wording this is. It offers
+    /// *Change Encoding* and *Cancel*, and SubText does the second of those by
+    /// returning this: writing anyway would put a file on disk that no longer
+    /// holds what the user typed, and the encoding picker in the status bar is
+    /// how the first is reached.
+    #[error("The document contains characters incompatible with \"{0}\"")]
+    LossyEncoding(&'static str),
 }
 
 /// What changed on disk since the document was last read or written.
@@ -256,7 +265,10 @@ impl Document {
             bom: self.bom,
             detection: self.detection,
         };
-        let bytes = file.encode();
+        let (bytes, lossy) = file.encode_checked();
+        if lossy {
+            return Err(DocumentError::LossyEncoding(file.encoding.name));
+        }
 
         // Write to a sibling temp file and rename, so a crash mid-write cannot
         // truncate the user's document. This is what an editor must do.
@@ -366,6 +378,30 @@ mod tests {
         assert_eq!(reopened.bom(), Bom::Utf8);
         assert_eq!(reopened.text(), "hello\n");
 
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_document_the_encoding_cannot_spell_is_not_written() {
+        // CotEditor's `LossyEncodingError`. Writing anyway would put a file on
+        // disk holding `&#65533;` where the user typed an emoji — the file
+        // would look saved and would not be the document.
+        let encoding = TextEncoding::from_identifier("shift_jis").expect("Shift JIS");
+        let mut document = Document::untitled(
+            FileEncoding { encoding, with_utf8_bom: false },
+            LineEnding::LF,
+        );
+        document.set_text("hello 👾 world".to_string(), true);
+
+        let path = std::env::temp_dir().join("subtext-lossy-save.txt");
+        let error = document.save(Some(path.clone())).expect_err("the save must fail");
+        assert!(matches!(error, DocumentError::LossyEncoding("Japanese (Shift JIS)")));
+        // …and nothing was written, not even a half file.
+        assert!(!path.exists());
+
+        // Text the encoding *can* spell saves as before.
+        document.set_text("hello world".to_string(), true);
+        assert!(document.save(Some(path.clone())).is_ok());
         std::fs::remove_file(&path).ok();
     }
 

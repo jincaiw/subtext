@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 41,805（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 42,382（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
 
 ---
 
@@ -145,7 +145,7 @@
 | 检查器 | `update_window_options` | ✅ |
 | 文稿检查器 | `render_document_inspector` | ✅ 上游的四段：**File**（Created / Modified / Size / Permissions / Owner / Full Path + *Show in Finder*）· **Text Settings**（Encoding / Line Endings / Mode）· **Count**（三对计数带 `entire (selected)` + 三个位置量）· **Character**（code point，单标量再给 Name / Block / Category；无选区写 *Not selected*）。少了 `Tags` 一行，见缺口表 |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
-| 警告检查器 | `show_inspector(Warnings)` | ✅ |
+| 警告检查器 | `render_warnings` | ✅ 上游的 `VSplitView` 两栏：**Incompatible Characters**（Line / Character / Converted）与 **Inconsistent Line Endings**（Line / Line Ending），各带 `Found N …` / `No issues found.` 状态行，两栏可拖动改高，点一行选中编辑器里那个字符。`Converted` 列显示 WHATWG 的替换物、表格不排序、横向滚动，见缺口表 |
 | 导航栏 | `render_navigation_bar(pane)` | ✅ **每个编辑分屏一条**（上游 `EditorViewController` 的第一项）：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 · 分屏按钮（右键改方向）。只有一个分屏时关闭按钮不可见 |
 | 行号 | `update_editor_options` | ✅ |
 | 状态栏 | `render_status_bar` | ✅ **属于内容列**（上游挂在内容项的 bottom accessory 上），不跨侧栏与检查器：不可编辑徽标 · Lines / Characters / Words / Location / Line / Column（各由一个开关控制，有选区时 `entire (selected)`）· 文件大小 · 编码选择器 · 换行符选择器 |

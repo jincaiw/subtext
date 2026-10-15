@@ -47,6 +47,7 @@ use gpui_kit::component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     popover::Popover,
     resizable_panel,
+    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tab::{Tab, TabBar},
     tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex, v_resizable,
@@ -432,6 +433,13 @@ pub struct Workspace {
     count_options_open: bool,
     /// The word completion popup, while it is up.
     completion: Option<Completion>,
+    /// The incompatible-character scan, memoised.
+    ///
+    /// The scan is a codec round trip per chunk, so it cannot run on every
+    /// frame; the key is the buffer's hash and the encoding, and the answer is
+    /// thrown away when either moves. A memo rather than state: nothing outside
+    /// the pane reads it, and recomputing it does not change what is drawn.
+    incompatible_cache: std::cell::RefCell<Option<(u64, TextEncoding, Vec<subtext_core::IncompatibleCharacter>)>>,
 }
 
 impl Workspace {
@@ -540,6 +548,7 @@ impl Workspace {
             count_running: false,
             count_options_open: false,
             completion: None,
+            incompatible_cache: std::cell::RefCell::new(None),
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -3036,6 +3045,40 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The incompatible characters in the active document, memoised.
+    ///
+    /// CotEditor's guard is upstream's: a Unicode encoding has nothing to be
+    /// incompatible with, and an empty buffer has nothing in it.
+    fn incompatible_characters(
+        &self,
+        cx: &App,
+    ) -> Vec<subtext_core::IncompatibleCharacter> {
+        let Some(document) = self.active_document() else {
+            return Vec::new();
+        };
+        let encoding = document.document.encoding();
+        if encoding.is_unicode() {
+            return Vec::new();
+        }
+        let Some(text) = self.active_text(cx) else {
+            return Vec::new();
+        };
+        let key = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut hasher);
+            hasher.finish()
+        };
+        if let Some((cached_key, cached_encoding, items)) = self.incompatible_cache.borrow().as_ref()
+            && *cached_key == key
+            && *cached_encoding == encoding
+        {
+            return items.clone();
+        }
+        let items = subtext_core::incompatible_characters(&text, encoding);
+        *self.incompatible_cache.borrow_mut() = Some((key, encoding, items.clone()));
+        items
+    }
+
     /// `Edit ▸ Delete` — `NSTextView.delete:` behind ⌘⌫.
     ///
     /// The text engine handles a bare ⌫ on its own; this is the menu's own
@@ -4566,26 +4609,226 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// The Warnings inspector — upstream's `WarningInspectorView`.
+    ///
+    /// A `VSplitView` of two panes: the incompatible characters on top and the
+    /// inconsistent line endings below, each resizable. They are two scans of
+    /// the same buffer answering two different questions — "what would not
+    /// survive being saved" and "what is not the line ending the document says
+    /// it uses" — and CotEditor keeps them apart rather than merging them into
+    /// one list.
     fn render_warnings(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(_) = self.active_document() else {
+            return v_flex().into_any_element();
+        };
+
+        let mut split = v_resizable("warnings-panes");
+        if let Some(panel) = self.render_incompatible_characters(cx) {
+            split = split.child(
+                resizable_panel()
+                    // `resizable_panel().size()` takes pixels, so the design
+                    // scale is applied by hand, as in the window's own split.
+                    .size(cx.theme().font_size * 9.)
+                    .size_range(cx.theme().font_size * 5.0..cx.theme().font_size * 20.)
+                    .child(panel),
+            );
+        }
+        split
+            .child(resizable_panel().child(self.render_inconsistent_line_endings(cx)))
+            .into_any_element()
+    }
+
+    /// The *Incompatible Characters* pane.
+    ///
+    /// `None` while there is nothing to say — the encoding is a Unicode one, so
+    /// nothing can be incompatible, or the buffer is empty. Upstream draws the
+    /// pane anyway in that case, with its title and "No issues found."; the
+    /// title is what tells the reader which of the two lists is which, so it is
+    /// drawn either way and only the table is conditional.
+    fn render_incompatible_characters(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        let document = self.active_document()?;
+        let encoding = document.document.encoding();
+        let items = self.incompatible_characters(cx);
+        let text = self.active_text(cx).unwrap_or_default();
+
+        let status = if items.is_empty() {
+            "No issues found.".to_string()
+        } else {
+            format!("Found {} incompatible characters.", items.len())
+        };
+
+        let mut pane = v_flex().gap_2().child(section_title("Incompatible Characters", cx)).child(
+            div()
+                .text_sm()
+                .when(items.is_empty(), |this| this.text_color(cx.theme().muted_foreground))
+                .child(status),
+        );
+
+        if !items.is_empty() {
+            // Upstream shows the character, and for one the encoding cannot
+            // spell at all a `�` stands in for it.
+            let converted = |item: &subtext_core::IncompatibleCharacter| {
+                item.converted.clone().unwrap_or_else(|| "\u{FFFD}".to_string())
+            };
+            let _ = encoding;
+            let rows: Vec<(String, String, String, Range<usize>)> = items
+                .iter()
+                .map(|item| {
+                    let line = textops::status_position(&text, item.range.start).0;
+                    (line.to_string(), item.character.clone(), converted(item), item.range.clone())
+                })
+                .collect();
+            pane = pane.child(self.render_warning_table(
+                "incompatible",
+                ["Line", "Character", "Converted"],
+                rows,
+                cx,
+            ));
+        }
+
+        Some(pane.into_any_element())
+    }
+
+    /// The *Inconsistent Line Endings* pane.
+    fn render_inconsistent_line_endings(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let Some(document) = self.active_document() else {
             return v_flex().into_any_element();
         };
-        let warnings = crate::outline::document_warnings(document, cx);
-        if warnings.is_empty() {
-            return v_flex()
-                .child(
+        let base = document.document.line_ending();
+        let text = self.active_text(cx).unwrap_or_default();
+        let items = subtext_core::inconsistent_line_endings(&text, base);
+
+        let status = if items.is_empty() {
+            "No issues found.".to_string()
+        } else {
+            format!("Found {} line endings other than {}.", items.len(), base.abbreviation())
+        };
+
+        let mut pane = v_flex()
+            .gap_2()
+            .child(section_title("Inconsistent Line Endings", cx))
+            .child(
+                div()
+                    .text_sm()
+                    .when(items.is_empty(), |this| this.text_color(cx.theme().muted_foreground))
+                    .child(status),
+            );
+
+        if !items.is_empty() {
+            let rows: Vec<(String, String, String, Range<usize>)> = items
+                .iter()
+                .map(|(range, ending)| {
+                    let line = textops::status_position(&text, range.start).0;
+                    (line.to_string(), ending.abbreviation().to_string(), String::new(), range.clone())
+                })
+                .collect();
+            pane = pane.child(self.render_warning_table(
+                "line-endings",
+                ["Line", "Line Ending", ""],
+                rows,
+                cx,
+            ));
+        }
+
+        pane.into_any_element()
+    }
+
+    /// One of the inspector's two tables.
+    ///
+    /// The stateless `Table` rather than the `DataTable`: upstream's tables can
+    /// be sorted by clicking a header, but the rows here are a handful of
+    /// offenders in a document that is being written in a legacy encoding, and
+    /// what matters for the panel is that the two lists are laid out as tables
+    /// at all — three columns, a header, a border. Clicking a row selects the
+    /// offender in the editor, which is what upstream's selection does.
+    ///
+    /// The fourth element of each row is the range to select; the third is
+    /// unused by the line-ending table, which has only two columns.
+    fn render_warning_table(
+        &self,
+        id: &'static str,
+        headers: [&'static str; 3],
+        rows: Vec<(String, String, String, Range<usize>)>,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let columns = if headers[2].is_empty() { 2 } else { 3 };
+        let mut header = TableRow::new();
+        for (index, label) in headers.iter().take(columns).enumerate() {
+            header = header.child(
+                TableHead::new()
+                    .when(index == 0, |this| this.text_right())
+                    .child(*label),
+            );
+        }
+
+        // A `TableRow` is not an interactive element, so the click lives on the
+        // cell contents — one handler per cell, which makes the whole row
+        // clickable rather than just its first column.
+        let mut body = TableBody::new();
+        for (index, (line, first, second, range)) in rows.into_iter().enumerate() {
+            let cells = [line, first, second];
+            let mut row = TableRow::new();
+            for (column, text) in cells.into_iter().take(columns).enumerate() {
+                let range = range.clone();
+                row = row.child(TableCell::new().child(
                     div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No warnings"),
-                )
-                .into_any_element();
+                        .id((id, index * 3 + column))
+                        .cursor_pointer()
+                        .when(column == 0, |this| this.text_right())
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                this.select_range_in_editor(range.clone(), window, cx);
+                            }),
+                        )
+                        .child(text),
+                ));
+            }
+            body = body.child(row);
         }
-        let mut list = v_flex().gap_1();
-        for warning in warnings {
-            list = list.child(div().text_sm().child(warning));
-        }
-        list.into_any_element()
+
+        // The table's cells each have a minimum width, so three of them do not
+        // fit a narrow inspector. The panel scrolls sideways rather than
+        // dropping a column: a warning whose "Converted" half is unreachable is
+        // not a warning.
+        div()
+            .id(id)
+            .w_full()
+            .min_w_0()
+            .overflow_x_scroll()
+            .child(
+                Table::new()
+                    .small()
+                    .child(TableHeader::new().child(header))
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Put the editor's selection on `range` and bring it into view.
+    ///
+    /// Upstream centres the selection; SubText scrolls it into view, because
+    /// `EditorState` has no way to centre a range — the same note the outline's
+    /// navigation carries.
+    fn select_range_in_editor(
+        &mut self,
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let editor = document.editor().clone();
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_selected_range(range, cx);
+                let _ = window;
+            });
+        });
     }
 
     /// The status bar's encoding picker.
@@ -5348,6 +5591,19 @@ pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
     } else {
         scaled
     }
+}
+
+/// The heading over one of the Warnings inspector's two lists.
+///
+/// Upstream draws both as 12-point semibold text in the secondary colour —
+/// the same style the Document inspector's four sections use, and the reason
+/// the two lists read as two things rather than one.
+fn section_title(label: &'static str, cx: &App) -> impl IntoElement {
+    div()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(cx.theme().muted_foreground)
+        .child(label)
 }
 
 /// One `LabeledContent` row of the Document inspector.

@@ -78,6 +78,18 @@
 - **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
   `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
   （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
+- **警告检查器按上游重排成两栏**：`Inspector ▸ Warnings` 原来是一列自己编的提示文字，
+  现在是上游那两块 —— **Incompatible Characters**（Line / Character / Converted 三列）
+  与 **Inconsistent Line Endings**（Line / Line Ending 两列），各带一句状态行
+  （`Found N …` 或 `No issues found.`），两栏之间可以拖动改高，点一行把编辑器选区
+  放到那个字符上。「不兼容」的判定照上游：**有损编码再解码回来，不等就是有问题**，
+  一段里不止一个字符就对半切开递归 —— 所以 Shift-JIS 里 `\` 会变成 `＼` 这种事也抓得到。
+- **保存不再静默写坏文件**：`Document::save` 一直丢掉了编码器的 `had_errors` 标志，
+  于是把一份带 emoji 的文档按 Shift-JIS 保存，磁盘上会**静默**出现 `&#65533;`，
+  而文件看起来保存成功了。现在会拒绝并报出上游那句话
+  （*The document contains characters incompatible with "Japanese (Shift JIS)"*），
+  磁盘上什么都不会留下。上游给的是三个选择（*Save Available Text* / *Change Encoding* /
+  *Cancel*），SubText 做的是「取消」，并把「改编码」指到状态栏的编码选择器上。
 - **补全（`Edit ▸ Complete`，⌥⎋）**：此前是占位提示，现在是上游那套 ——
   在光标处的词上按下，弹出候选列表（文档里以它开头的词 + 语法 `Completion.json` 里
   以它开头的词），↑↓ 选、Enter/Tab 插入、Esc 或左右方向键取消，继续打字会重新过滤。
@@ -212,16 +224,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**614** 项测试全部通过（v0.1.0 是 124 项）：
+**623** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 355 |
+| `subtext-core` | 364 |
 | `subtext-app` | 222 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **614** |
+| **合计** | **623** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

@@ -228,6 +228,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
 | 8.18 | 自定义包围 + 五个内置包围的语义 | 文本菜单最后一个占位提示；做它的时候用上游 fixture 发现内置命令一直包的是**行**而不是**选区** | ✅ |
 | 8.19 | 高级计数重做成「选项 + 胶囊」 | 上游是带七个选项的活计数器（sheet → 胶囊 → 齿轮 popover），SubText 是一个静态对话框 | ✅ |
+| 8.21 | 警告检查器按上游重排成两栏 | 上游是 `VSplitView` 的两个面板（不兼容字符 / 不一致换行符），各带状态行与表格；SubText 是一列自编的提示。顺带查出保存路径丢掉了有损标志，会把 `&#65533;` 静默写进文件 | ✅ |
 | 8.20 | 补全 + 三个被 base64 吃掉的快捷键 | `Edit ▸ Complete` 是占位提示，Mode 面板的三个补全开关没人读；顺带发现 ⌘⌫ / ⇧⌘⌫ / ⌥⎋ 三条键位在 storyboard 里是 base64 存的，一直没被读出来 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
@@ -2162,14 +2163,75 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 首行高亮、贴在光标下方。
 行数 41,117 → 41,805（`completion.rs` 361）。
 
+### 8.21 警告检查器按上游重排成两栏 —— 以及一个会写坏文件的保存路径 ✅
+
+`Inspector ▸ Warnings` 在 SubText 里是**一列自己编的提示文字**（混用换行符、U+FFFD、
+行尾空白、编不出来的 BOM）。上游不是一列文字，是 **`VSplitView` 的两个面板**，
+各带标题、一句状态和一个**表格**。
+
+#### 上游的两个面板
+
+```
+Incompatible Characters     Line │ Character │ Converted
+  Found N incompatible characters. / No issues found.
+Inconsistent Line Endings   Line │ Line Ending
+  Found N line endings other than LF. / No issues found.
+```
+
+- 标题 12pt semibold 次级色；状态行在**没有问题时**才用次级色。
+- 表格：`.tableStyle(.bordered)`、圆角 8、`controlSize(.small)`，行号列**右对齐**且用
+  tabular 数字；点一行把编辑器选区放到那个位置并居中。
+- 「不兼容字符」只在**编码不是 Unicode** 且文本非空时才有内容 —— 这是上游自己的守卫。
+
+#### 「不兼容」的判定：有损往返 + 二分
+
+`String.charactersIncompatible(with:)`：把一段文字**有损编码**再**按同一编码解码**，
+两者严格不等就是有问题；一段里如果不止一个字符，就**对半切开递归**，直到把出问题的
+字符单独隔离出来。两种问题一条规则一起抓：编码装不下的字符，以及编码装得下但**写出去
+会变成另一个字符**的（Shift-JIS 的 `\` → `＼`）。
+
+二分是必须的：往返是编解码器调用，逐字符试在大文件上慢得不能接受，而绝大多数文档几乎
+全是兼容字符。SubText 的扫描结果**按内容哈希记忆**（键是缓冲区哈希 + 编码），
+所以每帧渲染不会重扫。
+
+#### 顺带查出一个会写坏文件的 bug
+
+`Document::save` → `FileEncoding::encode()` **丢掉了 `had_errors` 标志**。于是把一份带
+emoji 的文档按 Shift-JIS 保存，磁盘上会**静默**出现 `&#65533;`（encoding_rs 对有损替换
+写的是数字字符引用），而文件看起来保存成功了。上游的 `LossyEncodingError` 会拦住它。
+
+现在保存路径会拒绝并报出上游那句话（*The document contains characters incompatible
+with "Japanese (Shift JIS)"*）。上游给的是三个选择（*Save Available Text* / *Change
+Encoding* / *Cancel*），SubText 做的是「取消」那一个，并把「改编码」指到状态栏的编码
+选择器上 —— 记账里写明了「照原样保存」没做。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| `Converted` 列显示的是 WHATWG 的替换 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**判定哪些字符不兼容两边的规则一样**，只是替换物不同 —— 与编码注册表「8 条是 WHATWG 超集近似」同源。 |
+| 表格不能按列排序 | 上游的表头可点排序。这里用组件库里无状态的 `Table`（行数是「正在用遗留编码写的文档里的几个出问题的字符」，不需要虚拟化）。 |
+| 表格横向滚动而不是压缩列 | `Table` 的单元格有最小宽度，三列塞不进窄检查器。上游的 SwiftUI `Table` 会压缩并截断。 |
+| 点一行是滚入可见而不是居中 | 与大纲导航同一条：`EditorState` 没有居中接口。 |
+
+验收：**9 条新测试**（623 = 614 + 9）——core 的 `warnings` 8 条（Unicode 编码与空文本
+没有内容、编码装得下的文本没有内容、装不下的字符逐个列出、**连着的两个不会互相藏住**、
+范围是字节偏移、不一致换行符的上游向量、CRLF 算一个、六种换行符都认）与 `document`
+的 1 条（编不出来的文档不写盘、且磁盘上什么都没留下）。
+全工作区 **623** 项测试全绿、clippy 零自有警告、生成器幂等、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活且 stdout/stderr 各 0 字节。
+**截了应用窗口核对**：两个面板各带标题与状态行、两张表按列排好、
+「Found 5 incompatible characters.」与「Found 1 line endings other than LF.」都对。
+行数 41,805 → 42,382（`warnings.rs` 265）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（614 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（623 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.20 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.21 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
@@ -2186,6 +2248,10 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
+| 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
+| 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |
+| 警告检查器的表格横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器；上游的 SwiftUI `Table` 会压缩并截断。 |
+| 有损保存只能取消，不能「照原样保存」 | 上游 `LossyEncodingError` 给 *Change Encoding* 与 *Cancel*，关闭文档时还多一个 *Save Available Text*。SubText 只做取消，并把改编码指到状态栏的编码选择器。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小，但一个字符的前缀在大文件里可以有很多行。 |
 | 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器不暴露这个状态。 |
 | 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |

@@ -24,6 +24,7 @@ pub mod scripts;
 pub mod snippets;
 pub mod textops;
 pub mod unicode_tables;
+pub mod warnings;
 
 pub use charinfo::{CharacterCount, CharacterInfo, CharacterReport, Count, GeneralCategory, ScalarInfo};
 pub use colorcode::{Color, ColorCodeType};
@@ -47,6 +48,7 @@ pub use snippets::{
     CURSOR_TOKEN, Insertion, Rejection, SELECTION_TOKEN, Sections, Shortcut, Snippet, TOKENS,
     Variable as SnippetVariable, indent_at, indent_range_at,
 };
+pub use warnings::{IncompatibleCharacter, incompatible_characters, inconsistent_line_endings};
 pub use textops::{
     CaseTransform, CommentDelimiters, Edit, LogicalLine, Normalization, SortKey, SortKeyError,
     SortOptions, SymbolPair, WidthTransform,
