@@ -30,6 +30,9 @@
 - **编码优先级列表编辑**（`Format ▸ Text Encoding ▸ Customize Encodings List…`
   与设置窗口 Format 面板的 *Edit List…*）：增删改序、Add 菜单、Restore Defaults，
   那份列表同时驱动编码菜单与打开文件时的探测顺序。
+- **侧栏与检查器可以拖动改宽**，宽度会记住：上游是 `NSSplitViewController`，
+  两条分隔线都能拖且位置自动保存，现在 SubText 也是。侧栏 11–24 rem、检查器 12–26 rem，
+  文档区吃掉富余。
 
 **运行时填充的菜单**
 
@@ -62,6 +65,12 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 修复
 
+- **设置文件里任何一个嵌套对象不完整，整份设置会被静默重置**：`Settings` 上有
+  `#[serde(default)]`，但六个 `*Options` 结构都没有。容器级的那个只覆盖「顶层键缺失」，
+  一个**存在但不完整**的嵌套对象会让反序列化整体失败，而读取路径是
+  `unwrap_or_default()` —— 用户设过的每一项都被丢掉，文件按设计留在磁盘上，
+  用户永远不知道为什么。这条同时是向前兼容的硬伤：给嵌套结构加字段就会让已有设置
+  全部读不出来。六个结构各补 `#[serde(default)]`，并加两条测试盯住。
 - **查找栏在最小窗口宽度下装不下**：两个定宽输入框加四个命令按钮的最小宽度是
   776 px，而窗口最小宽度是 720 px，窄窗下尾部按钮被裁掉且无法到达。
   输入框改成有下限的弹性宽度，计数格截断，主任务在每个允许的宽度上都在。
@@ -95,16 +104,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**554** 项测试全部通过（v0.1.0 是 124 项）：
+**556** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
 | `subtext-core` | 304 |
-| `subtext-app` | 213 |
+| `subtext-app` | 215 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **554** |
+| **合计** | **556** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

@@ -54,7 +54,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 554 项测试
+cargo test --workspace # 556 项测试
 ```
 
 要求 Rust 1.85+（edition 2024）。首次构建会编译 GPUI 全家桶，需要几分钟。

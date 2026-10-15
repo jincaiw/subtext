@@ -72,7 +72,10 @@ use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
 use crate::resources;
 use crate::scripts;
-use crate::settings::{DEFAULT_OUTLINE_FONT_SIZE, InspectorPane, Settings, SettingsPane, SidebarPane};
+use crate::settings::{
+    DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH, INSPECTOR_MIN_WIDTH, InspectorPane, Settings,
+    SettingsPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SidebarPane,
+};
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
 
@@ -101,6 +104,21 @@ const SCRIPT_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 /// lane, so an indent step and a disclosure triangle occupy the same column and
 /// a label's leading edge lands on a consistent spine at every depth.
 const OUTLINE_INDENT: f32 = 0.75;
+
+/// The element id of the middle row's split group.
+///
+/// The id carries which of the three panes are showing, because
+/// `ResizableState` keys its panel sizes by group id *and panel position*: one
+/// id shared by all four configurations would hand the sidebar's width to
+/// whichever pane moved into slot 0 when the sidebar is hidden. One id per
+/// configuration gives each its own sizes.
+fn middle_group_id(sidebar: bool, inspector: bool) -> ElementId {
+    ElementId::Name(SharedString::from(format!(
+        "workspace-columns-{}{}",
+        u8::from(sidebar),
+        u8::from(inspector)
+    )))
+}
 
 /// The text colour inside an outline match highlight.
 ///
@@ -3896,21 +3914,108 @@ impl Render for Workspace {
 
         let editor_area = self.render_editor_area(cx);
 
-        // `items_stretch`, not the `h_flex` default of centring on the cross
-        // axis: every child here is a full-height column that owns a header or a
-        // scroll region, and a centred column shorter than the row would have its
-        // top — its tab bar — pushed off the window's top edge with nothing to
-        // say why. Each column also asks for `h_full()`; this is the row saying
-        // so too, so a future child cannot get it wrong by omission.
-        let mut middle = h_flex().flex_1().min_h_0().items_stretch();
-        if self.settings.window.show_sidebar {
-            middle = middle.child(self.render_sidebar(cx));
+        // The middle row is a split group, not three fixed-width columns:
+        // upstream's `WindowContentViewController` is an `NSSplitViewController`
+        // whose sidebar and inspector items are both draggable and whose split
+        // view autosaves its position, and a sidebar the user cannot widen is a
+        // sidebar that cannot show a long file name. The widths come from the
+        // settings and go back there when a drag ends, which is what the
+        // autosave name does upstream.
+        //
+        // The group's element id carries which panes are showing. `ResizableState`
+        // keys its sizes by group id *and panel position*, so a single id for all
+        // four configurations would hand the sidebar's width to whatever pane
+        // moved into slot 0 when the sidebar is hidden — the editor would come
+        // back at fifteen rem. One id per configuration gives each its own sizes,
+        // and each starts from the widths in the settings.
+        let sidebar = self.settings.window.show_sidebar;
+        let inspector = self.settings.window.show_inspector;
+        // `resizable_panel().size()` takes `impl Into<Pixels>`, not a `Length`,
+        // so the design scale is applied by hand here the way `Dialog::w` does.
+        // Recomputing each frame is what keeps a dragged width honest when the
+        // interface scale changes.
+        let rem = window.rem_size().as_f32();
+        let mut panels = Vec::new();
+        if sidebar {
+            panels.push(
+                resizable_panel()
+                    .size(px(self.settings.window.sidebar_width * rem))
+                    .size_range(
+                        px(SIDEBAR_MIN_WIDTH * rem)..px(SIDEBAR_MAX_WIDTH * rem),
+                    )
+                    // Fixed rather than growing: the document takes the surplus
+                    // when the window widens, which is what upstream's sidebar
+                    // item does and what keeps the reading column the widest
+                    // thing on screen.
+                    .flex_none()
+                    .child(self.render_sidebar(cx)),
+            );
         }
-        middle = middle.child(editor_area);
-        if self.settings.window.show_inspector {
-            middle = middle.child(self.render_inspector(window, cx));
+        panels.push(resizable_panel().child(editor_area));
+        if inspector {
+            panels.push(
+                resizable_panel()
+                    .size(px(self.settings.window.inspector_width * rem))
+                    .size_range(
+                        px(INSPECTOR_MIN_WIDTH * rem)..px(INSPECTOR_MAX_WIDTH * rem),
+                    )
+                    .flex_none()
+                    .child(self.render_inspector(window, cx)),
+            );
         }
-        root = root.child(middle);
+
+        let group = h_resizable(middle_group_id(sidebar, inspector))
+            .children(panels)
+            .on_resize({
+                let workspace = cx.entity().downgrade();
+                move |state, _, cx| {
+                    // Read the resolved widths and release the borrow before
+                    // touching the workspace: `sizes()` hands back a slice of
+                    // the state we are about to notify through.
+                    //
+                    // Rem comes from the theme's base font, which is what the
+                    // Component Root hands the window as its rem size; an effect
+                    // has no window to ask.
+                    let rem = cx.theme().font_size.as_f32();
+                    let (sidebar_width, inspector_width) = {
+                        let state = state.read(cx);
+                        let sizes = state.sizes();
+                        (
+                            sizes.first().map(|size| size.as_f32() / rem),
+                            sizes.last().map(|size| size.as_f32() / rem),
+                        )
+                    };
+                    workspace
+                        .update(cx, |workspace, _| {
+                            // `sizes()` is positional, so the first entry is the
+                            // sidebar only when the sidebar is showing and the
+                            // last is the inspector only when it is. Writing a
+                            // width for a hidden pane would be writing the
+                            // editor's.
+                            //
+                            // Clamped on the way in as well as by the panel's
+                            // own range: the value is about to become a file on
+                            // disk, and a hand-edited one must not come back as
+                            // a sidebar wider than the window.
+                            let window = &mut workspace.settings.window;
+                            if let Some(width) = sidebar.then_some(sidebar_width).flatten() {
+                                window.sidebar_width =
+                                    width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+                            }
+                            if let Some(width) = inspector.then_some(inspector_width).flatten() {
+                                window.inspector_width =
+                                    width.clamp(INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH);
+                            }
+                            let _ = workspace.settings.save();
+                        })
+                        .ok();
+                }
+            });
+
+        // The group fills the row it is given; the wrapper is what asks for the
+        // remaining height, because `ResizablePanelGroup` is not `Styled` and so
+        // cannot take `flex_1()` itself.
+        root = root.child(div().flex_1().min_h_0().child(group));
 
         if self.settings.window.show_navigation_bar {
             root = root.child(self.render_navigation_bar(cx));

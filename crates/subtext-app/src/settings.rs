@@ -235,6 +235,7 @@ pub enum WritingDirection {
 
 /// What appears in the editor's gutter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EditorOptions {
     pub show_line_numbers: bool,
     pub show_invisibles: bool,
@@ -290,6 +291,7 @@ impl EditorOptions {
 ///
 /// No `Eq`: the saved window size and the hanging indent are floats.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WindowOptions {
     pub show_tab_bar: bool,
     pub show_toolbar: bool,
@@ -304,6 +306,17 @@ pub struct WindowOptions {
     /// The saved window width in points. `None` means "fit the content".
     pub window_width: Option<f64>,
     pub window_height: Option<f64>,
+
+    /// How wide the sidebar is, in rem.
+    ///
+    /// CotEditor's sidebar is an `NSSplitViewItem` the user drags, and the split
+    /// view autosaves its position — this is that position, and it is the third
+    /// of the three constraints the design guides ask of a major region (the
+    /// other two are [`SIDEBAR_MIN_WIDTH`] and [`SIDEBAR_MAX_WIDTH`]). Rem
+    /// rather than points because the interface scale moves it.
+    pub sidebar_width: f32,
+    /// How wide the inspector is, in rem. See [`Self::sidebar_width`].
+    pub inspector_width: f32,
 
     /// A tinted status bar follows the editor; an opaque one does not.
     pub prefers_opaque_bar_background: bool,
@@ -340,6 +353,8 @@ impl WindowOptions {
             window_tabbing: WindowTabbing::default(),
             window_width: None,
             window_height: None,
+            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+            inspector_width: INSPECTOR_DEFAULT_WIDTH,
             prefers_opaque_bar_background: false,
             enables_hanging_indent: false,
             hanging_indent_width: 2.0,
@@ -361,6 +376,7 @@ impl WindowOptions {
 /// No `Eq`: the delay is a float, and claiming exact equality on one would be
 /// a promise the type cannot keep.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EditOptions {
     /// Prefer spaces over tabs when indenting.
     pub auto_expand_tab: bool,
@@ -421,6 +437,7 @@ impl EditOptions {
 
 /// Startup, saving and update behaviour — the General pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GeneralOptions {
     /// Reopen the documents that were open when the app last quit.
     pub quit_always_keeps_windows: bool,
@@ -458,6 +475,7 @@ impl GeneralOptions {
 ///
 /// No `Eq`: the sizes, the line height and the opacity are floats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppearanceOptions {
     /// The font used for prose documents.
     pub standard_font_family: Option<String>,
@@ -511,6 +529,7 @@ impl AppearanceOptions {
 /// models the kind-level defaults; per-syntax overrides arrive with the syntax
 /// editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ModeOptions {
     pub font_type: FontType,
     pub smart_insert_delete: bool,
@@ -550,6 +569,23 @@ pub enum InspectorPane {
 /// CotEditor's `NSFont.smallSystemFontSize`, which is 11 points on macOS and is
 /// also the floor its *Smaller* command stops at.
 pub const DEFAULT_OUTLINE_FONT_SIZE: f32 = 11.0;
+
+/// The sidebar's three width constraints, in rem.
+///
+/// The minimum is where a file name and its icon still fit, the default is what
+/// the column has always been, and the maximum is where it would start to crowd
+/// out the document it is there to serve. Upstream's `NSSplitViewItem` takes the
+/// same three from the sidebar view's own constraints; its *inspector* item is
+/// given only a minimum (200 points), which is why the inspector's floor is the
+/// larger of the two — it holds a table, not a list.
+pub const SIDEBAR_MIN_WIDTH: f32 = 11.0;
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 15.0;
+pub const SIDEBAR_MAX_WIDTH: f32 = 24.0;
+
+/// The inspector's three width constraints, in rem. See [`SIDEBAR_MIN_WIDTH`].
+pub const INSPECTOR_MIN_WIDTH: f32 = 12.0;
+pub const INSPECTOR_DEFAULT_WIDTH: f32 = 16.0;
+pub const INSPECTOR_MAX_WIDTH: f32 = 26.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -816,6 +852,16 @@ impl Settings {
     ///
     /// A corrupt file is not fatal: the user gets a working editor and their
     /// broken file is left alone rather than silently overwritten.
+    ///
+    /// That fallback is why **every** options struct carries its own
+    /// `#[serde(default)]`, not just [`Settings`]. The container-level one only
+    /// covers a missing *top-level* key; a nested object that is present but
+    /// incomplete — a file written by a build with fewer fields, or by one with
+    /// more — would otherwise fail to deserialize, and this method would quietly
+    /// return the defaults, discarding every setting the user ever made, while
+    /// leaving the file on disk so they never learn why. The same is true in
+    /// reverse: adding a field to one of these structs must not make the files
+    /// already on disk unreadable.
     pub fn load() -> Self {
         let path = Self::path();
         let Ok(bytes) = std::fs::read(&path) else {
@@ -845,6 +891,54 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A settings file that names one nested field keeps every other field.
+    ///
+    /// This is the forward-compatibility contract: a file written by an earlier
+    /// build lacks whatever fields a later build added, and a file written by a
+    /// *later* build lacks nothing but must still be readable here. Both work
+    /// only if each nested object has its own `#[serde(default)]` — the one on
+    /// [`Settings`] covers a missing top-level key, not a missing key inside a
+    /// present nested object. Without it a partial nested object fails to
+    /// deserialize, [`Settings::load`] falls back to `Self::default()`, and
+    /// **every setting the user ever made is silently discarded** while the
+    /// file is left on disk, so they never find out why.
+    #[test]
+    fn a_partial_nested_object_keeps_the_other_settings() {
+        let json = br#"{
+            "window": { "show_sidebar": true },
+            "font_size": 18.0,
+            "encoding_list": ["utf-8"]
+        }"#;
+
+        let settings: Settings = serde_json::from_slice(json).expect("a partial file must parse");
+
+        assert!(settings.window.show_sidebar, "the named field was dropped");
+        assert_eq!(settings.font_size, 18.0, "a sibling top-level field was dropped");
+        assert_eq!(
+            settings.window.show_toolbar,
+            WindowOptions::default().show_toolbar,
+            "an unnamed field in the same object did not take its default"
+        );
+        assert_eq!(
+            settings.window.sidebar_width,
+            SIDEBAR_DEFAULT_WIDTH,
+            "a field this build added has no default"
+        );
+        assert_eq!(
+            settings.encoding_list.identifiers(),
+            EncodingList::from_identifiers(&[Some("utf-8")]).identifiers()
+        );
+    }
+
+    /// A file this build wrote reads back unchanged, which is the other half of
+    /// the contract.
+    #[test]
+    fn the_defaults_round_trip() {
+        let json = serde_json::to_vec(&Settings::default()).expect("serializable");
+        let back: Settings = serde_json::from_slice(&json).expect("a complete file must parse");
+        assert_eq!(back, Settings::default());
+    }
 
     #[test]
     fn every_pane_has_a_title_and_a_symbol() {

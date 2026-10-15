@@ -221,6 +221,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.10 | 大纲导航命令 | 8.0 留下的大纲条目只有行号，没有位置 | ✅ |
 | 8.11 | 编码优先级列表编辑 | 上游探测顺序就是这份列表；SubText 用的是统计猜测 | ✅ |
 | 8.12 | 桌面 UI 与布局按设计规范复核 | 两个技能的规范是**要求**；逐条对账而非凭印象 | ✅ |
+| 8.13 | 侧栏与检查器可拖动改宽 | 上游是 `NSSplitViewController`，两条分隔线都能拖且会自存 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1532,17 +1533,79 @@ app 里编辑器 18 条（含两条方向按钮的启用判据）。全工作区
 「最小 / 舒适默认 / 如何吃掉富余」），但没有拖拽手柄。上游是 `NSSplitViewController`，
 可以拖。改成 `h_resizable` 需要把中栏做成可调整组，而编辑器区分屏自己已经是一层
 `h_resizable`——嵌套之后的视觉结果这一轮无法验证（没有 UI 集成测试，见缺口表），
-所以按本仓惯例**如实记账而不猜**。
+所以按本仓惯例**如实记账而不猜**。→ **§8.13 已补上，且是量出来的，不是猜的。**
 
 验收：无新增测试（这一轮改的是布局与令牌，判据是编译、clippy、算术与冒烟）。
 全工作区 **554** 项测试仍全绿、clippy 零自有警告、生成器幂等、
 冒烟开一份 Rust 文件存活 7 秒且 stdout/stderr 各 0 字节。
 
+### 8.13 侧栏与检查器可拖动改宽 ✅
+
+§8.12 记账的那条缺口。上游 `WindowContentViewController` 是一个
+`NSSplitViewController`，三个 item（sidebar / content / inspector）的两条分隔线都能拖，
+而且 `splitView.autosaveName` 会把位置存下来；它的 inspector item 只给了
+`minimumThickness = 200`，sidebar item 的三条约束来自视图自己的约束。
+
+SubText 的中栏从「三个定宽列」改成 `h_resizable` 组：
+
+| 面板 | `size` | `size_range` | flex |
+| --- | --- | --- | --- |
+| 侧栏 | `sidebar_width`（默认 15 rem） | 11–24 rem | `flex_none()` |
+| 编辑器 | 无 | 无 | 默认（吃掉富余） |
+| 检查器 | `inspector_width`（默认 16 rem） | 12–26 rem | `flex_none()` |
+
+三个新常量成对放在 `settings.rs`（`SIDEBAR_MIN_WIDTH` / `_DEFAULT_` / `_MAX_WIDTH`），
+`WindowOptions` 新增 `sidebar_width` / `inspector_width` 两个字段持久化，
+拖动结束时 `on_resize` 把解析出的像素宽度换算回 rem 写回设置（写回前 clamp）。
+
+#### 一个必须先解决的问题：面板宽度是按位置存的
+
+`ResizableState` 按**组 id + 面板位置**存尺寸。四种显隐组合若共用一个 id，
+隐藏侧栏时编辑器会挪到 slot 0，把侧栏的宽度继承过来 —— 下次开窗文档区就是 15 rem。
+所以组 id 带上显隐状态（`workspace-columns-{sidebar}{inspector}`），每种组合各有各的尺寸，
+且都从设置里的宽度起算。
+
+#### 验证：不是「看起来对」，是量出来的
+
+没有 UI 集成测试，但这不代表只能猜 —— `ResizableState::sizes()` 给出**解析后的像素宽度**。
+临时用一个 `with_state` 持有状态 + 一个 `SUBTEXT_SMOKE_SPLIT` 钩子每 0.6 秒打印一次，
+四种情形各测一遍（探针提交前已移除，`grep -c PROBE` = 0）：
+
+| 情形 | 期望 | 实测 |
+| --- | --- | --- |
+| 默认宽度，两栏都开（窗口 1536 px） | 15 rem / 富余 / 16 rem | `[240, 1040, 256]` ✅ |
+| 存了 20 rem / 22 rem | 320 / 富余 / 352 | `[320, 864, 352]` ✅ |
+| 隐藏侧栏（存的是 20 rem） | 编辑器**不得**继承 320 | `[1184, 352]` ✅ |
+| 三帧连续采样 | 不抖动 | 三次相同 ✅ |
+
+最后一行才是 §8.12 那条缺口的答案：宽度**是**可以量出来的，
+所以「无法验证」这个理由不成立 —— 该做的是造一个量具，不是记一笔账。
+
+#### 顺带逮到的一个真 bug（比这个功能重要）
+
+探针第一次跑只打印出一个面板 `[1536]`，说明**侧栏根本没显示** ——
+写进去的 `{"window":{"show_sidebar":true}}` 没有被读出来。原因不在探针：
+
+`Settings` 上有 `#[serde(default)]`，但**嵌套的六个 `*Options` 结构都没有**。
+容器级的 `serde(default)` 只覆盖「顶层键缺失」；一个**存在但不完整**的嵌套对象会让整个
+`Settings` 反序列化失败，而 `Settings::load()` 是 `unwrap_or_default()` ——
+于是**用户设过的每一项设置被静默丢弃**，而那份文件按设计留在磁盘上，用户永远不知道为什么。
+
+这条对**向前兼容**同样致命：给任何一个嵌套结构加字段（比如这一轮的 `sidebar_width`），
+磁盘上已有的设置文件就会全部读不出来。也就是说这一轮自己就踩了这个坑。
+
+修法是给六个结构各加 `#[serde(default)]`，并加两条测试：
+`a_partial_nested_object_keeps_the_other_settings`（只写一个字段，其余必须留住）
+与 `the_defaults_round_trip`（本构建写出的文件必须读得回来）。前者在修之前**是红的**。
+
+验收：**2 条新测试**（556 = 554 + 2）。全工作区 **556** 项测试全绿、
+clippy 零自有警告、生成器幂等（`menu.rs` `d72a9524` / `keymap.rs` `75c5c9e0` 未变）、
+冒烟开一份 Rust 文件存活 7 秒且 stdout/stderr 各 0 字节。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
-| 任务 | 内容 | 状态 |
-| --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（554 项 / 零警告） |
+| 任务 | 内容 | 状态 || --- | --- | --- |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（556 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、统计同步 |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12 的布局复核落在其后；因为标签只在本地、尚未推送，把它移到包含 §8.12 的提交（`12cf74a`）并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致 |
@@ -1572,5 +1635,6 @@ app 里编辑器 18 条（含两条方向按钮的启用判据）。全工作区
 | 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
 | 侧栏与检查器不能拖动改宽 | 上游是 `NSSplitViewController`，两条分隔线都能拖；SubText 的侧栏与检查器是定宽列（各带 `min_w` / `w` / `max_w` 三条约束），没有拖拽手柄。要补就得把中栏做成 `h_resizable` 组，而编辑器区分屏自己已经是一层 `h_resizable`，嵌套后的视觉结果在没有 UI 集成测试（见上一条）的情况下无法验证，所以按本仓惯例记账不猜。详见 §8.12。 |
 | Windows / Linux 未编译验证（主机缺交叉工具链，不是代码问题） | 两个目标都试过 `cargo check --workspace --target …`，都在**依赖的构建脚本**上停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
+| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

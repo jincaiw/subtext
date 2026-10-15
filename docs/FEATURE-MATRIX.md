@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 34,834（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 35,033（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -139,6 +139,7 @@
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
 | 文件夹查找 | `show_sidebar(FolderFind)` | ✅ |
 | 侧边栏 | `update_window_options` | ✅ |
+| 侧边栏 / 检查器的宽度 | `WindowOptions::sidebar_width` / `inspector_width` | ✅ 分隔线可拖动（`h_resizable`），宽度记在设置里；上游是 `NSSplitViewController` 的 `autosaveName`。侧栏 11–24 rem、检查器 12–26 rem，文档区吃富余 |
 | 检查器 | `update_window_options` | ✅ |
 | 文稿检查器 | `show_inspector(Document)` | ✅ |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
@@ -296,11 +297,11 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 129 | 64% |
+| ✅ 完整实现 | 约 130 | 64% |
 | 🔁 等价实现（委托或改写） | 约 24 | 12% |
 | ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
 | ⏳ 未实现（菜单保留 + 提示） | 约 28 | 14% |
-| **合计** | **201** | **100%** |
+| **合计** | **202** | **100%** |
 
 **关键点**：**菜单栏 258 项一个不少**。
 未实现的功能不是「从菜单里删掉」，而是「保留 + 说明」——
