@@ -37,7 +37,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 | 文本操作 | 38 个全部实现（注释、缩进、排序、大小写、全半角、URL、Unicode 规范化…） |
 | 编码支持 | UTF-8 / UTF-16 LE,BE / UTF-32 LE,BE + 6 种 BOM；自动探测与上游同序（BOM → 声明 → 用户的优先级列表 → 默认编码），**优先级列表可编辑**，默认编码含字节序标记 |
 | 换行符 | LF / CRLF / CR / NEL / LS / PS 六种 |
-| 检查器 | 文稿信息 / 大纲（可折叠 `Tree` + 子序列过滤）/ 警告 |
+| 检查器 | 文稿信息（上游的四段：File / Text Settings / Count / Character）/ 大纲（可折叠 `Tree` + 子序列过滤）/ 警告 |
 | 侧栏 | 文件浏览器 / 文件夹查找 |
 | 面板 | 分屏编辑器、多重替换、按模式排序、编辑颜色代码、快速操作（⌘K）、代码片段 |
 | 窗口框架 | 侧栏 / 内容 / 检查器三栏（分隔线可拖动、宽度记住），状态栏属于内容列，每个分屏带一条导航栏 |
@@ -55,7 +55,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 562 项测试
+cargo test --workspace # 579 项测试
 ```
 
 要求 Rust 1.85+（edition 2024）。首次构建会编译 GPUI 全家桶，需要几分钟。

@@ -14,4 +14,7 @@ regex.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
+unicode-properties.workspace = true
 unicode_names2 = "1"
+jiff.workspace = true
+libc.workspace = true

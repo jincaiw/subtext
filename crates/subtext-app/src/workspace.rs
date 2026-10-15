@@ -33,6 +33,8 @@ use std::rc::Rc;
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::input::InputEvent;
+use gpui_kit::base::AccordionTrigger;
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
@@ -51,13 +53,14 @@ use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px, rems,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, percentage, px,
+    rems,
 };
 
 use subtext_core::scripts::{InputType, Invocation, Item as ScriptItem, OutputType};
 use subtext_core::{
     Document, DroppedFile, FileEncoding, LineEnding, Normalization, TextEncoding, charinfo,
-    colorcode, finder, imagesize, line_ending, multireplace, textops,
+    colorcode, fileattrs, finder, imagesize, line_ending, multireplace, textops,
 };
 use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
@@ -104,6 +107,25 @@ const SCRIPT_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 /// lane, so an indent step and a disclosure triangle occupy the same column and
 /// a label's leading edge lands on a consistent spine at every depth.
 const OUTLINE_INDENT: f32 = 0.75;
+
+/// The Document inspector's four sections, in CotEditor's order.
+///
+/// Upstream's `DocumentInspectorView` is a `VStack` of four `DisclosureGroup`s
+/// with these labels, and the panel draws them in this order. Naming them once
+/// keeps the labels, the order and the per-section open state from drifting
+/// apart — the state is an array indexed by position in this list.
+const INSPECTOR_SECTIONS: [&str; 4] = ["File", "Text Settings", "Count", "Character"];
+const INSPECTOR_SECTION_COUNT: usize = INSPECTOR_SECTIONS.len();
+
+/// The three counts and the three positions, in CotEditor's order.
+///
+/// Its `CountType.countCases` followed by `CountType.positionCases`. Both the
+/// status bar and the inspector's Count section draw these six in this order —
+/// the labels are here so the two cannot disagree about what "Lines" is called
+/// or where it sits. The three counts carry a selected half; the three
+/// positions do not.
+const COUNT_LABELS: [&str; 3] = ["Lines", "Characters", "Words"];
+const POSITION_LABELS: [&str; 3] = ["Location", "Line", "Column"];
 
 /// The element id of the middle row's split group.
 ///
@@ -353,6 +375,15 @@ pub struct Workspace {
     /// built from — a script deleted between the two should report that it is
     /// gone rather than run a neighbour that happens to sort next to it.
     scripts: Vec<ScriptItem>,
+    /// Which of the Document inspector's four sections are open.
+    ///
+    /// Upstream keeps one `@State private var isExpanded = true` per section,
+    /// so all four start open and a collapse is forgotten when the view is
+    /// recreated — that is, per document window. The workspace is the closest
+    /// thing SubText has to a document window, and the state has to live
+    /// *somewhere*: the accordion rebuilds its own state on every frame, and
+    /// the inspector redraws on every keystroke.
+    inspector_sections: [bool; INSPECTOR_SECTION_COUNT],
 }
 
 impl Workspace {
@@ -453,6 +484,7 @@ impl Workspace {
             _outline_filter_changes: outline_filter_changes,
             menus_built_for: None,
             scripts: Vec::new(),
+            inspector_sections: [true; INSPECTOR_SECTION_COUNT],
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -2540,13 +2572,13 @@ impl Workspace {
 
         let rows = vec![
             ("Character", info.character.to_string()),
-            ("Name", info.name.clone()),
-            ("Code Point", info.code_point.clone()),
-            ("Category", info.category.to_string()),
-            ("Block", info.block.to_string()),
+            ("Name", info.scalar.display_name().to_string()),
+            ("Code Point", info.code_point().to_string()),
+            ("Category", info.scalar.category.to_string()),
+            ("Block", info.scalar.display_block().to_string()),
             ("UTF-8", info.utf8.clone()),
             ("UTF-16", info.utf16.clone()),
-            ("Decimal", info.decimal.to_string()),
+            ("Decimal", info.decimal().to_string()),
             ("HTML Entity", info.html_entity.clone()),
             ("Width", info.width.to_string()),
         ];
@@ -3112,42 +3144,243 @@ impl Workspace {
             )
     }
 
+    /// The Full Path row, which carries upstream's *Show in Finder* button.
+    ///
+    /// Upstream draws the path with `truncationMode(.middle)`, a `help` tooltip
+    /// and a bordered-circle arrow that reveals the file. GPUI truncates at the
+    /// end and a plain `div` carries no tooltip, so those two decorations are
+    /// lost; the button is the part that *does* something, and it is kept. It
+    /// only appears for a document that has a file, which is when upstream
+    /// shows it too.
+    fn inspector_full_path(
+        &self,
+        path: Option<&Path>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let shown = path.map(|path| path.display().to_string()).unwrap_or_default();
+        let reveal = path.map(Path::to_path_buf).map(|path| {
+            Button::new("inspector-reveal")
+                .ghost()
+                .xsmall()
+                .icon(IconName::CircleArrowRight)
+                .tooltip("Show in Finder")
+                .on_click(cx.listener(move |_this, _, _, _| reveal_in_file_manager(&path)))
+        });
+
+        h_flex()
+            .w_full()
+            .gap_2()
+            .items_start()
+            .justify_between()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Full Path"),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
+                    .justify_end()
+                    .child(div().min_w_0().text_xs().truncate().child(shown))
+                    .when_some(reveal, |this, button| this.child(button)),
+            )
+    }
+
+    /// The Document inspector — upstream's `DocumentInspectorView`.
+    ///
+    /// Four `DisclosureGroup`s, each a `Form` of label/value rows:
+    ///
+    /// ```text
+    /// File            Created · Modified · Size · Tags · Permissions · Owner · Full Path
+    /// Text Settings   Encoding · Line Endings · Mode
+    /// Count           Lines · Characters · Words · Location · Line · Column
+    /// Character       Code Point(s) · Name · Block · Category   (only when one character is selected)
+    /// ```
+    ///
+    /// Everything the rows need is read in one pass here, because the buffer and
+    /// the selection have to be copied out together anyway.
     fn render_document_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let Some(document) = self.active_document() else {
             return v_flex().into_any_element();
         };
         let model = &document.document;
-        let text = document.editor().read(cx).value().to_string();
-        let count = charinfo::CharacterCount::of(&text, model.encoding());
+        let encoding = FileEncoding::of_document(model.encoding(), model.bom());
+        let (text, selection) = {
+            let state = document.editor().read(cx);
+            (state.value().to_string(), state.selected_range())
+        };
+        let selected_text = text.get(selection.clone()).unwrap_or_default().to_string();
 
-        let rows: Vec<(&str, String)> = vec![
-            ("File Name", model.display_name()),
-            ("File Size", format_size(count.encoded_bytes, true)),
-            ("Encoding", model.encoding().name.to_string()),
-            ("BOM", model.bom().to_string()),
-            ("Line Endings", model.line_ending().to_string()),
-            ("Syntax", document.syntax.to_string()),
-            ("Lines", count.lines.to_string()),
-            ("Characters", count.characters.to_string()),
-            ("Words", count.words.to_string()),
-            ("Paragraphs", count.paragraphs.to_string()),
-            ("UTF-16 Units", count.utf16_units.to_string()),
-            ("UTF-8 Bytes", count.utf8_bytes.to_string()),
+        // ---- File ---------------------------------------------------------
+        let attributes = model.path().and_then(fileattrs::FileAttributes::read);
+        let file_rows = {
+            let (created, modified) = match &attributes {
+                Some(attributes) => (
+                    attributes.created.and_then(fileattrs::format_timestamp),
+                    attributes.modified.and_then(fileattrs::format_timestamp),
+                ),
+                None => (None, None),
+            };
+            let size = attributes.as_ref().map(|attributes| format_size(attributes.size, true));
+            let permissions =
+                attributes.as_ref().map(|attributes| attributes.permissions.formatted());
+            let owner = attributes.as_ref().and_then(|attributes| attributes.owner.clone());
+
+            v_flex()
+                .w_full()
+                .gap_1()
+                .child(inspector_row("Created", created.unwrap_or_default(), cx))
+                .child(inspector_row("Modified", modified.unwrap_or_default(), cx))
+                .child(inspector_row("Size", size.unwrap_or_default(), cx))
+                // Upstream draws a Tags row here. SubText does not read Finder
+                // tags at all — see the gap table in `docs/PLAN.md` — and a row
+                // that could never show anything is worse than no row.
+                .child(inspector_row("Permissions", permissions.unwrap_or_default(), cx))
+                .child(inspector_row("Owner", owner.unwrap_or_default(), cx))
+                .child(self.inspector_full_path(model.path(), cx))
+        };
+
+        // ---- Text Settings ------------------------------------------------
+        let text_settings_rows = v_flex()
+            .w_full()
+            .gap_1()
+            .child(inspector_row("Encoding", encoding.name(), cx))
+            .child(inspector_row("Line Endings", model.line_ending().to_string(), cx))
+            // Upstream's `Mode` is the syntax in force — its `Syntax.Kind` label
+            // for a built-in kind, the syntax's own name otherwise. SubText's
+            // syntaxes are the same bundles, so the name is the same name.
+            .child(inspector_row("Mode", document.syntax.to_string(), cx));
+
+        // ---- Count --------------------------------------------------------
+        let count = charinfo::CharacterCount::of(&text, encoding.encoding);
+        let selected = (!selection.is_empty())
+            .then(|| charinfo::CharacterCount::of(&selected_text, encoding.encoding));
+        let counts = count.counts(selected.as_ref());
+        let (line, column, location) = textops::status_position(&text, selection.start);
+        let count_rows = {
+            let mut rows = v_flex().w_full().gap_1();
+            for (label, count) in COUNT_LABELS.iter().zip(counts) {
+                rows = rows.child(inspector_row(*label, count.formatted(), cx));
+            }
+            // Upstream's counts sit in one `Form.Section` and the positions in
+            // a second, so the two groups are separated by the form's own
+            // spacing rather than by a rule.
+            rows = rows
+                .child(inspector_row(POSITION_LABELS[0], location.to_string(), cx))
+                .child(inspector_row(POSITION_LABELS[1], line.to_string(), cx))
+                .child(inspector_row(POSITION_LABELS[2], column.to_string(), cx));
+            rows
+        };
+
+        // ---- Character ----------------------------------------------------
+        let character = charinfo::CharacterReport::of(&selected_text);
+        let character_rows = {
+            let mut rows = v_flex().w_full().gap_1();
+            if character.is_empty() {
+                rows = rows.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Not selected"),
+                );
+            } else {
+                // One code point is labelled in the singular, several in the
+                // plural — upstream asks `scalars.count == 1` for the same two
+                // strings.
+                let label = if character.is_single_scalar() { "Code Point" } else { "Code Points" };
+                rows = rows.child(inspector_row(label, character.code_points().join(" "), cx));
+                if character.is_single_scalar() {
+                    let scalar = &character.scalars[0];
+                    rows = rows
+                        .child(inspector_row("Name", scalar.display_name().to_string(), cx))
+                        .child(inspector_row("Block", scalar.display_block().to_string(), cx))
+                        .child(inspector_row("Category", scalar.category.to_string(), cx));
+                }
+            }
+            rows
+        };
+
+        let bodies = [
+            file_rows.into_any_element(),
+            text_settings_rows.into_any_element(),
+            count_rows.into_any_element(),
+            character_rows.into_any_element(),
         ];
 
-        let mut list = v_flex().gap_1();
-        for (label, value) in rows {
-            list = list.child(
-                h_flex()
-                    .gap_2()
-                    .justify_between()
-                    .child(
-                        div().text_xs().text_color(cx.theme().muted_foreground).child(label),
-                    )
-                    .child(div().text_xs().truncate().child(value)),
-            );
+        let mut sections = v_flex().w_full().gap_1();
+        for (index, body) in bodies.into_iter().enumerate() {
+            sections = sections.child(self.inspector_section(index, body, cx));
         }
-        list.into_any_element()
+        sections.into_any_element()
+    }
+
+    /// One `DisclosureGroup` of the Document inspector.
+    ///
+    /// Upstream styles its sections with `InspectorDisclosureGroupStyle`: a
+    /// 12-point semibold label in the secondary colour, and the disclosure
+    /// triangle where `DisclosureGroup` puts it, in the leading position.
+    /// `Accordion`'s item renders its chevron trailing, so this is built on the
+    /// trigger the accordion itself is built on — [`AccordionTrigger`], which is
+    /// deliberately unstyled and leaves the icon and the layout to the
+    /// application, while keeping the focus, keyboard and accessibility
+    /// behaviour of the component.
+    ///
+    /// The open state is the workspace's, not the element's: this panel is
+    /// redrawn on every keystroke, and an element that owned its own state
+    /// would spring back open at the next character typed.
+    fn inspector_section(
+        &self,
+        index: usize,
+        body: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = self.inspector_sections[index];
+        // The trigger reports the click through a four-argument handler
+        // (open, event, window, app), which `Context::listener` — one event
+        // argument — cannot wrap. The workspace is reached through a weak
+        // handle instead, which is also what keeps the element free of a
+        // borrow of the view it is being rendered into.
+        let workspace = cx.entity().downgrade();
+        let trigger = AccordionTrigger::new(("inspector-section", index))
+            .open(open)
+            .h_flex()
+            .w_full()
+            .gap_1()
+            .py_1()
+            .on_change(move |open, _, _, cx| {
+                workspace
+                    .update(cx, |this, cx| {
+                        this.inspector_sections[index] = open;
+                        cx.notify();
+                    })
+                    .ok();
+            })
+            .child(
+                // A quarter turn from pointing right to pointing down, which is
+                // the pair of positions AppKit's triangle has.
+                Icon::new(IconName::ChevronRight)
+                    .xsmall()
+                    .flex_none()
+                    .text_color(cx.theme().muted_foreground)
+                    .rotate(percentage(if open { 0.25 } else { 0. })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(INSPECTOR_SECTIONS[index]),
+            );
+
+        v_flex()
+            .w_full()
+            .child(trigger)
+            .when(open, |this| this.child(body))
+            .into_any_element()
     }
 
     // ---- the Outline inspector -------------------------------------------
@@ -3941,11 +4174,14 @@ impl Workspace {
                 Button::new("nav-split")
                     .ghost()
                     .xsmall()
-                    .icon(if is_vertical {
-                        IconName::SquareSplitVertical
-                    } else {
-                        IconName::SquareSplitHorizontal
-                    })
+                    .icon(
+                        // Upstream draws one symbol and turns it a quarter turn
+                        // when the split is vertical. `Icon::rotate` takes a
+                        // fraction of a full turn, so this is that same -90°.
+                        Icon::new(IconName::SquareSplitHorizontal).rotate(percentage(
+                            if is_vertical { -0.25 } else { 0. },
+                        )),
+                    )
                     .accessibility_label("Split Editor")
                     .tooltip("Split editor")
                     .on_click(move |_, window, cx| {
@@ -3957,9 +4193,7 @@ impl Workspace {
                             .ok();
                     })
                     // Upstream puts the orientation on the button's *context*
-                    // menu, so the click still splits. It rotates one symbol by
-                    // 90° to show which way; GPUI has no rotation, so the two
-                    // orientations get two symbols instead.
+                    // menu, so the click still splits.
                     .context_menu(move |menu, _window, _cx| {
                         let orientation = orientation.clone();
                         menu.item(
@@ -4076,32 +4310,26 @@ impl Workspace {
 
         let count = charinfo::CharacterCount::of(&text, encoding.encoding);
         // Upstream shows `entire (selected)` while a selection is up, which is
-        // the whole reason the counts are worth a glance mid-edit.
-        let selected = (!selection.is_empty())
-            .then(|| {
-                let slice = text.get(selection.start..selection.end).unwrap_or_default();
-                charinfo::CharacterCount::of(slice, encoding.encoding)
-            });
+        // the whole reason the counts are worth a glance mid-edit. The rule for
+        // that lives with the pair of numbers, in `charinfo::Count`, because
+        // the inspector's Count section draws the same three pairs.
+        let selected = (!selection.is_empty()).then(|| {
+            let slice = text.get(selection.start..selection.end).unwrap_or_default();
+            charinfo::CharacterCount::of(slice, encoding.encoding)
+        });
+        let counts = count.counts(selected.as_ref());
         let (line, column, location) = textops::status_position(&text, selection.start);
 
         let window = self.settings.window;
-        let mut counts: Vec<(bool, &str, String)> = vec![
-            (window.show_status_bar_lines, "Lines", count.lines.to_string()),
-            (
-                window.show_status_bar_chars,
-                "Characters",
-                with_selection(count.characters, selected.as_ref().map(|s| s.characters)),
-            ),
-            (
-                window.show_status_bar_words,
-                "Words",
-                with_selection(count.words, selected.as_ref().map(|s| s.words)),
-            ),
-            (window.show_status_bar_location, "Location", location.to_string()),
-            (window.show_status_bar_line, "Line", line.to_string()),
-            (window.show_status_bar_column, "Column", column.to_string()),
+        let mut items: Vec<(bool, &str, String)> = vec![
+            (window.show_status_bar_lines, COUNT_LABELS[0], counts[0].formatted()),
+            (window.show_status_bar_chars, COUNT_LABELS[1], counts[1].formatted()),
+            (window.show_status_bar_words, COUNT_LABELS[2], counts[2].formatted()),
+            (window.show_status_bar_location, POSITION_LABELS[0], location.to_string()),
+            (window.show_status_bar_line, POSITION_LABELS[1], line.to_string()),
+            (window.show_status_bar_column, POSITION_LABELS[2], column.to_string()),
         ];
-        counts.retain(|(shown, _, _)| *shown);
+        items.retain(|(shown, _, _)| *shown);
 
         // SubText's own transient notices share this row. Upstream has no such
         // line — it uses an alert — so the notice *replaces* the counts for the
@@ -4143,7 +4371,7 @@ impl Workspace {
                     })
                     .when(notice.is_none(), |this| {
                         this.children(
-                            counts
+                            items
                                 .into_iter()
                                 .map(|(_, label, value)| div().child(format!("{label}: {value}"))),
                         )
@@ -4154,7 +4382,7 @@ impl Workspace {
                 this.child(
                     div()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format_size(size as usize, false)),
+                        .child(format_size(size, false)),
                 )
             })
             .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
@@ -4370,7 +4598,7 @@ impl Workspace {
 /// `includes_actual_byte_count` appends the exact count in parentheses. That is
 /// what the *document inspector* shows; the status bar shows the same number
 /// without it.
-pub fn format_size(bytes: usize, includes_actual_byte_count: bool) -> String {
+pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
     const UNITS: [(&str, f64); 4] = [("kB", 1e3), ("MB", 1e6), ("GB", 1e9), ("TB", 1e12)];
     let value = bytes as f64;
     let scaled = if value < 1e3 {
@@ -4397,16 +4625,50 @@ pub fn format_size(bytes: usize, includes_actual_byte_count: bool) -> String {
     }
 }
 
-/// `entire (selected)` while a selection is up.
+/// One `LabeledContent` row of the Document inspector.
 ///
-/// Upstream's `EditorCounter.Count.formatted` — the parenthesised count is what
-/// makes the three counts worth glancing at mid-edit, and it appears only when
-/// something is actually selected.
-fn with_selection(entire: usize, selected: Option<usize>) -> String {
-    match selected {
-        Some(selected) if selected > 0 => format!("{entire} ({selected})"),
-        _ => entire.to_string(),
-    }
+/// Upstream pairs a label with its value inside a grouped `Form`, which puts
+/// the label in a leading column and the value against the trailing edge. This
+/// is that pair. The label never shrinks, so it is never the half that gets
+/// cut off; the value takes what is left and truncates, which is what keeps a
+/// long full path from pushing its own label out of a 12-rem pane.
+fn inspector_row(
+    label: impl Into<SharedString>,
+    value: impl IntoElement,
+    cx: &App,
+) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .items_start()
+        .justify_between()
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.into()),
+        )
+        .child(div().min_w_0().text_xs().truncate().child(value))
+}
+
+/// Hand `path` to the platform's file manager, with the file selected.
+///
+/// Upstream calls `NSWorkspace.activateFileViewerSelecting`, which is the same
+/// idea on each of the three systems and a one-line command on each of them
+/// too. Failure is ignored: the worst case is that nothing comes to the front.
+fn reveal_in_file_manager(path: &Path) {
+    let (program, arguments) = if cfg!(target_os = "macos") {
+        ("open", vec![std::ffi::OsString::from("-R"), path.into()])
+    } else if cfg!(target_os = "windows") {
+        ("explorer", vec![std::ffi::OsString::from(format!("/select,{}", path.display()))])
+    } else {
+        // The desktop environments have no "select this file" switch; opening
+        // the containing folder is the closest thing that is not a dependency.
+        let folder = path.parent().unwrap_or(path);
+        ("xdg-open", vec![folder.into()])
+    };
+    let _ = std::process::Command::new(program).args(arguments).spawn();
 }
 
 impl Render for Workspace {

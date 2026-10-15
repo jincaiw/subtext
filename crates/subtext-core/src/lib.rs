@@ -11,6 +11,7 @@ pub mod charinfo;
 pub mod colorcode;
 pub mod document;
 pub mod encoding;
+pub mod fileattrs;
 pub mod filedrop;
 pub mod finder;
 pub mod folderfind;
@@ -22,10 +23,11 @@ pub mod scripts;
 pub mod snippets;
 pub mod textops;
 
-pub use charinfo::{CharacterCount, CharacterInfo};
+pub use charinfo::{CharacterCount, CharacterInfo, CharacterReport, Count, GeneralCategory, ScalarInfo};
 pub use colorcode::{Color, ColorCodeType};
 pub use document::{Document, DocumentError, FileStatus};
 pub use encoding::{Bom, DecodedFile, Detection, FileEncoding, TextEncoding};
+pub use fileattrs::{FileAttributes, FilePermissions, format_timestamp};
 pub use filedrop::{DroppedFile, FileDropItem, Variable as FileDropVariable};
 pub use finder::{FindOptions, ReplacementSyntax, Searcher, replace_all, replace_one};
 pub use folderfind::{

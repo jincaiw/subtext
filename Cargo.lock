@@ -3423,6 +3423,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -6233,11 +6234,14 @@ name = "subtext-core"
 version = "0.2.0"
 dependencies = [
  "encoding_rs",
+ "jiff",
+ "libc",
  "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "unicode-normalization",
+ "unicode-properties",
  "unicode-segmentation",
  "unicode-width",
  "unicode_names2",

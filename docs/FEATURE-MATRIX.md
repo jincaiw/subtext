@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 35,865（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 37,284（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`） | — |
 
 ---
 
@@ -142,7 +142,7 @@
 | 侧边栏 | `update_window_options` | ✅ |
 | 侧边栏 / 检查器的宽度 | `WindowOptions::sidebar_width` / `inspector_width` | ✅ 分隔线可拖动（`h_resizable`），宽度记在设置里；上游是 `NSSplitViewController` 的 `autosaveName`。侧栏 11–24 rem、检查器 12–26 rem，文档区吃富余 |
 | 检查器 | `update_window_options` | ✅ |
-| 文稿检查器 | `show_inspector(Document)` | ✅ |
+| 文稿检查器 | `render_document_inspector` | ✅ 上游的四段：**File**（Created / Modified / Size / Permissions / Owner / Full Path + *Show in Finder*）· **Text Settings**（Encoding / Line Endings / Mode）· **Count**（三对计数带 `entire (selected)` + 三个位置量）· **Character**（code point，单标量再给 Name / Block / Category；无选区写 *Not selected*）。少了 `Tags` 一行，见缺口表 |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
 | 警告检查器 | `show_inspector(Warnings)` | ✅ |
 | 导航栏 | `render_navigation_bar(pane)` | ✅ **每个编辑分屏一条**（上游 `EditorViewController` 的第一项）：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 · 分屏按钮（右键改方向）。只有一个分屏时关闭按钮不可见 |
@@ -180,7 +180,7 @@
 | URL 编码 / 解码 | `url_encode` / `url_decode` | ✅ |
 | Unicode 规范化 | `normalize_unicode` | ✅ 经 Text ▸ Unicode Normalizations 菜单（5 项 + 分隔符 + 2 项）；上游 7 种里 4 种可用，3 个 Apple 形态触发时在状态栏说明原因 |
 | 显示选区信息 | `inspect_selection` | ✅ |
-| 高级计数 | `inspect_document` | ✅ |
+| 高级计数 | `inspect_document` | ✅ 计数走 `charinfo::CharacterCount`：Characters 是扩展字形簇、Lines 按上游的行数规则、Words 按 UAX #29（与上游 ICU 的差别见缺口表） |
 | 编辑颜色代码 | `color_code_dialog` | ✅ 11 种记法 |
 | 插入片段（子菜单） | `menus::install` 按语法动态重建 | ✅ 无范围片段在前 + 按语法分节 |
 | 代码片段编辑器 | `show_settings_pane(Snippets)` | ✅ 两个页签 + 令牌插入菜单 |

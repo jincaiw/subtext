@@ -51,6 +51,22 @@
 - **编码切换会问「转换还是重解释」**：`Format ▸ Text Encoding` 的菜单项与状态栏的
   编码选择器现在走同一个动作，并且与上游一样先弹
   *Convert* / *Reinterpret* / *Cancel* —— 文档没有文件或文本为空时直接改。
+- **文档检查器按上游重排成四段**：原来是 SubText 自己编的十二行平铺列表，现在是
+  `DocumentInspectorView` 的四个可折叠段 —— **File**（Created / Modified / Size /
+  Permissions / Owner / Full Path，末行带 *Show in Finder*）、**Text Settings**
+  （Encoding / Line Endings / Mode）、**Count**（Lines / Characters / Words /
+  Location / Line / Column）、**Character**（选中单个字符时给 code point，
+  单标量再给 Name / Block / Category；没有选区时写 *Not selected*）。
+  `Count` 的三对计数与状态栏是同一个来源，所以两处不会给出不同的数。
+- **Unicode 数据补真**：区块表从 72 条「大致会遇到的」补成上游那份 **346 条**
+  （Unicode 17.0，未分配返回「无」而不是自造的 `No Block`）；`General_Category`
+  从 `char` 谓词拼出来的近似换成 `unicode-properties` 的真表，30 个类别与上游的
+  长名/短名逐条对齐（`Uppercase Letter (Lu)`）；控制字符补上 ASCII / ISO 6429 的名字
+  （`NULL`、`NEXT LINE`…）。
+- **文件属性**：Created / Modified / Size / Permissions（`644 (-rw-r--r--)`，
+  含 setuid/setgid/sticky）/ Owner，日期按本机时区格式化。
+- **`Icon::rotate` 让分屏方向回到「一个符号转 -90°」**，与上游的
+  `.rotationEffect(.degrees(isVertical ? -90 : 0))` 同形。
 
 **运行时填充的菜单**
 
@@ -83,8 +99,18 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 修复
 
-- **状态栏的六个开关没有代码读**：Window 面板 *Status Bar* 一节的
-  *Show lines / characters / words / location / line / column* 六项，此前改了没有任何
+- **三个字符计数一直算错，而状态栏和检查器都在用它们**：
+  - *Characters* 数的是 Unicode 标量而不是**扩展字形簇**（Swift 的 `String.count`），
+    所以 `👍🏻` 报 2 而不是 1、`\r\n` 报 2 而不是 1；
+  - *Lines* 把结尾的换行符算成了新开一行（`"a\nb c\n\n"` 报 4 而不是 3，
+    空文档报 1 而不是 0）—— 上游的 `numberOfLines` 是「一行一个换行符，
+    文本不以换行符结尾时再加一」；
+  - *Words* 按空白与 CJK 标点切，所以 `plain-text` 报 1 而不是 2；
+  - *Unicode Scalars* 干脆是 *Characters* 的副本。
+  现在分别按扩展字形簇、上游的行数规则与 UAX #29 词边界算，并把上游
+  `StringCountingTests.swift` 的四组向量搬成测试。**`Words` 与上游仍有一处差异**
+  （ICU 的分词带词典），已记账。
+- **状态栏的六个开关没有代码读**：Window 面板 *Status Bar* 一节的  *Show lines / characters / words / location / line / column* 六项，此前改了没有任何
   反应 —— 与上面那条 BOM 开关是同一类缺陷（界面在，行为不在）。状态栏按上游重写后
   六个开关各自生效，关掉的项不再出现。
 - **状态位置量只认 `\n`**：`textops` 里算行列的函数数的是 `\n` 字节与标量，
@@ -138,16 +164,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**562** 项测试全部通过（v0.1.0 是 124 项）：
+**579** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 309 |
+| `subtext-core` | 326 |
 | `subtext-app` | 216 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **562** |
+| **合计** | **579** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 

@@ -224,6 +224,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.13 | 侧栏与检查器可拖动改宽 | 上游是 `NSSplitViewController`，两条分隔线都能拖且会自存 | ✅ |
 | 8.14 | 默认编码是一个「文件编码」 | 上游选的是 `FileEncoding`（codec + BOM）；SubText 选 codec，BOM 开关是死的 | ✅ |
 | 8.15 | 文档窗口的状态栏与导航栏 | 上游两者都不在窗口这一层：状态栏属于内容列、导航栏属于每个分屏 | ✅ |
+| 8.16 | 文档检查器按上游重排 | 8.15 读窗口层次时发现检查器的行集是自编的；顺带查出三个计数（Characters / Lines / Words）算错 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1731,8 +1732,9 @@ DocumentWindow
 - 上一个/下一个的箭头随分屏方向换：竖直分屏用左右箭头。判据与命令走同一次 `previous_item` / `next_item`。
 - 大纲菜单列出所有条目，选中当前条目。
 - 分屏按钮的**右键菜单**切换方向，点击仍然是分屏 —— 与上游一致。
-- 上游把方向编码成「一个符号旋转 -90°」；**GPUI 没有旋转**，所以用两个符号
-  （`SquareSplitVertical` / `SquareSplitHorizontal`）代替，已记账。
+- 上游把方向编码成「一个符号旋转 -90°」；上一轮误以为 GPUI 没有旋转，用了两个符号
+  （`SquareSplitVertical` / `SquareSplitHorizontal`）。**§8.16 发现 `Icon::rotate` 一直存在**，
+  已改回「一个符号转 -90°」。
 
 #### 编码切换要问「转换还是重解释」
 
@@ -1746,11 +1748,11 @@ DocumentWindow
 
 | 偏差 | 说明 |
 | --- | --- |
-| 分屏方向用两个符号而非旋转一个 | GPUI 的 `Styled` 没有 `rotate`，`Icon` 也没有。语义相同。 |
+| ~~分屏方向用两个符号而非旋转一个~~ | **§8.16 关掉了。** 当时写的是「GPUI 的 `Styled` 没有 `rotate`，`Icon` 也没有」—— 后半句是错的，`Icon::rotate(impl Into<Radians>)` 一直存在（`gpui-base` 的 Accordion 自己就用它转 chevron）。现在是一个符号转 -90°。 |
 | 转换有损时只有一个对话框 | 上游是两步：先问转换/重解释，发现不能无损再弹第二个 sheet（多一个 *Change Encoding* 按钮）。SubText 把警告并进第一个对话框 —— 用户在选之前就看见，且只有一个界面。判断有损用的是 `TextEncoding::encode` 自己的错误标志，也就是写出时真正会碰到的那个。 |
 | 换行符菜单项带长名 | 上游的弹窗项只写缩写、长名在 tooltip 里；GPUI 菜单项没有 tooltip，所以写成 `"Windows (CRLF)"`，与 Format ▸ Line Endings 子菜单同形。 |
 | 状态消息占用计数那一格 | 上游没有状态消息行（它用 alert）。SubText 自己的「未实现」提示在 4 秒有效期内**替换**计数，而不是新增一条车道 —— 于是没消息时布局与上游完全相同。 |
-| 文档检查器的 `File Size` 还是文本的编码长度 | 上游那一行是文件在磁盘上的大小（`attributes.size`）。SubText 的检查器给的是缓冲区编码后的字节数。这是**检查器面板**的账，与这一轮的窗口框架无关，单独记在缺口表。 |
+| ~~文档检查器的 `File Size` 还是文本的编码长度~~ | **§8.16 关掉了。** 检查器按上游重排后，`Size` 读的是 `FileAttributes::read` 的 `metadata.len()`，也就是磁盘上的那个量。 |
 | 检查器的行集与上游不同 | 上游是「File（Created / Modified / Size / Tags / Permissions / Owner / Full Path）· Document（Encoding / Line Endings / Mode）· Counts · Character」；SubText 现在给的是另一套。同为检查器面板的账。 |
 
 验收：**3 条新测试**（562 = 559 + 3）——core 的 `the_status_position_has_three_different_bases`、
@@ -1760,11 +1762,106 @@ DocumentWindow
 侧栏 + 检查器 + 导航栏 + 状态栏全开、开一份含大纲的 Rust 文件存活 8 秒、stdout/stderr 各 0 字节；
 派发两次 `ChangeEncoding`（第二次时对话框已开）同样存活。
 
+### 8.16 文档检查器按上游重排成四段 ✅
+
+§8.15 把窗口框架读完时，顺手发现检查器的行集是 SubText 自己编的（十二行：
+File Name / File Size / Encoding / BOM / Line Endings / Syntax / Lines / Characters /
+Words / Paragraphs / UTF-16 Units / UTF-8 Bytes）。上游不是这样，于是这一轮按
+`DocumentInspectorView` 重排，并把支撑它的三块数据补真。
+
+#### 上游的四段
+
+```
+File            Created · Modified · Size · Tags · Permissions · Owner · Full Path
+Text Settings   Encoding · Line Endings · Mode
+Count           Lines · Characters · Words · Location · Line · Column
+Character       Code Point(s) · Name · Block · Category
+```
+
+- 四段都是 `DisclosureGroup`，标签 12pt semibold、次级色，三角在**前**；默认全展开。
+  上游用 `InspectorDisclosureGroupStyle` 与 `InspectorLabeledContentStyle` 定制，
+  行是 `LabeledContent`：标签在左列、值贴右缘。
+- `Count` 的三对计数与状态栏是同一份（`entire (selected)`），三个位置量没有选中半。
+  上游的 `EditorCounter.Result.formattedValue` 就是状态栏用的那个方法 —— 两处一个来源。
+- `Character` 只在选区**正好是一个字符**（一个扩展字形簇）时给数据：先列 code point
+  （单数个时标签用单数 `Code Point`，多个时用复数 `Code Points`），
+  **只有单标量**才再给 Name / Block / Category；没有选区时整段写 *Not selected*。
+- `Mode` 是当前语法。上游的 `Mode` 是「kind 或语法名」，kind 取它的本地化标签；
+  SubText 的语法就是同一批 bundle，名字同名。
+
+#### 顺带查出的三个真 bug（计数）
+
+这三个数是状态栏与检查器**共用**的，所以一直是错的，只是没人量过：
+
+| 量 | SubText 原来 | 上游 | 说明 |
+| --- | --- | --- | --- |
+| `Characters` | `text.chars().count()`（标量） | 扩展字形簇 | `😀🇯🇵a` 是 3 不是 4；`👍🏻` 是 1 不是 2；`\r\n` 是 1 不是 2 |
+| `Lines` | `split_lines(text).len()` | 结尾的换行符**结束**它那一行，不开新的一行 | `"a\nb c\n\n"` 是 3 不是 4；`""` 是 0 |
+| `Words` | 按空白与 CJK 标点切 | UAX #29 词边界（上游走 ICU） | `plain-text` 是 2 不是 1 |
+| `Unicode Scalars` | **等于 `characters`**（复制） | 标量数 | 这个字段以前就是另一个字段的副本 |
+
+上游 `StringCountingTests.swift` 的向量逐条搬成了测试。**`Words` 有一处真实差异**，
+已在缺口表记账并写进测试注释：ICU 的分词带词典，UAX #29 只有规则，
+`こんにちは` 在规则下是 5、ICU 下是 1。
+
+#### 补真的三块数据（都是照搬上游的表）
+
+1. **Unicode 区块表**：原来只有 72 条「文本编辑器大致会遇到的」区块，其余一律报
+   `No Block` —— 一个自造的值。现在是从上游 `Unicode.UTF32.CodeUnit+BlockName.swift`
+   逐条搬来的 **346 条**（Unicode 17.0），未分配返回 `None`，`No Block` 由面板自己画。
+2. **General_Category**：原来是靠 `char` 的谓词拼出来的近似（`Ⅻ` 会被算成 `Nd`，
+   `½` 也是）。现在用 `unicode-properties` 的真表，30 个类别与上游 `longName` /
+   `shortName` 两张表逐条对齐（`Uppercase Letter (Lu)`）。
+3. **控制字符名**：Unicode 对 C0/C1 只写 `<control>`，上游自带 ASCII/ISO 6429 的名字表
+   （`NULL`、`NEXT LINE`…），照搬 66 条。
+4. **Finder 标签**：**没做**，见缺口表。`Tags` 这一行因此没有画 —— 一行永远填不上的
+   比没有这一行更糟。
+
+#### 新增：文件属性
+
+`subtext-core::fileattrs`，按上游 `DocumentFile` 的 `FileAttributes` /
+`FilePermissions` 移植：Created / Modified / Size / Permissions（`644 (-rw-r--r--)`，
+含 setuid/setgid/sticky 的 `s`/`S`/`t`/`T`）/ Owner。日期用 `jiff` 按本机时区格式化，
+形状照上游 `.formatted(date: .abbreviated, time: .shortened)` 的英文结果写死
+（`Oct 15, 2026 at 11:04 PM`）—— SubText 没有本地化机制。Owner 走 `getpwuid_r`
+（unix；Windows 没有对应调用，返回 `None`）。Full Path 行带 *Show in Finder* 按钮。
+
+#### 顺带关掉的一条旧账
+
+§8.15 记的「分屏方向用两个符号而非旋转一个」**关掉了**：`Icon::rotate` 一直存在
+（`gpui-base` 的 Accordion 自己就用它转 chevron），只是上一轮 grep 没找到。
+现在是一个符号转 -90°，与上游的 `.rotationEffect(.degrees(isVertical ? -90 : 0))` 同形。
+同一个发现也让四段的三角用「右→下」两个位置表达，而不是两个符号。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 没有 `Tags` 行 | 上游从 `com.apple.metadata:_kMDItemUserTags` 扩展属性读，值是 **binary plist**（`PropertyListDecoder` 解成 `[String]`，每项 `"名字\n颜色序号"`）。Rust 侧要一个 bplist 解析器或新依赖，且非 macOS 没有对应属性。**这一轮没做**，行也没画。 |
+| `Words` 与 ICU 不同 | 见上。规则内的用例全对，差别只在「词之间不写空格」的文字。 |
+| `Full Path` 是尾部截断 | 上游 `truncationMode(.middle)` 截中间，还带 `help` tooltip 且文本可选。GPUI 只有尾部截断，`div` 没有 tooltip，`div` 也不可选。 |
+| code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle.strokeBorder` 的方框里；SubText 用空格连起来。 |
+| 四段没有展开动画 | 上游的 `DisclosureGroup` 带 SwiftUI 的默认动画。`Accordion` 的 item 用 `spring` + `MotionReveal` 动画，但它的 chevron 在**后**、标签样式也不对，所以这一轮用的是同一套基元里无样式的那一个（`AccordionTrigger`），动画一并舍去。 |
+| 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的。 |
+| 检查器的宽度是固定的 | 上游 `inspectorViewItem.minimumThickness = 200`，SubText 是 12–26 rem 可拖。§8.13 已记账。 |
+
+验收：**17 条新测试**（579 = 562 + 17）——core 的 `fileattrs` 6 条（三种权限渲染、
+setuid/setgid/sticky、真文件读回来、不存在的文件、时间戳形状），`charinfo` 11 条
+（区块表 346 条且升序不重叠、显示名、控制字符名、无名的标量、谓词会答错的类别、
+`CharacterReport` 的单/多标量、`Count::formatted`、三对计数、以及上游
+`StringCountingTests.swift` 的四组向量）。
+全工作区 **579** 项测试全绿、clippy 零自有警告、生成器幂等、
+冒烟（临时探针已移除，`git diff | grep -c PROBE` = 0）：
+侧栏 + 检查器 + 导航栏 + 状态栏全开、开一份含中日文与 Rust 代码的文件存活 9 秒、
+stdout/stderr 各 0 字节。**并且第一次真正看到了界面**：用 `CGWindowListCopyWindowInfo`
+取窗口号 + `screencapture -l` 截了应用窗口，逐段核对了四段的每一行、
+折叠态（`File` 收起后行消失、三角转回朝右）与单标量 / 多标量两种 Character 段。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（562 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（579 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 之后重跑一遍**：release 二进制与 `dist/SubText.app` 各存活 7 秒、输出为空（侧栏 + 检查器 + 导航栏 + 状态栏全开，开一份含大纲的 Rust 文件）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏两行、统计同步 |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.15 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
@@ -1784,8 +1881,13 @@ DocumentWindow
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
-| 文档检查器的行集与上游不同 | 上游 `DocumentInspectorView` 是四段：**File**（Created / Modified / Size / Tags / Permissions / Owner / Full Path）、**Document**（Encoding / Line Endings / Mode）、**Counts**（六种计数，带 `(selected)`）、**Character**（选中单个字符时：标量、Name、Block、Category）。SubText 现在给的是 File Name / File Size / Encoding / BOM / Line Endings / Syntax / Lines / Characters / Words / Paragraphs / Unicode Scalars / UTF-16 Units / UTF-8 Bytes —— 少了文件属性的六项（要 `std::fs::Metadata` 的 created/modified/permissions，以及 tags 与 owner，后两者在非 macOS 上没有对应），多了若干计数（那些在状态栏里）。这是检查器面板自己的账。 |
-| 检查器的 `File Size` 是文本的编码长度，不是文件大小 | 上游那一行是 `attributes.size`，即文件在磁盘上的大小。SubText 给的是缓冲区按当前编码编码后的字节数 —— 未保存时是唯一有意义的数，但已保存的文件显示的不是磁盘上的大小。`Document::file_size()`（这一轮为状态栏加的）才是那个量。 |
+| 文档检查器没有 `Tags` 行 | **§8.16 重排后剩下的唯一一行缺口。** 上游从 `com.apple.metadata:_kMDItemUserTags` 扩展属性读标签，值是 **binary plist**：`PropertyListDecoder` 解成 `[String]`，每项 `"名字\n颜色序号"`（序号 0–7 → none/gray/green/purple/blue/yellow/red/orange）。Rust 侧要么写一个 bplist 解析器、要么加新依赖（`plist`），而 `xattr` 与那套调色板又都只有 macOS 有。这一轮没做，`Tags` 行也**没有画** —— 一行永远填不上的比没有这一行更糟。 |
+| `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
+| 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
+| 检查器的 code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle(cornerRadius: 3.5).strokeBorder` 的方框里；SubText 用空格连成一串。 |
+| 检查器的四段没有展开动画 | 上游 `DisclosureGroup` 带 SwiftUI 的默认展开动画。组件库的 `Accordion` 用 `spring` + `MotionReveal` 做动画，但它的 chevron 在**后**、标签样式也不是上游那一套；这一轮用的是同一套基元里无样式的那一个（`AccordionTrigger`），动画一并舍去。 |
+| 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的（上游的 `.creationDate` 在 APFS 上总有值）。 |
+| 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | `Straighten Quotes` 不随选区置灰 | 上游在空选区时禁用它（`validateUserInterfaceItem`，见 §8.9h）；GPUI 的菜单项只有固定 `disabled`，要跟着光标动就得每次选区变化重建 258 项菜单栏。SubText 保持可用、空选区时在状态栏说明，两种情况都不改文本。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |

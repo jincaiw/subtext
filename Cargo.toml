@@ -43,6 +43,14 @@ unicode-normalization = "0.1"
 # is what Foundation's `rangeOfComposedCharacterSequences` does for CotEditor.
 unicode-segmentation = "1"
 unicode-width = "0.2"
+# The real `General_Category` table. `char`'s own predicates cannot answer that
+# question, and CotEditor reads it from Swift's stdlib.
+unicode-properties = "0.1"
+# The File section of the document inspector dates two rows. `tz-system` reads
+# the machine's time zone from the OS rather than bundling a tzdb; the rest of
+# jiff's default features are not needed and are not enabled.
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system"] }
+libc = "0.2"
 dirs = "6"
 clap = { version = "4", features = ["derive"] }
 
