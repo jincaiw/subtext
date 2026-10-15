@@ -60,7 +60,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Div, ElementId, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, rems,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, rems,
 };
 
 use subtext_core::folderfind::{
@@ -657,7 +657,7 @@ impl FolderFindPane {
             .child(
                 v_flex()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .gap_0p5()
                     .child(div().text_sm().truncate().child(label))
                     .when(!detail.is_empty(), |this| {
@@ -1030,7 +1030,7 @@ impl FolderFindPane {
                         "folder-find-file:{key}"
                     ))))
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .gap_1()
                     .cursor_pointer()
                     .child(
@@ -1038,7 +1038,7 @@ impl FolderFindPane {
                             .xsmall()
                             .flex_shrink_0(),
                     )
-                    .child(div().flex_1().min_w(px(0.)).text_sm().truncate().child(filename))
+                    .child(div().flex_1().min_w_0().text_sm().truncate().child(filename))
                     .when(!directory.is_empty(), |this| {
                         this.child(
                             div()
@@ -1464,7 +1464,7 @@ impl FileScopeSheet {
                     .gap_1()
                     .child(target_menu)
                     .child(comparison_menu)
-                    .child(div().flex_1().min_w(px(0.)).child(Input::new(value).small()))
+                    .child(div().flex_1().min_w_0().child(Input::new(value).small()))
                     .child(
                         Button::new(ElementId::Name(SharedString::from(format!(
                             "scope-remove:{index}"
@@ -1685,7 +1685,7 @@ impl Render for SavedScopesSheet {
                 let mut row = h_flex().w_full().gap_2().px_2().py_1();
                 if let Some(input) = input {
                     row = row
-                        .child(div().flex_1().min_w(px(0.)).child(Input::new(&input).small()))
+                        .child(div().flex_1().min_w_0().child(Input::new(&input).small()))
                         .child(
                             Button::new("saved-scope-rename-confirm")
                                 .small()
@@ -1712,7 +1712,7 @@ impl Render for SavedScopesSheet {
                             .xsmall()
                             .flex_shrink_0(),
                     )
-                    .child(div().flex_1().min_w(px(0.)).text_sm().truncate().child(name.clone()))
+                    .child(div().flex_1().min_w_0().text_sm().truncate().child(name.clone()))
                     .child(
                         Button::new(ElementId::Name(SharedString::from(format!(
                             "saved-scope-rename:{name}"
@@ -1866,7 +1866,12 @@ fn menu_row(
         .text_color(foreground)
         .hover(move |this| this.bg(accent))
         .child(
-            div().w(px(12.)).child(if checked {
+            // A fixed lane for the tick, so a label does not shift sideways
+            // depending on whether its row is checked. Three quarters of the
+            // base font — the same lane width the outline gives its disclosure
+            // triangle, so the two lists share one spine rather than two
+            // coincidentally similar ones.
+            div().w(rems(0.75)).child(if checked {
                 Icon::new(gpui_kit::assets::IconName::Check)
                     .xsmall()
                     .into_any_element()
@@ -1874,7 +1879,7 @@ fn menu_row(
                 div().into_any_element()
             }),
         )
-        .child(div().flex_1().min_w(px(0.)).truncate().child(label))
+        .child(div().flex_1().min_w_0().truncate().child(label))
 }
 
 /// A file row's matching line, with the hit emphasised and the head trimmed.
@@ -1896,7 +1901,7 @@ fn render_match_row(
         .overflow_hidden()
         .child(div().flex_shrink_0().child(head))
         .child(div().flex_shrink_0().text_color(primary).child(hit))
-        .child(div().flex_1().min_w(px(0.)).truncate().child(tail))
+        .child(div().flex_1().min_w_0().truncate().child(tail))
 }
 
 /// The overlay that stands in for the list when there is nothing to show.

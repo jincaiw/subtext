@@ -487,21 +487,26 @@ impl EncodingListSheet {
     }
 
     /// The list itself: one scroll region, with the rows inside it.
+    ///
+    /// The frame is the scroll owner and the inset belongs to the column inside
+    /// it, so the scrollbar runs down the frame's inner edge instead of through
+    /// the padding.
     fn render_list(&self, cx: &Context<Self>) -> AnyElement {
-        let mut list = v_flex()
+        let mut rows = v_flex().gap_0p5().p_1();
+
+        for row in self.rows.iter() {
+            rows = rows.child(self.render_row(row, cx));
+        }
+
+        div()
             .id("encoding-list")
-            .gap_0p5()
-            .p_1()
             .h(rems(LIST_HEIGHT))
             .overflow_y_scroll()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().border);
-
-        for row in self.rows.iter() {
-            list = list.child(self.render_row(row, cx));
-        }
-        list.into_any_element()
+            .border_color(cx.theme().border)
+            .child(rows)
+            .into_any_element()
     }
 
     /// The Add button: a separator, then every encoding the list does not hold.

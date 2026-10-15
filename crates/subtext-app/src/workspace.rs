@@ -51,7 +51,7 @@ use gpui_kit::{
     Anchor, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, px, rems,
 };
 
 use subtext_core::scripts::{InputType, Invocation, Item as ScriptItem, OutputType};
@@ -94,6 +94,23 @@ const MAXIMUM_SPLIT_EDITORS: usize = 4;
 /// away when nothing moved, so the cost is one `read_dir` every couple of
 /// seconds.
 const SCRIPT_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How far one outline level is indented, in rem.
+///
+/// Three quarters of the base font. It is also the width of the disclosure
+/// lane, so an indent step and a disclosure triangle occupy the same column and
+/// a label's leading edge lands on a consistent spine at every depth.
+const OUTLINE_INDENT: f32 = 0.75;
+
+/// The text colour inside an outline match highlight.
+///
+/// The fill is a fixed bright yellow in either appearance, so the text on it
+/// has to be fixed too. This is the second and last literal colour in the
+/// workspace, and it is here for the same reason [`crate::outline`]'s symbol
+/// palette is: the value is a property of the highlight, not of the theme, and
+/// a theme foreground would be near-white in a dark theme and disappear into
+/// the yellow. `hsla(0., 0., 0.1, 0.9)` is 90%-opaque near-black.
+const MATCH_FOREGROUND: gpui_kit::Hsla = hsla(0., 0., 0.1, 0.9);
 
 /// Stable identity for an open document.
 ///
@@ -2936,9 +2953,9 @@ impl Workspace {
             // A navigation sidebar gets a minimum, a preferred and a maximum
             // width, so a long label cannot squeeze it and a short one cannot
             // leave a gap.
-            .w(gpui_kit::rems(15.))
-            .min_w(gpui_kit::rems(11.))
-            .max_w(gpui_kit::rems(24.))
+            .w(rems(15.))
+            .min_w(rems(11.))
+            .max_w(rems(24.))
             .h_full()
             .gap_2()
             .p_2()
@@ -3041,9 +3058,9 @@ impl Workspace {
         };
 
         v_flex()
-            .w(gpui_kit::rems(16.))
-            .min_w(gpui_kit::rems(12.))
-            .max_w(gpui_kit::rems(26.))
+            .w(rems(16.))
+            .min_w(rems(12.))
+            .max_w(rems(26.))
             .h_full()
             .gap_2()
             .p_2()
@@ -3434,6 +3451,11 @@ impl Workspace {
                 .w_full()
                 .py_0p5()
                 .px_1()
+                // The outline's own type size is a user setting — Outline's
+                // *Bigger Font* / *Smaller Font* — so it is a pixel value like
+                // the editor's, not part of the interface scale. The row's
+                // *spacing* is rem, which is why an indented row keeps its
+                // proportions when the interface zooms while the text does not.
                 .text_size(px(font_size));
 
             let Some(row) = row else {
@@ -3442,24 +3464,34 @@ impl Workspace {
 
             // A separator is a hairline rather than a label. Upstream draws a
             // thin `Divider`; the rows of a virtualized list are all one height,
-            // so the line sits in the middle of a full row instead.
+            // so the line sits in the middle of a full row instead. One physical
+            // pixel is the intent — a rule that scaled with the interface font
+            // would stop reading as a rule — so this is a `px` value on purpose,
+            // like the settings window's `divider`.
             if row.kind == Some(OutlineKind::Separator) {
                 return base.child(div().w_full().h(px(1.)).bg(border));
             }
 
             let mut line = h_flex()
                 .w_full()
-                .min_w(px(0.))
+                .min_w_0()
                 .items_center()
                 .gap_1()
-                .pl(px(entry.depth() as f32 * 12.))
+                // One level of nesting is three quarters of the base font, so
+                // the indent keeps its proportion to the row's own text when
+                // the interface scale changes.
+                .pl(rems(entry.depth() as f32 * OUTLINE_INDENT))
                 // The disclosure control. The tree opens and closes a row on a
                 // click anywhere along it, so this shows the state rather than
                 // being the only way to change it — the one place SubText's
                 // outline behaves differently from upstream's.
                 .child(
                     div()
-                        .w(px(12.))
+                        // A fixed lane, so a label does not shift sideways as it
+                        // gains or loses a disclosure triangle. Same width as one
+                        // indent step, which is what makes the two read as one
+                        // system rather than two coincidences.
+                        .w(rems(OUTLINE_INDENT))
                         .flex_shrink_0()
                         .when(entry.is_folder(), |this| {
                             this.child(
@@ -3491,21 +3523,25 @@ impl Workspace {
 
             line = line.child(if row.matches.is_empty() {
                 // One element, so a long label truncates with an ellipsis.
-                div().flex_1().min_w(px(0.)).truncate().child(label.clone())
+                div().flex_1().min_w_0().truncate().child(label.clone())
             } else {
                 let mut runs = h_flex()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap();
                 for (range, is_match) in crate::outline::highlight_segments(&label, &row.matches) {
                     let text = label.get(range).unwrap_or_default().to_string();
                     runs = runs.child(if is_match {
                         // Upstream's find-highlight: a bright fill with dark
-                        // text, which stays legible in either appearance.
+                        // text. The foreground is a near-black literal rather
+                        // than `cx.theme().background`, because the fill is a
+                        // fixed bright yellow in *both* appearances — a theme
+                        // foreground would be light in a dark theme and vanish
+                        // into it. See `MATCH_FOREGROUND`.
                         div()
                             .bg(highlight)
-                            .text_color(hsla(0., 0., 0.1, 0.9))
+                            .text_color(MATCH_FOREGROUND)
                             .child(text)
                     } else {
                         div().child(text)
@@ -3722,6 +3758,17 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// The find bar.
+    ///
+    /// The two fields are flexible rather than fixed-width, and the message
+    /// between them and the buttons is shrinkable and truncating. The bar has
+    /// nine children at its widest — two fields, the count, four commands and
+    /// the close button — and at fixed widths their minimum came to more than
+    /// the window's own minimum, so a narrow window clipped the trailing
+    /// buttons with no way to reach them. Giving the fields a floor and letting
+    /// them absorb the surplus keeps the primary task (type a query, step
+    /// through hits) intact at every width the window allows, and a long error
+    /// message truncates instead of pushing *Replace All* off the edge.
     fn render_find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let error = self.find.error.clone();
         let count = self.find.matches.len();
@@ -3735,13 +3782,27 @@ impl Workspace {
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().secondary)
-            .child(div().w(gpui_kit::rems(14.)).child(Input::new(&self.find_query).small()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(rems(8.))
+                    .max_w(rems(20.))
+                    .child(Input::new(&self.find_query).small()),
+            )
             .when(self.find.show_replace, |this| {
-                this.child(div().w(gpui_kit::rems(14.)).child(Input::new(&self.find_replacement).small()))
+                this.child(
+                    div()
+                        .flex_1()
+                        .min_w(rems(8.))
+                        .max_w(rems(20.))
+                        .child(Input::new(&self.find_replacement).small()),
+                )
             })
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
+                    .truncate()
                     .text_xs()
                     .when(error.is_some(), |this| this.text_color(cx.theme().danger))
                     .child(match &error {
@@ -3835,7 +3896,13 @@ impl Render for Workspace {
 
         let editor_area = self.render_editor_area(cx);
 
-        let mut middle = h_flex().flex_1().min_h_0();
+        // `items_stretch`, not the `h_flex` default of centring on the cross
+        // axis: every child here is a full-height column that owns a header or a
+        // scroll region, and a centred column shorter than the row would have its
+        // top — its tab bar — pushed off the window's top edge with nothing to
+        // say why. Each column also asks for `h_full()`; this is the row saying
+        // so too, so a future child cannot get it wrong by omission.
+        let mut middle = h_flex().flex_1().min_h_0().items_stretch();
         if self.settings.window.show_sidebar {
             middle = middle.child(self.render_sidebar(cx));
         }

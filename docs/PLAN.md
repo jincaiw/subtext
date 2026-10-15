@@ -220,6 +220,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9h |
 | 8.10 | 大纲导航命令 | 8.0 留下的大纲条目只有行号，没有位置 | ✅ |
 | 8.11 | 编码优先级列表编辑 | 上游探测顺序就是这份列表；SubText 用的是统计猜测 | ✅ |
+| 8.12 | 桌面 UI 与布局按设计规范复核 | 两个技能的规范是**要求**；逐条对账而非凭印象 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1473,7 +1474,72 @@ app 里编辑器 18 条（含两条方向按钮的启用判据）。全工作区
 存活 10 秒、stderr 只有探针自己的两行；重复派发同一命令（走「窗口已开」那条分支）
 同样存活。
 
+### 8.12 桌面 UI 与布局按设计规范复核 ✅
+
+`gpui-kit` 与 `gpui-kit-design-guides` 两份规范是**要求**，不是参考。这一轮拿它们逐条对账，
+只看**能被判据抓住**的东西：规范点名了某个助手、某条规则，就在代码里查它有没有被用对。
+结论是布局骨架是对的（壳、列、滚动所有者都有声明），但有一批「能用但没按规范写」的地方，
+和**一处算得出来的溢出**。
+
+#### 一处真溢出：查找栏在最小窗口下装不下
+
+窗口最小宽度是 720 px（`lib.rs` / `open_settings` 各写一次）。查找栏最宽时有 9 个子项：
+两个**定宽** `w(rems(14.))` 输入框、计数、四个命令按钮、关闭按钮。按默认 16 px 基准字号算：
+
+| 项 | 宽 |
+| --- | --- |
+| 两个输入框 | 448 px |
+| 四个文本按钮 + 关闭 | ~288 px |
+| `px_3` 内边距 + 八处 `gap_2` | ~40 px |
+| **合计** | **~776 px** |
+
+超出 720 px 约 56 px，而两个输入框定宽、计数那格没有 `truncate()`，所以窄窗下**尾部按钮被裁掉
+且无法到达**。规范「Responsive desktop windows」那一条正是问这个：窗口变窄时会发生什么。
+
+改法照规范的两条：**输入框改成有下限的弹性宽度**（`flex_1().min_w(rems(8.)).max_w(rems(20.))`，
+既能在窄窗里缩到 8 rem，又不会在宽窗里无限拉长），**计数格加 `min_w_0().truncate()`**
+（一条长错误信息现在截断，而不是把 *Replace All* 推出边界）。主任务（输入查询、逐个跳转）
+在窗口允许的每个宽度上都在。
+
+#### 规范点名、而代码没用对的地方
+
+| 规范 | 原文 | 之前 | 现在 |
+| --- | --- | --- | --- |
+| 布局 · 弹性子项 | 「apply `min_w_0()` or `min_h_0()` to the flexible child that is allowed to shrink」 | 13 处写 `min_w(px(0.))` | 全部改 `min_w_0()` |
+| 布局 · 行列不对称 | 「Give a full-height column `h_full()`, or give the row `items_start()` / `items_stretch()`」 | 中栏 `h_flex()` 靠三个子列各自 `h_full()` 撑着 | 中栏显式 `.items_stretch()`，子项漏写也不会被裁 |
+| 布局 · 滚动所有者 | 「Put content inset inside that scroll owner rather than wrapping the scroll owner in a padded container」 | 设置窗口主面板 `p_4` 与 `overflow_y_scroll` 同一元素；`pick_list`、编码列表同理 | 三处都拆成「外框负责滚动、内层负责内边距」，滚动条贴区域边缘而不是穿在内边距里 |
+| 主题 · 令牌优先 | 「Application UI should not contain raw hex, `rgb`/`rgba`, or `hsla` colors」 | 大纲七种 kind 的颜色散在 `icon_color()` 的分支里；匹配高亮的前景是行内字面量 | 收进 `outline::symbol` 常量模块（七个 `NSColor.system*`）与 `MATCH_FOREGROUND`，两处都写明**为什么不是主题角色** |
+| 间距 · rem 优先 | 「application layout should use GPUI's rem-based scale helpers」 | 大纲缩进 `pl(px(depth * 12.))`、展开三角槽 `w(px(12.))`、文件夹查找的勾选槽 `w(px(12.))` | 全部改 rem（`OUTLINE_INDENT = 0.75`），三处共用同一格宽 |
+
+**剩下的每一处 `px(` 现在都有理由，且理由写在旁边**：窗口最小尺寸（OS 约束）、
+`command_bar::window_height`（`window.resize` 要 `Pixels`）、两条一物理像素的分隔线、
+编辑器与大纲的字号（用户设置的数据，不是界面缩放）。应用层已无「裸的」间距或颜色。
+
+#### 对账过但**不改**的（避免为规范而规范）
+
+- 侧栏与检查器的 `h_flex()` 子列都有 `h_full()`，所以 `items_center` 的裁切陷阱本来就没咬到——
+  加 `items_stretch()` 是把意图写明，不是修 bug。
+- 设置窗口的 `field()` 标签列是**右对齐定宽**，这是上游 `Grid` 的
+  `gridColumnAlignment(.trailing)`，不是 SubText 自创的；规范要求「标签与控件对齐」，
+  右对齐满足它。
+- `primary()` 七处全部是「决策区的默认提交」（Go / Apply / Rename / Sort / Replace All /
+  Insert / 编码列表 OK），没有一处是「因为它唯一」或「因为它靠右」。
+- 文案已合规：无标签以句号结尾、无三点省略号；打开对话框的命令带 `…`（菜单表里上游本来就带）。
+
+#### 记账的新缺口
+
+侧栏与检查器**不能拖动改宽**：它们有 `min_w` / `w` / `max_w` 三条约束（规范要求的
+「最小 / 舒适默认 / 如何吃掉富余」），但没有拖拽手柄。上游是 `NSSplitViewController`，
+可以拖。改成 `h_resizable` 需要把中栏做成可调整组，而编辑器区分屏自己已经是一层
+`h_resizable`——嵌套之后的视觉结果这一轮无法验证（没有 UI 集成测试，见缺口表），
+所以按本仓惯例**如实记账而不猜**。
+
+验收：无新增测试（这一轮改的是布局与令牌，判据是编译、clippy、算术与冒烟）。
+全工作区 **554** 项测试仍全绿、clippy 零自有警告、生成器幂等、
+冒烟开一份 Rust 文件存活 7 秒且 stdout/stderr 各 0 字节。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
+
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 9.1 | 全量测试 + clippy 零警告 | ✅（554 项 / 零警告） |
@@ -1504,6 +1570,7 @@ app 里编辑器 18 条（含两条方向按钮的启用判据）。全工作区
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
+| 侧栏与检查器不能拖动改宽 | 上游是 `NSSplitViewController`，两条分隔线都能拖；SubText 的侧栏与检查器是定宽列（各带 `min_w` / `w` / `max_w` 三条约束），没有拖拽手柄。要补就得把中栏做成 `h_resizable` 组，而编辑器区分屏自己已经是一层 `h_resizable`，嵌套后的视觉结果在没有 UI 集成测试（见上一条）的情况下无法验证，所以按本仓惯例记账不猜。详见 §8.12。 |
 | Windows / Linux 未编译验证（主机缺交叉工具链，不是代码问题） | 两个目标都试过 `cargo check --workspace --target …`，都在**依赖的构建脚本**上停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

@@ -542,11 +542,11 @@ fn draw_row(
 
     let mut row = h_flex()
         .flex_1()
-        .min_w(px(0.))
+        .min_w_0()
         .gap(rems(0.25))
         .items_center()
         .child(icon)
-        .child(v_flex().flex_1().min_w(px(0.)).child(matched).child(trail));
+        .child(v_flex().flex_1().min_w_0().child(matched).child(trail));
 
     if let Some(shortcut) = shortcut {
         row = row.child(

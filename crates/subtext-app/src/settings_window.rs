@@ -256,21 +256,29 @@ impl Render for SettingsWindow {
                     .children(rail),
             )
             .child(
-                v_flex()
+                // The scroll owner is the pane itself, so its scrollbar sits
+                // against the window's trailing edge; the inset belongs to the
+                // column *inside* it. Padding on the scroll owner would push the
+                // scrollbar inwards, leaving it floating between the content and
+                // the edge of the surface that scrolls.
+                div()
                     .id("settings-pane")
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .p_4()
-                    .gap_4()
                     .overflow_y_scroll()
                     .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(self.pane.title()),
-                    )
-                    .child(body),
+                        v_flex()
+                            .p_4()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(self.pane.title()),
+                            )
+                            .child(body),
+                    ),
             )
     }
 }
@@ -2088,19 +2096,14 @@ fn pick_list(
 ) -> AnyElement {
     let on_click: ListClick = Rc::new(on_click);
 
-    let mut list = v_flex()
-        .id(id)
-        .gap_0p5()
-        .p_1()
-        .max_h(rems(18.))
-        .overflow_y_scroll()
-        .rounded_md()
-        .border_1()
-        .border_color(cx.theme().border);
+    // The frame is the scroll owner and the padding is a child of it: the rows
+    // scroll inside the frame's inner edge, and the scrollbar runs down that
+    // edge rather than through the inset.
+    let mut rows = v_flex().gap_0p5().p_1();
 
     for (index, label) in items.into_iter().enumerate() {
         let on_click = on_click.clone();
-        list = list.child(
+        rows = rows.child(
             // The list is not reorderable, so the index is a stable identity
             // for the row; the name keeps it from colliding with other lists.
             Button::new(ElementId::NamedInteger(SharedString::from(id), index as u64))
@@ -2112,7 +2115,16 @@ fn pick_list(
                 .on_click(move |_, window, cx| on_click(&index, window, cx)),
         );
     }
-    list.into_any_element()
+
+    div()
+        .id(id)
+        .max_h(rems(18.))
+        .overflow_y_scroll()
+        .rounded_md()
+        .border_1()
+        .border_color(cx.theme().border)
+        .child(rows)
+        .into_any_element()
 }
 
 /// A checkbox whose value is written into one field of the settings.

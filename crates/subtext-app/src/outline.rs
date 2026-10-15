@@ -55,7 +55,7 @@ use std::ops::Range;
 use std::sync::LazyLock;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::{Hsla, hsla};
+use gpui_kit::Hsla;
 use regex::{Captures, Regex};
 use subtext_syntax::OutlineItem;
 
@@ -685,22 +685,56 @@ impl OutlineRow {
 
     /// The colour of that symbol.
     ///
-    /// CotEditor colours each kind with a macOS system colour. These are those
-    /// colours in the light appearance, converted to HSLA, and they are
-    /// deliberately *not* theme colours: the point of the colour is to say what
-    /// kind of thing this is, which must not change when the editor's theme
-    /// does.
+    /// CotEditor colours each kind with a macOS system colour, and these are
+    /// those colours — see [`symbol`] for why they are not theme roles.
     pub fn icon_color(&self) -> Hsla {
         match self.kind {
-            Some(OutlineKind::Container) => hsla(0.587, 1.0, 0.50, 1.0),  // systemBlue
-            Some(OutlineKind::Value) => hsla(0.377, 0.584, 0.492, 1.0),    // systemGreen
-            Some(OutlineKind::Function) => hsla(0.097, 1.0, 0.50, 1.0),    // systemOrange
-            Some(OutlineKind::Title) => hsla(0.526, 0.609, 0.484, 1.0),    // systemTeal
-            Some(OutlineKind::Heading) => hsla(0.668, 0.606, 0.588, 1.0),  // systemIndigo
-            Some(OutlineKind::Mark) => hsla(0.009, 1.0, 0.594, 1.0),       // systemRed
-            Some(OutlineKind::Separator) | None => hsla(0.667, 0.022, 0.569, 1.0), // systemGray
+            Some(OutlineKind::Container) => symbol::BLUE,
+            Some(OutlineKind::Value) => symbol::GREEN,
+            Some(OutlineKind::Function) => symbol::ORANGE,
+            Some(OutlineKind::Title) => symbol::TEAL,
+            Some(OutlineKind::Heading) => symbol::INDIGO,
+            Some(OutlineKind::Mark) => symbol::RED,
+            Some(OutlineKind::Separator) | None => symbol::GRAY,
         }
     }
+}
+
+/// The palette the outline's kind symbols are painted from.
+///
+/// These are the macOS system colours CotEditor uses, taken from
+/// `NSColor.system*` in the light appearance and written here as HSLA. They are
+/// deliberately **not** `cx.theme()` roles: the colour says *what kind of thing
+/// this is*, which must not change when the editor's theme does. A theme
+/// colour would say "this is secondary" or "this is the accent", which is a
+/// different statement, and a dark theme's accent would collide with a kind the
+/// user is trying to tell apart from another.
+///
+/// They live here rather than inline at the call site so that the one place a
+/// literal is allowed is also the one place a reader can find the whole
+/// palette, check the contrast of a new entry against its neighbours, and see
+/// that none of the seven is a theme role by accident.
+///
+/// The audit trail for the guide's "no raw colours in application UI" rule:
+/// this module and [`crate::highlighter`] (which converts `.cottheme` values,
+/// whose colour *is* the data) are the two exceptions, and both say so here.
+mod symbol {
+    use gpui_kit::{Hsla, hsla};
+
+    /// `NSColor.systemBlue`.
+    pub const BLUE: Hsla = hsla(0.587, 1.0, 0.50, 1.0);
+    /// `NSColor.systemGreen`.
+    pub const GREEN: Hsla = hsla(0.377, 0.584, 0.492, 1.0);
+    /// `NSColor.systemOrange`.
+    pub const ORANGE: Hsla = hsla(0.097, 1.0, 0.50, 1.0);
+    /// `NSColor.systemTeal`.
+    pub const TEAL: Hsla = hsla(0.526, 0.609, 0.484, 1.0);
+    /// `NSColor.systemIndigo`.
+    pub const INDIGO: Hsla = hsla(0.668, 0.606, 0.588, 1.0);
+    /// `NSColor.systemRed`.
+    pub const RED: Hsla = hsla(0.009, 1.0, 0.594, 1.0);
+    /// `NSColor.systemGray`, for a rule that named no kind and for a separator.
+    pub const GRAY: Hsla = hsla(0.667, 0.022, 0.569, 1.0);
 }
 
 /// Index every row of `nodes` by its entry id.
