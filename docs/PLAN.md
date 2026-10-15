@@ -2335,7 +2335,7 @@ self.windowFrameAutosaveName = "Find Panel"
 | 9.1 | 全量测试 + clippy 零警告 | ✅（628 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在 `a9bc177`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
