@@ -36,6 +36,7 @@ pub mod count_panel;
 pub mod dialogs;
 pub mod dispatch;
 pub mod encoding_list_sheet;
+pub mod find_panel;
 pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;

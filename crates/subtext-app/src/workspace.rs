@@ -87,6 +87,7 @@ use crate::settings::{
 };
 use crate::settings_window::SettingsWindow;
 use crate::count_panel::{CountOptionsView, CountSheet};
+use crate::find_panel::FindPanel;
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
 
@@ -261,10 +262,8 @@ impl OpenDocument {
 /// copy in step.
 #[derive(Default)]
 pub struct FindState {
-    pub visible: bool,
-    pub show_replace: bool,
-    /// Ranges the last search found, kept so "Highlight All" and the status
-    /// bar can report them without re-running the search.
+    /// Ranges the last search found, kept so the panel and the status bar can
+    /// report them without re-running the search.
     pub matches: Vec<Range<usize>>,
     pub current: Option<usize>,
     pub error: Option<String>,
@@ -431,6 +430,17 @@ pub struct Workspace {
     count_running: bool,
     /// Whether the capsule's gear popover is open.
     count_options_open: bool,
+    /// The **Find & Replace** panel's window, while it is up.
+    ///
+    /// Weak in the same way the settings window is: the window owns the view,
+    /// and this only says whether the window is still there.
+    find_window: Option<AnyWindowHandle>,
+    /// The document window the panel belongs to.
+    ///
+    /// A command that edits the buffer has to be deferred onto the window that
+    /// owns the editor, and the panel is a window of its own — so it asks for
+    /// this handle rather than using its own.
+    find_window_owner: Option<AnyWindowHandle>,
     /// The word completion popup, while it is up.
     completion: Option<Completion>,
     /// The incompatible-character scan, memoised.
@@ -458,7 +468,10 @@ impl Workspace {
             .unwrap_or_else(|| themes.default_theme().clone());
 
         let find_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
-        let find_replacement = cx.new(|cx| InputState::new(window, cx).placeholder("Replace"));
+        // Upstream's second placeholder is *Replace with*, not *Replace* — it is
+        // a prepositional phrase there, and the panel's window title already
+        // says which command this is.
+        let find_replacement = cx.new(|cx| InputState::new(window, cx).placeholder("Replace with"));
 
         // The pane reads its switches out of the settings at construction and
         // writes them back as they change, so it is built from the same
@@ -547,6 +560,8 @@ impl Workspace {
             count_options: None,
             count_running: false,
             count_options_open: false,
+            find_window: None,
+            find_window_owner: None,
             completion: None,
             incompatible_cache: std::cell::RefCell::new(None),
         };
@@ -1880,16 +1895,119 @@ impl Workspace {
         self.find_replacement.read(cx).value().to_string()
     }
 
-    /// Show the find bar, optionally with the replace field open.
+    /// The find panel's two fields.
+    ///
+    /// The panel reads them rather than owning them: every find command in the
+    /// menu works on the same query, and two `InputState`s would be two answers
+    /// to "what is being searched for".
+    pub fn find_fields(&self) -> (Entity<InputState>, Entity<InputState>) {
+        (self.find_query.clone(), self.find_replacement.clone())
+    }
+
+    /// What the last search found: how many matches, which one is current, and
+    /// the error if the query could not be compiled.
+    pub fn find_status(&self) -> (usize, usize, Option<String>) {
+        (
+            self.find.matches.len(),
+            self.find.current.map_or(0, |index| index + 1),
+            self.find.error.clone(),
+        )
+    }
+
+    /// The document window, for the views that live in a window of their own.
+    pub fn document_window(&self) -> Option<AnyWindowHandle> {
+        self.find_window_owner
+    }
+
+    /// `Edit ▸ Find ▸ Find…` (⌘F) and *Find and Replace…* (⌥⌘F).
+    ///
+    /// Upstream's `FindPanelController` is an `NSPanel` — a floating utility
+    /// window titled *Find & Replace* — rather than a bar in the document
+    /// window, and it is shared: a second ⌘F brings the same panel forward
+    /// instead of opening a second one. The panel shows both fields either
+    /// way, so the two commands differ only in which field the caret lands in.
     pub fn show_find(&mut self, show_replace: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.find.visible = true;
-        if show_replace {
-            self.find.show_replace = true;
+        let owner = window.window_handle();
+        if let Some(handle) = self.find_window {
+            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+                self.find_window_owner = Some(owner);
+                self.refresh_matches(cx);
+                self.focus_find_field(handle, show_replace, cx);
+                return;
+            }
+            self.find_window = None;
         }
+
+        self.find_window_owner = Some(owner);
         self.refresh_matches(cx);
-        self.find_query
-            .update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
-        cx.notify();
+
+        let weak = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            if weak.upgrade().is_none() {
+                return;
+            }
+            let options = WindowOptions {
+                // A utility window is a short column of rows, so it opens at
+                // the size those rows need rather than filling the screen, and
+                // the minimum is the width below which the button row wraps.
+                window_bounds: Some(WindowBounds::centered(
+                    gpui_kit::size(px(520.), px(190.)),
+                    cx,
+                )),
+                window_min_size: Some(gpui_kit::size(px(420.), px(150.))),
+                ..Default::default()
+            };
+            let panel = weak.clone();
+            let focus = weak.clone();
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+                let view = cx.new(|cx| FindPanel::new(panel, window, cx));
+                // Upstream makes the find text view the panel's initial first
+                // responder, so the caret is in the field the moment the panel
+                // appears. It has to be done *here*: the panel's window is the
+                // only one that can hold a handle it draws.
+                focus
+                    .update(cx, |workspace, cx| {
+                        workspace.focus_find_field_in(window, show_replace, cx);
+                    })
+                    .ok();
+                view
+            });
+            weak.update(cx, |workspace, cx| match opened {
+                Ok((handle, _)) => workspace.find_window = Some(handle),
+                Err(error) => workspace.set_status(error.to_string(), cx),
+            })
+            .ok();
+        });
+    }
+
+    /// Put the caret in one of the panel's two fields, in the panel's window.
+    ///
+    /// A focus handle belongs to the window that focused it. Focusing the query
+    /// from the document window — which is where every find command is invoked
+    /// from — would leave the panel's field unfocused and the document window
+    /// holding a handle it does not draw.
+    fn focus_find_field(&self, panel: AnyWindowHandle, show_replace: bool, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        panel
+            .update(cx, move |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    workspace.focus_find_field_in(window, show_replace, cx);
+                })
+                .ok();
+            })
+            .ok();
+    }
+
+    /// Put the caret in one of the panel's two fields, given the panel's window.
+    fn focus_find_field_in(
+        &self,
+        window: &mut Window,
+        show_replace: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let field =
+            if show_replace { self.find_replacement.clone() } else { self.find_query.clone() };
+        field.update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
     }
 
     /// Run the current query and remember where the matches are.
@@ -1905,7 +2023,15 @@ impl Workspace {
             cx.notify();
             return;
         }
-        let scope = 0..text.len();
+        // *In Selection* narrows the scope rather than the pattern: the
+        // matches come back as offsets into the whole buffer either way, so
+        // nothing downstream has to know the search was bounded.
+        let selection = self.active_selection(cx);
+        let scope = if self.settings.find_in_selection && !selection.is_empty() {
+            selection
+        } else {
+            0..text.len()
+        };
         match finder::Searcher::new(&query, &self.find_options()) {
             Ok(searcher) => {
                 self.find.matches = searcher.find_all(&text, &scope);
@@ -1989,8 +2115,9 @@ impl Workspace {
         self.find_query.update(cx, |state, cx| {
             state.set_value(query.clone(), window, cx);
         });
-        self.find.visible = true;
-        self.refresh_matches(cx);
+        // ⌘E puts the selection in the query *and* brings the panel up, which
+        // is what upstream's `useSelectionForFind` does.
+        self.show_find(false, window, cx);
         self.set_status(format!("Find: {query}"), cx);
     }
 
@@ -2007,8 +2134,7 @@ impl Workspace {
         self.find_replacement.update(cx, |state, cx| {
             state.set_value(replacement.clone(), window, cx);
         });
-        self.find.visible = true;
-        self.find.show_replace = true;
+        self.show_find(true, window, cx);
         self.set_status(format!("Replace: {replacement}"), cx);
     }
 
@@ -2077,7 +2203,15 @@ impl Workspace {
             }
         };
         let replacement = self.replacement(cx);
-        let scope = 0..text.len();
+        // *In Selection* narrows the scope rather than the pattern: the
+        // matches come back as offsets into the whole buffer either way, so
+        // nothing downstream has to know the search was bounded.
+        let selection = self.active_selection(cx);
+        let scope = if self.settings.find_in_selection && !selection.is_empty() {
+            selection
+        } else {
+            0..text.len()
+        };
         let (replaced, count) = finder::replace_all(
             &text,
             &searcher,
@@ -5460,101 +5594,6 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// The find bar.
-    ///
-    /// The two fields are flexible rather than fixed-width, and the message
-    /// between them and the buttons is shrinkable and truncating. The bar has
-    /// nine children at its widest — two fields, the count, four commands and
-    /// the close button — and at fixed widths their minimum came to more than
-    /// the window's own minimum, so a narrow window clipped the trailing
-    /// buttons with no way to reach them. Giving the fields a floor and letting
-    /// them absorb the surplus keeps the primary task (type a query, step
-    /// through hits) intact at every width the window allows, and a long error
-    /// message truncates instead of pushing *Replace All* off the edge.
-    fn render_find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let error = self.find.error.clone();
-        let count = self.find.matches.len();
-        let current = self.find.current.map_or(0, |index| index + 1);
-
-        h_flex()
-            .w_full()
-            .px_3()
-            .py_1p5()
-            .gap_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().secondary)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(rems(8.))
-                    .max_w(rems(20.))
-                    .child(Input::new(&self.find_query).small()),
-            )
-            .when(self.find.show_replace, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .min_w(rems(8.))
-                        .max_w(rems(20.))
-                        .child(Input::new(&self.find_replacement).small()),
-                )
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .when(error.is_some(), |this| this.text_color(cx.theme().danger))
-                    .child(match &error {
-                        Some(error) => error.clone(),
-                        None if count > 0 => format!("{current} of {count}"),
-                        None => String::new(),
-                    }),
-            )
-            .child(
-                Button::new("find-prev")
-                    .xsmall()
-                    .label("Previous")
-                    .on_click(cx.listener(|this, _, _, cx| this.find_step(false, cx))),
-            )
-            .child(
-                Button::new("find-next")
-                    .xsmall()
-                    .label("Next")
-                    .on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))),
-            )
-            .when(self.find.show_replace, |this| {
-                this.child(
-                    Button::new("replace-next")
-                        .xsmall()
-                        .label("Replace")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.replace_and_find_next(window, cx)
-                        })),
-                )
-                .child(
-                    Button::new("replace-all")
-                        .xsmall()
-                        .label("Replace All")
-                        .on_click(cx.listener(|this, _, window, cx| this.replace_all(window, cx))),
-                )
-            })
-            .child(
-                Button::new("find-close")
-                    .xsmall()
-                    .ghost()
-                    .icon(gpui_kit::assets::IconName::Close)
-                    .accessibility_label("Close the find bar")
-                    .tooltip("Close the find bar")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.find.visible = false;
-                        this.find.matches.clear();
-                        cx.notify();
-                    })),
-            )
-    }
 }
 
 /// A byte count as a file size, the way the platform's `ByteCountFormatStyle`
@@ -5714,9 +5753,6 @@ impl Render for Workspace {
         }
         if self.settings.window.show_tab_bar && self.documents.len() > 1 {
             root = root.child(self.render_tab_bar(cx));
-        }
-        if self.find.visible {
-            root = root.child(self.render_find_bar(cx));
         }
 
         let editor_area = self.render_editor_area(cx);

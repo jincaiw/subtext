@@ -9,7 +9,8 @@
 ## [0.2.0] — 2026-10-15
 
 把 v0.1.0 里「菜单项保留、触发时在状态栏说明原因」的功能大部分真正做出来，
-并把 UI 对齐 GPUI Kit 的设计规范。菜单仍是 258 项、快捷键仍是 72 条。
+并把 UI 对齐 GPUI Kit 的设计规范。菜单仍是 258 项；快捷键从 72 条变成 75 条
+（三条控制字符键位此前被生成器读成了空串）。
 
 ### 新增
 
@@ -78,6 +79,17 @@
 - **`tools/generate_unicode_tables.swift`**：面板要的 `age`（哪个 Unicode 版本收的）、
   `isDeprecated`、`isVariationSelector` 三个属性从 Swift 标准库生成
   （1787 / 8 / 4 段），生成的文件入库，构建不需要 Swift。
+- **查找面板改成一个独立的浮动窗口**：`⌘F` 原来在文档窗口顶上开一条横条；上游的
+  `FindPanelController` 是一个 `NSPanel` —— 标题 *Find & Replace* 的浮动工具窗口。
+  现在也是：两个 **44pt 高、圆角描边**的字段（Find / Replace with）、一行三个复选框
+  （Regular Expression / Ignore Case / **In Selection**）、
+  `[Find All] [Replace All] … [Replace] [◀] [▶]` 的按钮行。窗口 520×190 居中打开，
+  用窗口自己的关闭键。`⌘E` / `⇧⌘E` 顺带把面板带出来。
+  结果消息按上游放在**查找字段的尾随边缘**上（和清空按钮一起，字段为空时不画），
+  有当前匹配时是 `1/4`、否则是 `4 matches` —— 上游 `positionMessage` 的
+  `defaultValue` 就是 `"\(index)/\(self.count)"`，不是「1 of 4」。
+- **新增 *In Selection***：只在选区里查找。它是把搜索的 **scope** 收窄，匹配仍然是
+  整篇的偏移量，所以编辑器选中它们时不需要换算。
 - **警告检查器按上游重排成两栏**：`Inspector ▸ Warnings` 原来是一列自己编的提示文字，
   现在是上游那两块 —— **Incompatible Characters**（Line / Character / Converted 三列）
   与 **Inconsistent Line Endings**（Line / Line Ending 两列），各带一句状态行
@@ -197,6 +209,15 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 - **三个副窗口没有 Base `Root`**：设置窗口、关于窗口、快速操作面板此前用
   `cx.open_window` 而不是 `gpui_kit::open_window`，因此没有组件窗口状态，
   一开对话框就会崩。三处已改正，并加了一条判据（`grep -rn 'cx\.open_window' crates/` 应为空）。
+- **`⌘F` 打开的面板拿不到光标**：焦点是在**文档窗口**上给的
+  （`focus_handle(cx).focus(window, cx)`），而 GPUI 的 `Window::focus` 是**按窗口存的**
+  —— 文档窗口于是拿着一个它根本不画的句柄，面板的查找框反而没有焦点，键盘输入
+  不会进去。改成在面板自己的窗口里给焦点。这条是照抄上游那句
+  `initialFirstResponder = textView` 的字面意思才发现的：**「谁是第一响应者」是窗口的属性**。
+- **查找字段画了两层边框**：上游只有一层（`strokeBorder(.separator)` 叠在裁圆角的字段上），
+  而 SubText 在外层 `div` 的描边之外，`Input` 组件自己又画了一层。现在把组件那层关掉，
+  由外层负责，并按 `is_focused(window)` 在 `border` / `ring` 之间切换描边色 ——
+  等价于上游的「分隔色描边 + exterior 焦点环」，而且只有一层。
 - 编辑器容器的高度误用「随基准字号缩放」的写法，实际只有一行高，改为 `h_full()`。
 - 上次记录里写错的框架 API 名（`gpui_kit::relative` 不存在，正确的是 `gpui_kit::rems`）。
 
@@ -224,16 +245,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**623** 项测试全部通过（v0.1.0 是 124 项）：
+**628** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 364 |
-| `subtext-app` | 222 |
+| `subtext-core` | 365 |
+| `subtext-app` | 226 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **623** |
+| **合计** | **628** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
@@ -247,7 +268,7 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 **菜单与快捷键**
 
 - 完整的应用菜单栏：258 个菜单项、28 个顶层菜单，结构与 CotEditor 逐项一致。
-- 75 条快捷键，键位与 CotEditor 一致（`secondary` 在 macOS 上是 ⌘，
+- 72 条快捷键，键位与 CotEditor 一致（`secondary` 在 macOS 上是 ⌘，
   在 Windows / Linux 上是 Ctrl）。
 - 182 个类型化动作，分 10 个命名空间。
 - `tools/generate_menu.py`：从 `resources/menu.json` 生成 `menu.rs` 与 `keymap.rs`，

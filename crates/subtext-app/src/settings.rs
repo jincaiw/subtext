@@ -643,6 +643,12 @@ pub struct Settings {
     pub find_regex: bool,
     pub find_case_sensitive: bool,
     pub find_whole_word: bool,
+    /// Search only inside the selection — upstream's *In Selection*.
+    ///
+    /// It narrows the scope the searcher is given rather than the pattern, so
+    /// the matches that come back are still offsets into the whole buffer and
+    /// the editor's selection of them needs no translation.
+    pub find_in_selection: bool,
 
     /// Accept `rmate` connections from a remote host.
     pub enables_remote_editing: bool,
@@ -780,6 +786,7 @@ impl Default for Settings {
             find_regex: false,
             find_case_sensitive: false,
             find_whole_word: false,
+            find_in_selection: false,
             enables_remote_editing: false,
             remote_editing_port: 52698,
             // CotEditor's `colorCodeType` default is `1`, which is `Hex`.

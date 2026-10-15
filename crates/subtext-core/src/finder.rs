@@ -262,6 +262,20 @@ pub fn supports_comments(delimiters: &CommentDelimiters) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_bounded_scope_still_reports_offsets_into_the_whole_text() {
+        // What *In Selection* rests on: the search is narrowed by the scope,
+        // and the matches come back as offsets into the whole buffer — so the
+        // editor can select one without translating it back.
+        let text = "cat dog cat";
+        let searcher = Searcher::new("cat", &FindOptions::default()).expect("a literal query");
+
+        assert_eq!(searcher.find_all(text, &(0..text.len())), vec![0..3, 8..11]);
+        assert_eq!(searcher.find_all(text, &(4..11)), vec![8..11]);
+        // A scope with nothing in it finds nothing.
+        assert!(searcher.find_all(text, &(4..7)).is_empty());
+    }
+
 
     #[test]
     fn literal_search_is_case_insensitive_by_default() {

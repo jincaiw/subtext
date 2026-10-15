@@ -228,8 +228,9 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.17 | Inspect Character 改成锚定选区的 popover | 8.16 补 `ScalarInfo` 时发现：上游是 popover（`preferredEdge: .minY` + `.semitransient`），SubText 是模态对话框、十行平铺 | ✅ |
 | 8.18 | 自定义包围 + 五个内置包围的语义 | 文本菜单最后一个占位提示；做它的时候用上游 fixture 发现内置命令一直包的是**行**而不是**选区** | ✅ |
 | 8.19 | 高级计数重做成「选项 + 胶囊」 | 上游是带七个选项的活计数器（sheet → 胶囊 → 齿轮 popover），SubText 是一个静态对话框 | ✅ |
-| 8.21 | 警告检查器按上游重排成两栏 | 上游是 `VSplitView` 的两个面板（不兼容字符 / 不一致换行符），各带状态行与表格；SubText 是一列自编的提示。顺带查出保存路径丢掉了有损标志，会把 `&#65533;` 静默写进文件 | ✅ |
 | 8.20 | 补全 + 三个被 base64 吃掉的快捷键 | `Edit ▸ Complete` 是占位提示，Mode 面板的三个补全开关没人读；顺带发现 ⌘⌫ / ⇧⌘⌫ / ⌥⎋ 三条键位在 storyboard 里是 base64 存的，一直没被读出来 | ✅ |
+| 8.21 | 警告检查器按上游重排成两栏 | 上游是 `VSplitView` 的两个面板（不兼容字符 / 不一致换行符），各带状态行与表格；SubText 是一列自编的提示。顺带查出保存路径丢掉了有损标志，会把 `&#65533;` 静默写进文件 | ✅ |
+| 8.22 | 查找面板改成独立的浮动窗口 | 上游 `FindPanelController` 是 `NSPanel`（标题 *Find & Replace*），内容是三段纵向布局；SubText 是窗口内的一条横条。顺带补上 *In Selection*。**照抄注释会写错三处**：位置消息是 `1/4` 不是 `1 of 4`、消息是字段的尾随附件不是独立一行、焦点必须给在面板自己的窗口里 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2224,14 +2225,117 @@ Encoding* / *Cancel*），SubText 做的是「取消」那一个，并把「改�
 「Found 5 incompatible characters.」与「Found 1 line endings other than LF.」都对。
 行数 41,805 → 42,382（`warnings.rs` 265）。
 
+### 8.22 查找面板改成一个独立的浮动窗口 ✅
+
+SubText 的查找栏是**窗口内的一条横条**（一行：查找框、替换框、计数、Previous / Next /
+Replace / Replace All / 关闭）。上游不是横条 —— `FindPanelController` 是一个
+**`NSPanel`**：
+
+```swift
+let window = NSPanel(contentViewController: FindPanelContentViewController())
+window.styleMask = [.titled, .closable, .resizable, .utilityWindow]
+window.level = .floating
+window.title = "Find & Replace"
+self.windowFrameAutosaveName = "Find Panel"
+```
+
+是**独立的浮动工具窗口**，标题 *Find & Replace*。它的内容也因此是一个纵向三段的
+`NSSplitViewController` —— 两个字段、结果列表（默认收起）、按钮行 ——
+窗口内的横条根本没有这些的位置。
+
+#### 现在的面板
+
+```
+┌ alpha                        1/4 ⊗ ┐   44pt，圆角 7，描边
+└────────────────────────────────────┘   （聚焦时描边变 ring 色）
+┌ Replace with ──────────────────────┐   同上
+└────────────────────────────────────┘
+[Regular Expression] [Ignore Case] [In Selection]
+[Find All] [Replace All]        …        [Replace] [◀] [▶]
+```
+
+- 两个字段 **44pt 高、圆角 7、描边**（上游 `.frame(minHeight: 44)` 与
+  `RoundedRectangle(cornerRadius: 7).strokeBorder`）。
+- 结果消息**在查找字段的尾随边缘上**，和清空按钮在一起（`[1/4] [⊗]`）——
+  上游的 `FindPanelFieldAccessoryView` 就叠在字段上，而且
+  **`if !self.text.isEmpty`：字段为空时什么都不画**。位置用 `index/count`
+  （`1/4`），不是 `1 of 4` —— `positionMessage` 的 `defaultValue` 是
+  `"\(index)/\(self.count)"`。没有当前匹配时是 `count matches`。
+- 选项行是三个复选框，按钮行：`[Find All] [Replace All]` 靠左、`[Replace]` 与
+  一对图标按钮靠右（上游的 `ControlGroup`，70pt 宽）。
+- 窗口 520×190 居中打开，最小 420×150，标题 *Find & Replace*，用的是窗口自己的关闭键。
+
+#### 三个「照抄注释会写错」的地方
+
+这一轮把面板画出来之后，逐项与上游对齐时抓到三处 —— 都是**看起来对、其实不对**：
+
+1. **消息格式是 `index/count`，不是 `index of count`。** 原来写的是
+   `"{current} of {count}"`。上游 `FindResult.positionMessage` 的
+   `defaultValue` 是 `"\(index)/\(self.count)"`（`FindResult+Localization.swift:57`）。
+   这两个字符串在同一个位置上，但不是一回事。已加 4 条测试钉住
+   （`1/4` / `4 matches` / 空 / 错误）。
+2. **消息是字段的尾随附件，不是独立一行。** 原来在字段下面加了一行
+   `h(rems(1.25))` 的文本 —— 上游没有这一行，它把附件叠在字段**里面**。
+   改成 `Input::suffix()`：gpui-kit 的 `Input` 在挂了 suffix 时会同时给输入区
+   加 `pr()`，正好是上游那个 `trailingInset`（`FindTextField` 用它把文本的
+   尾随内边距撑开，免得查询被消息压住）。
+3. **焦点必须给在面板自己的窗口里。** 原来 `show_find` 在**文档窗口**上调
+   `focus_handle(cx).focus(window, cx)` —— 而 GPUI 的 `Window::focus` 是
+   **按窗口存的**（`window.focus = Some(handle)`，`gpui-pre` `window.rs:509`）。
+   于是文档窗口拿着一个它根本不画的句柄，面板的字段反而没有光标：⌘F 打开面板
+   后键盘输入不会进查找框。改成在面板的窗口里给（新建路径在 `open_window`
+   的 build 闭包里给，复用路径经 `AnyWindowHandle::update` 拿面板的 `Window`）。
+   用探针读回来验证：`PROBE focus-in-panel: true`。
+
+顺带发现字段是**双层边框**：上游只有一层（`strokeBorder(.separator)` 叠在
+裁圆角的字段上），而 SubText 在外层 `div` 描边之外，`Input` 自己又画了一层
+（`appearance` 默认开）。改成 `.appearance(false)`，由外层那层负责描边，
+并按 `focus_handle().is_focused(window)` 把描边色在 `border` / `ring` 之间切换
+—— 等价于上游的「分隔色描边 + exterior 焦点环」，而且只有一层。
+
+#### 顺带补上 `In Selection`
+
+上游那三个复选框的第三个是 **In Selection**（只在选区里找），SubText 没有这个设置 ——
+它只有 *Whole Word*，而上游的 *Whole Word* 在高级选项弹层里。这一轮加了
+`find_in_selection`：`refresh_matches` 的 scope 从 `0..text.len()` 换成选区
+（**一行**），匹配仍然是整篇的偏移量，所以编辑器选它们时不需要换算。
+`⌘E` / `⇧⌘E`（Use Selection for Find / Replace）也改成**顺带把面板带出来**。
+
+#### 记账的偏差
+
+| 偏差 | 说明 |
+| --- | --- |
+| 没有结果列表 | 上游中间那一段是「Find All 之后列出所有匹配」的表格，默认收起。SubText 的 `find.matches` 已经在手，但没有渲染成列表；面板因此比上游矮。 |
+| `Find All` 没有下拉 | 上游是一个「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单。SubText 的编辑器没有多选，「Select All」无处可去，所以按钮是单动作的。 |
+| 没有 `(?)` 正则速查与 `(…)` 高级选项弹层 | 上游字段行两端各有一个：`RegularExpressionReferenceView`（174 行）与 `FindSettingsView`（205 行，10 个开关）。SubText 的三个复选框已经覆盖其中三个，其余（忽略变音符、忽略宽度、正则单行/多行/Unicode 边界）没有对应实现。 |
+| 没有 Recent Searches / Recent Replacements 历史菜单 | 上游两个字段的附件行左边各有一个 `HistoryMenu`（`⌘⌥F` 之类的 `defaultKey: .findHistory`，最多 64 字符截断 + *Clear Recent…*）。SubText 没有「最近查找」的持久化存储，所以附件行只有消息与清空按钮。 |
+| 替换字段没有自己的结果消息 | 上游替换字段的附件显示 `.replace` 动作的结果（`"\(count) replaced"`）。SubText 的 `FindState` 只记查找结果，不记「刚才替换了几个」。 |
+| 面板不记住窗口位置 | 上游 `windowFrameAutosaveName = "Find Panel"`。SubText 每次居中打开。 |
+
+验收：**5 条新测试**（628 = 623 + 5）——core 的
+`a_bounded_scope_still_reports_offsets_into_the_whole_text`（有界 scope 下匹配仍是
+整篇的偏移，这正是 *In Selection* 成立的前提），加上 `find_panel` 里 4 条钉住消息
+格式的 `result_message` 测试（`1/4` 不是 `1 of 4`）。
+全工作区 **628** 项测试全绿、clippy 零自有警告、生成器幂等
+（`menu.rs d72a9524` / `keymap.rs 36ecd219` 连跑两次不变）、
+探针已移除（`git diff | grep -c PROBE` = 0）、冒烟存活且 stdout/stderr 各 0 字节。
+**截了应用窗口核对**（临时探针在启动时打开面板，核对完即删）：`/tmp/winlist` 列出
+`1536x971 sample.txt` 与 **`520x222 Find & Replace`**，后者画的是 44pt 的两个字段、
+查找字段里的 `alpha` 与尾随的 `1/4` + ⊗、`Replace with` 占位、
+三个复选框、以及 `[Find All] [Replace All] … [Replace] [◀] [▶]`；
+查找字段的描边是 ring 色（有焦点）、替换字段是分隔色。
+同一轮探针读出 `PROBE focus-in-panel: true`。
+行数 42,688 → 42,819（`find_panel.rs` 282 → 379；口径同 FEATURE-MATRIX：
+`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`）。
+
 ## 阶段 9 — 验证与发布 v0.2.0 ✅
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（623 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（628 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.21 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在其后**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
 
 ---
 
@@ -2248,6 +2352,12 @@ Encoding* / *Cancel*），SubText 做的是「取消」那一个，并把「改�
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
+| 查找面板没有结果列表 | 上游中间那一段是「Find All 之后列出所有匹配」的表格，默认收起；SubText 的 `find.matches` 已经在手，但没有渲染成列表。 |
+| `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
+| 查找面板没有正则速查与高级选项弹层 | 上游字段行两端各有一个（`RegularExpressionReferenceView` / `FindSettingsView` 的 10 个开关）；SubText 的三个复选框覆盖其中三个。 |
+| 查找面板没有 Recent Searches / Recent Replacements 历史菜单 | 上游两个字段的附件行左边各有一个 `HistoryMenu`（最多 64 字符截断 + *Clear Recent…*），值存在 `UserDefaults` 里。SubText 没有「最近查找」的持久化存储，附件行只有消息与清空按钮。 |
+| 替换字段没有自己的结果消息 | 上游替换字段的附件显示 `.replace` 动作的结果（`"\(count) replaced"`）；SubText 的 `FindState` 只记查找结果，不记「刚才替换了几个」。 |
+| 查找面板不记住窗口位置 | 上游 `windowFrameAutosaveName = "Find Panel"`；SubText 每次居中打开。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
 | 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |
 | 警告检查器的表格横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器；上游的 SwiftUI `Table` 会压缩并截断。 |

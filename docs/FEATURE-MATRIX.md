@@ -17,7 +17,7 @@
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
-| 代码行数 | 约 72,128（Swift） | 42,382（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
+| 代码行数 | 约 72,128（Swift） | 42,819（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
 
 ---
 
@@ -195,7 +195,7 @@
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 查找 | `show_find(false)` | ✅ |
+| 查找 / 替换 | `show_find` | ✅ 上游的**独立浮动窗口**（标题 *Find & Replace*，520×190 居中）：两个 44pt 圆角字段、三个复选框（Regular Expression / Ignore Case / In Selection）、结果消息在**查找字段的尾随边缘**上（`1/4` 或 `4 matches`，字段为空时不画，旁边是清空按钮）、`[Find All] [Replace All] … [Replace] [◀] [▶]`。没有结果列表、没有 Find All 下拉、没有正则速查与高级选项弹层、没有 Recent Searches 历史菜单，见缺口表 |
 | 替换 | `show_find(true)` | ✅ |
 | 查找下一个 / 上一个 | `find_step(±)` | ✅ |
 | 查找全部 | `find_all` | ✅ |
