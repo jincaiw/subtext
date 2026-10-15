@@ -9,7 +9,7 @@ members = [
 default-members = ["crates/subtext-app"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/local/subtext"
@@ -37,7 +37,6 @@ log = "0.4"
 env_logger = "0.11"
 
 encoding_rs = "0.8"
-chardetng = "0.1"
 regex = "1"
 unicode-normalization = "0.1"
 # Folder Find grows a displayed line fragment to whole grapheme clusters, which

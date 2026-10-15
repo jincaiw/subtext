@@ -202,7 +202,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 这个 bug 从阶段 7.8 重写设置窗口起就存在，一直没被触发过——因为此前所有验证都只
 启动了主窗口，从没真正打开过设置窗口。8.7d 的冒烟第一次把它踩了出来。
 
-## 阶段 8 — 补齐高价值缺失功能 ⏳
+## 阶段 8 — 补齐高价值缺失功能 ✅
 
 从 [FEATURE-MATRIX](FEATURE-MATRIX.md) 的 39 项未实现中，按「用户可感知收益 ÷ 工作量」排序：
 
@@ -219,6 +219,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.8 | 快速操作 | 需要面板框架 | ✅ |
 | 8.9 | 运行时填充的菜单子菜单 | 8.8 暴露出来的缺口（见下） | ✅ 8.9a–8.9h |
 | 8.10 | 大纲导航命令 | 8.0 留下的大纲条目只有行号，没有位置 | ✅ |
+| 8.11 | 编码优先级列表编辑 | 上游探测顺序就是这份列表；SubText 用的是统计猜测 | ✅ |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -1326,13 +1327,159 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 死菜单命令探针重跑：165 条菜单命令，**0 条** `dispatch` 不认。
 冒烟：开一份含大纲的 Markdown 存活 5 秒、stderr 0 字节。
 
-## 阶段 9 — 验证与发布 v0.2.0 ⏳
+### 8.11 编码优先级列表编辑 ✅
+
+`Format ▸ Text Encoding ▸ Customize Encodings List…` 与设置窗口 Format 面板的
+*Edit List…* 此前一条是占位臂、一条是置灰按钮，两处都说「列表是固定的」。这一轮把
+上游的 `EncodingListView` 整个搬过来。
+
+#### 先要弄清上游到底怎么定编码
+
+`about_autodetect_encoding.html` 写的是四步，`String+Encoding.swift` 的
+`String.string(data:options:)` 是它的实现，顺序为：
+
+| 步骤 | 条件 |
+| --- | --- |
+| ① BOM | 且 `options.candidates` 含 `bom.candidateEncodings` 里的那个 |
+| ② xattr | `com.apple.TextEncoding`；SubText 不读 |
+| ③ 声明 | `options.respectsDeclaration` 且 `candidates` 含声明里那个编码 |
+| ④ 列表 | **按 `candidates` 顺序逐个试，取第一个能解出且没有替换字符的** |
+| ⑤ 兜底 | 都不行就抛错，由调用方用默认编码 |
+
+关键在④：**上游没有统计探测**。`candidates` 就是用户那份优先级列表，所谓「自动识别」
+是「按用户排的顺序试」。SubText 此前是「BOM → UTF-8 有效性 → `chardetng` 统计猜测 →
+默认编码」——与上游**根本不同**：`chardetng` 会把一份 Big5 文件猜成 GBK，而上游只会
+按用户列表里 GBK 与 Big5 的先后给答案。所以 `chardetng` 依赖整个删掉（core 与
+workspace 各一行），`Detection` 的两个变体 `Utf8Valid` / `Guessed` 换成
+`Declared` / `Candidate`。
+
+#### `subtext-core`：`EncodingList`
+
+`EncodingList(Vec<Option<TextEncoding>>)`，`None` 是分隔符。上游 `EncodingItem` 用
+`kCFStringEncodingInvalidId` 当分隔符，且 `separator` 是**每次访问都新造一个**——
+说明分隔符没有身份，只有位置。照搬的方法：
+
+| 上游 | SubText |
+| --- | --- |
+| `move(fromOffsets:toOffset:)` | `move_up` / `move_down`（返回落点，供 UI 同步行序） |
+| `canRemove(ids:)` | `can_remove(index, default_encoding) -> Option<RemovalError>` |
+| `remove(ids:)` | `remove(index)`（不自己问 `can_remove`，与上游一致） |
+| `restore()` | `restore_defaults()` |
+| `save()` | `Serialize`（写成 `Vec<Option<String>>`） |
+| `addSeparator(after:)` / `addEncoding(_:after:)` | `insert_after(selection, item) -> usize` |
+| `canRestore` | `is_default()` |
+
+**一处设计决定**：`from_identifiers` 对「解析不出的标识符」是**丢弃**而不是变成分隔符。
+变成分隔符会让菜单凭空多出空行，且与「用户自己放的分隔符」混淆——上游的 `nil` 只有
+一个来源（用户放的），不该被两种含义共用。`a_list_that_resolves_to_nothing_falls_back_to_the_defaults`
+与 `an_encoding_this_build_cannot_read_is_dropped` 两条测试盯住这里。
+
+`FileEncoding::menu_groups()` 由无参改成收 `&EncodingList`：按分隔符**切**成组再重新
+拼。上游是逐项映射（`fileEncodings(from:)` 一次过），两者对任何列表给出同一序列；
+`the_separators_survive_the_cut_and_join` 用 6 种刁钻列表（前导 / 尾随 / 连续分隔符）
+证明这一点。
+
+#### `subtext-core`：声明扫描器
+
+`scan_declaration()` 只读**前 1024 字节**（上游 `scanEncodingDeclaration` 的
+`NSRange(0..<1024)`），用 `.isoLatin1` 解——不可能失败，且每字节一字符，偏移即文件偏移。
+三条规则照搬上游：CSS `^@charset "…";`、注释 `(?:(?:file)?encoding|coding)[:=] *["']? *…`
+（**只看前两行**）、HTML `\scharset\s*= *["']…["']`（`.ignoresCase()`，且**匹配点之前
+必须全是 ASCII**——否则会在正文里认领 `charset=`）。三者取 `range.lowerBound` 最早的
+那个，然后 `from_identifier` 认领；认不出的当没看见。
+
+这里有一个真实的坐标错位 bug 被测试逮到：注释式规则是**按行**匹配的，正则给出的偏移是
+相对**行首**的，直接当文件偏移用会让第二行的 `# coding:` 显得比第一行的 `@charset` 更早。
+修法是 `first_lines(text, count)` 迭代器同时产出 `(offset, line)`，匹配后加回 `offset`。
+
+#### `subtext-app`：设置、菜单、探测
+
+`Settings` 新增 `encoding_list: EncodingList`（上游的 `encodingList`，`#[serde(default)]`
+所以旧设置文件照读）。`Settings::detection_candidates()` 给出 `Vec<TextEncoding>`，
+`detection_options(&candidates)` 把它与 `refer_to_encoding_tag` 配成 `DetectionOptions`。
+`MenuState` 新增 `encoding_list`，`menus::encodings(state)` 改从它建子菜单。`workspace`
+的 `open_path` / `revert` 走新探测；`Document::open` / `revert` 因此多一个
+`&DetectionOptions` 参数，`folderfind` 传 `DetectionOptions::defaults()`（它没有设置可读）。
+`Workspace::encodings()` 那个「把 `'static` 的 `MENU` 交给调用方」的方法删掉——它正是
+「列表固定」这个假设的化身。
+
+设置窗口的 **Default text encoding** 选择器也改从用户列表取（上游用的是
+`encodingManager.fileEncodings`，同一份）；列表里没有当前编码时仍把当前编码插到最前，
+这样一份早先版本写下的设置文件不会让选择器空着。
+
+#### `subtext-app`：编辑器
+
+`encoding_list_sheet.rs`，1117 行（含 18 条测试）。上游是 SwiftUI 的 `List` + `.sheet`，SubText 是
+设置窗口上的一个对话框——上游的 *Customize Encodings List…* 也是「打开 Format 面板，
+再请面板呈现它自己的 sheet」，只是它靠 `FormatSettingsView.Presentation` 这个请求对象
+跨窗口传话；SubText 两扇窗之间是一次调用，请求对象就不需要了。调用本身要等窗口：`open_settings`
+是 `cx.defer` 出去的，所以 `show_encoding_list_editor` 把「请它呈现」也 defer 在同一队列
+之后（`App::flush_effects` 是 `VecDeque` 从前取，`defer` 从后放，顺序有保证）。
+
+**编辑的是副本**：不按 OK 什么都不会写进设置，所以 Cancel 与 Escape 都是零成本。
+*Restore Defaults* 也是拿它做判据——与上游的 `canRestore` 同一个比较。
+
+**编辑方法全是纯方法**（不接 `cx`），只改 `list` / `rows` / `selection` / `anchor` /
+`addable`，由各 click 处理器在调用后调一次 `cx.notify()`。这是为了让全部**数据规则**
+（拒绝、插入点、移动的形状）都能在没有窗口的环境里测。`rows` 与 `list` 是两个平行结构，
+`assert_in_step()` 是它们的不变量：debug 构建下每次编辑后都断言，测试里也一样。
+行的身份来自一个计数器，不能是行号（移动会改），也不能来自编码（分隔符无从派生，手改的
+设置文件可以让同一个编码出现两次）。
+
+#### 与上游的偏差（都记账）
+
+| 偏差 | 说明 |
+| --- | --- |
+| 拖拽排序 → 箭头按钮 | `gpui-component` 0.7.3 没有拖拽重排，也没有能上报 Delete 键的列表（`grep -r on_drag src/` 为空）。能力相同——任何条目都能一次挪一格——手势不同。 |
+| Delete 键 → Delete 按钮 | 同上。上游的按钮本来就由 `canRemove` 置灰，SubText 的也是；上游那条**没有**被置灰拦住的是 `.onDeleteCommand`，SubText 没有那条路。 |
+| 列表上方那句话 | 上游是 *Drag encodings to change the order*，SubText 是 *Move encodings up or down to change the order*。用户跟不动的指示比换一种说法的指示更糟。 |
+| 选择器里没有分隔线 | 上游的选择器把分隔符画成 `Divider()`。SubText 的 `pick_list` 是各面板共用的一列按钮，加分隔线要动那个共用件，不在这一轮。 |
+| 对话框标题 | 上游的 sheet 没有标题栏（`presentationSizing(.fitted)`）。GPUI 的 `Dialog` 需要一个，用 *Encoding List*——上游这张表的表名。 |
+| 拒绝消息取哪一条 | 选中的既是 UTF-8 又是默认编码时，消息属于**列表里靠上**的那条（上游 `canRemove(ids:)` 是 `items.filter(with: ids)` 取第一个，不跟选区）。已照此实现，`the_first_refusal_in_list_order_is_the_one_reported` 盯住。 |
+| UTF-8 那一行画两行 | 上游 `EncodingView` 对 `.utf8` 画「Unicode (UTF-8)」与「Unicode (UTF-8) with BOM」两条，右侧 IANA 名两条都是 `utf-8`。已照此。 |
+
+#### 顺带修掉的一个真 bug：三个副窗口没有 Base `Root`
+
+冒烟探针（临时钩子派发 `CustomizeEncodings`）第一次跑就崩了：
+
+```
+panicked at gpui-component-0.7.3/src/root.rs:112:45:
+component window state is missing; call gpui_component::init before gpui_kit::open_window
+```
+
+原因：`gpui_kit::open_window` 会把 builder 返回的视图包一层 `base::Root`，而
+`cx.open_window`（GPUI 自己的）不会。主窗口走的是前者，**设置窗口、关于窗口、快速操作面板
+走的都是后者**——所以那三扇窗从来没有组件窗口状态，也就从来没有能力打开任何 overlay。
+在 §8.11 之前没人发现，是因为那三扇窗此前都不开对话框：设置窗口的 *Edit List…* 是置灰的，
+关于窗口只画字，快速操作面板自绘。
+
+这一轮把三处都改成 `gpui_kit::open_window`。随之而来的一个连带改动：窗口的根视图变成
+`Root` 之后，`handle.downcast::<SettingsWindow>()` 不再成立，所以 `Workspace` 多存一个
+`settings_view: Option<WeakEntity<SettingsWindow>>`——窗口句柄回答「窗还在不在」，
+弱实体回答「还有没有人可以说话」，两者一起清。这也是 `bridge` 对主窗口已经在做的事
+（句柄与内容实体分开存）。
+
+**这条值得单独记**：它是「框架的初始化步骤不能省」的一个实例，而且是**静默**的——省掉
+`Root` 不会在启动时报错，只会在第一次用到 overlay 时崩。判断办法很简单：
+`grep -n 'cx.open_window' crates/` 应该为空。
+
+验收：**40 条新测试**——core 里「优先级列表」11 条 + 「声明」6 条 + 「流水线」5 条，
+app 里编辑器 18 条（含两条方向按钮的启用判据）。全工作区 **554** 项测试全绿
+（514 → 554），clippy 零自有警告。生成器幂等（`menu.rs` `d72a9524` / `keymap.rs` `75c5c9e0`，
+与 8.9f 起一致——这一轮没有碰生成输入）。死菜单命令探针重跑：165 条菜单命令，
+**0 条** `dispatch` 不认。
+冒烟（临时钩子，提交前已移除，`git diff | grep -c PROBE` = 0）：4 个命令各跑一遍
+（`ShowAboutPanel` / `ShowQuickActions` / `ShowSettingsWindow` / `CustomizeEncodings`）
+存活 10 秒、stderr 只有探针自己的两行；重复派发同一命令（走「窗口已开」那条分支）
+同样存活。
+
+## 阶段 9 — 验证与发布 v0.2.0 ✅
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（514 项 / 零警告） |
-| 9.2 | 冒烟运行 + 打包 | ⏳ |
-| 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ⏳ |
-| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ⏳ |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（554 项 / 零警告） |
+| 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
+| 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、统计同步 |
+| 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ |
 
 ---
 
@@ -1344,10 +1491,12 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 | Unicode 规范化的 3 个 Apple 形态 | `NFKC Case-Fold` / `Modified NFD` / `Modified NFC` 需要 `Default_Ignorable_Code_Point`、全量 case fold（`CaseFolding.txt`）与 Apple 的 HFS+ 表，`unicode-normalization` 0.1.25 都没有。菜单照列、触发时在状态栏说明（见 §8.9b）。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **38 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；以及 Unicode (UTF-16)/(UTF-32)）。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 缺 `Unicode (UTF-16)` 与 `Unicode (UTF-32)` 两条菜单项 | 上游这两条的意思是「让 BOM 决定字节序」，写出时用哪个字节序由 Foundation 决定（跟平台原生字节序，不跨平台可复现）。SubText 的 `FileEncoding` 把字节序做成显式的（`utf-16le` / `utf-16be`），`Bom` 是文件的属性。要补这两条，先得给 `FileEncoding` 一个「未指定字节序」态并定义写出规则，是一个独立改动，不在 §8.9f 里猜。 |
-| 编码列表不可编辑 | 上游的设置面板可以从 `String.availableStringEncodings` 里增删、拖拽排序，那份列表既决定 `Format ▸ Text Encoding` 菜单，也决定打开文件时的探测优先级。SubText 的「Edit List…」是置灰的，菜单就是 `MENU`、探测候选也是 `MENU`。`UNLISTED` 那 7 条正是为这个编辑器留的存货（见 §8.9f）。 |
+| 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另有两条装饰性差异：默认编码选择器里没有上游的分隔线（`pick_list` 是各面板共用的，加分隔线要动那个共用件），对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。详见 §8.11。 |
+| UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
+| 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
-| 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，所以设置窗口的 "Default text encoding" 选择器里没有 *Unicode (UTF-8) with BOM* —— 菜单里有，设置里没有。 |
+| 默认编码设置没有 BOM 选项 | 上游的默认编码是一个 `FileEncoding`，配一个 `saveUTF8BOM`（"Save UTF-8 files with BOM"）；它的选择器逐项列出 `encodingManager.fileEncodings`，所以 *Unicode (UTF-8) with BOM* 是其中一项，选中即同时设 `encoding` 与 `saveUTF8BOM`。SubText 的 `Settings::default_encoding` 只存一个 codec 标识符，`save_utf8_bom` 是文档级的另一个开关，两者不联动，所以选择器里没有那一条。§8.11 之后选择器**跟着用户列表走**了（与上游一致），但仍然只列 codec。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | `Straighten Quotes` 不随选区置灰 | 上游在空选区时禁用它（`validateUserInterfaceItem`，见 §8.9h）；GPUI 的菜单项只有固定 `disabled`，要跟着光标动就得每次选区变化重建 258 项菜单栏。SubText 保持可用、空选区时在状态栏说明，两种情况都不改文本。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
@@ -1355,6 +1504,6 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
-| Windows / Linux 未验证 | 只验证过 `aarch64-apple-darwin`。 |
+| Windows / Linux 未编译验证（主机缺交叉工具链，不是代码问题） | 两个目标都试过 `cargo check --workspace --target …`，都在**依赖的构建脚本**上停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

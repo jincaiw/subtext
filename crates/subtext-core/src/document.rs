@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::encoding::{Bom, DecodedFile, Detection, TextEncoding};
+use crate::encoding::{Bom, DecodedFile, Detection, DetectionOptions, TextEncoding};
 use crate::line_ending::{self, LineEnding};
 
 #[derive(Debug, thiserror::Error)]
@@ -64,13 +64,23 @@ impl Document {
     }
 
     /// Read a document from disk, detecting encoding and line endings.
-    pub fn open(path: impl AsRef<Path>, fallback: TextEncoding) -> Result<Self, DocumentError> {
+    ///
+    /// `options` is what the detector is allowed to try, which is the user's
+    /// priority list and the *Refer to encoding declaration* switch. It is the
+    /// caller's rather than a constant because the list lives in the settings,
+    /// and a document opened from Folder Find has no document to take one from
+    /// — see [`DetectionOptions::defaults`].
+    pub fn open(
+        path: impl AsRef<Path>,
+        fallback: TextEncoding,
+        options: &DetectionOptions<'_>,
+    ) -> Result<Self, DocumentError> {
         let path = path.as_ref();
         let bytes = std::fs::read(path)
             .map_err(|source| DocumentError::Read { path: path.to_path_buf(), source })?;
         let metadata = std::fs::metadata(path).ok();
 
-        let decoded = DecodedFile::decode(&bytes, fallback);
+        let decoded = DecodedFile::decode(&bytes, fallback, options);
         let line_ending = line_ending::detect(&decoded.text);
 
         Ok(Self {
@@ -264,11 +274,16 @@ impl Document {
     }
 
     /// Reload the file from disk, discarding the buffer.
-    pub fn revert(&mut self) -> Result<(), DocumentError> {
+    ///
+    /// The encoding the document is *kept* in does not move: a revert re-reads
+    /// the bytes, and the user's choice of how to interpret them is theirs. The
+    /// detector runs again only to find the encoding, and its answer is thrown
+    /// away in favour of the one already in force.
+    pub fn revert(&mut self, options: &DetectionOptions<'_>) -> Result<(), DocumentError> {
         let Some(path) = self.path.clone() else {
             return Ok(());
         };
-        let reloaded = Self::open(&path, self.encoding)?;
+        let reloaded = Self::open(&path, self.encoding, options)?;
         let encoding = self.encoding;
         *self = reloaded;
         self.encoding = encoding;
@@ -301,7 +316,7 @@ mod tests {
         document.set_line_ending(LineEnding::CRLF);
         document.save(Some(path.clone())).unwrap();
 
-        let reopened = Document::open(&path, TextEncoding::UTF8).unwrap();
+        let reopened = Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
         assert_eq!(reopened.text(), "first\r\nsecond\r\n");
         assert_eq!(reopened.line_ending(), LineEnding::CRLF);
         assert!(!reopened.is_dirty());
@@ -332,7 +347,7 @@ mod tests {
     fn external_modification_is_detected() {
         let path = temp_path("external.txt");
         std::fs::write(&path, "original").unwrap();
-        let document = Document::open(&path, TextEncoding::UTF8).unwrap();
+        let document = Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
         assert_eq!(document.file_status(), FileStatus::Unchanged);
 
         std::fs::write(&path, "changed and longer").unwrap();

@@ -24,9 +24,10 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
+    dialog::{DialogAction, DialogClose, DialogFooter},
     h_flex,
     input::{Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -43,8 +44,9 @@ use gpui_kit::{
 
 use subtext_core::filedrop::FileDropItem;
 use subtext_core::snippets::Snippet;
-use subtext_core::{LineEnding, TextEncoding, encoding};
+use subtext_core::{LineEnding, TextEncoding};
 
+use crate::encoding_list_sheet::EncodingListSheet;
 use crate::keymap;
 use crate::settings::{
     DocumentAppearance, DocumentConflictOption, EditOptions, FontType, NoDocumentOnLaunchOption,
@@ -177,16 +179,23 @@ impl SettingsWindow {
     ///
     /// Every pane writes through here, so a control cannot change the model
     /// without the open documents hearing about it.
-    fn edit(&self, cx: &mut App, apply: impl FnOnce(&mut Settings) + 'static) {
+    fn edit(&self, cx: &mut Context<Self>, apply: impl FnOnce(&mut Settings) + 'static) {
         let mut apply = Some(apply);
-        self.workspace
+        if self
+            .workspace
             .update_in(cx, move |workspace, window, cx| {
                 if let Some(apply) = apply.take() {
                     apply(&mut workspace.settings);
                 }
                 workspace.apply_settings(window, cx);
             })
-            .ok();
+            .is_ok()
+        {
+            // This window reads the settings through the workspace. Refresh it
+            // after a write so controlled controls (notably the default
+            // encoding picker) do not wait for an unrelated redraw.
+            cx.notify();
+        }
     }
 }
 
@@ -1005,6 +1014,64 @@ impl SettingsWindow {
 
     // ---- Format ----------------------------------------------------------
 
+    /// The *Edit List…* dialog: the encoding priority list as a sheet over this
+    /// window.
+    ///
+    /// Upstream presents `EncodingListView` as a SwiftUI `.sheet` owned by the
+    /// Format pane, and the menu's *Customize Encodings List…* reaches it
+    /// through `FormatSettingsView.Presentation`, which asks the pane to
+    /// present the sheet it already holds. A dialog over the settings window is
+    /// the same shape — one window, one modal, the button and the sheet in the
+    /// same place — and it needs no channel between the two windows, which is
+    /// what the request object upstream is there to provide.
+    ///
+    /// The dialog's OK writes the list back through the sheet, and the pane
+    /// underneath is redrawn because it is built from the same list: the
+    /// default encoding picker offers it.
+    pub fn edit_encoding_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = self.settings(cx);
+        let sheet = cx.new(|cx| {
+            EncodingListSheet::new(
+                self.workspace.clone(),
+                settings.encoding_list.clone(),
+                settings.encoding(),
+                cx,
+            )
+        });
+        let this = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, _| {
+            let submit = sheet.clone();
+            let refresh = this.clone();
+            dialog
+                .title("Encoding List")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                // Upstream asks for `idealWidth: 440` points.
+                .w(window.rem_size() * 27.5)
+                .child(sheet.clone())
+                .footer(
+                    DialogFooter::new()
+                        // Escape and the dialog's own close button both reach
+                        // `Cancel`, and the sheet edits a copy, so cancelling
+                        // costs nothing.
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        // Enter reaches `Confirm`; the footer's own button has
+                        // to dispatch it by hand, which is what `DialogAction`
+                        // is for.
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("encoding-list-ok").label("OK").primary(),
+                            ),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    submit.update(cx, |sheet, cx| sheet.submit(cx));
+                    refresh.update(cx, |_, cx| cx.notify()).ok();
+                    true
+                })
+        });
+    }
+
     /// The Format pane, in `FormatSettingsView.swift`'s order.
     fn render_format(&self, settings: &Settings, cx: &mut Context<Self>) -> AnyElement {
         let endings = LineEnding::BASIC;
@@ -1034,13 +1101,16 @@ impl SettingsWindow {
                 cx,
             ));
 
-        // The picker offers the menu's list, which is upstream's encoding list.
-        // A settings file can hold a spelling the list does not, though — one of
-        // the encodings upstream can add but does not list by default, picked in
-        // an earlier build — and it still decodes with it, so the picker has to
-        // show it rather than come up blank. Same rule as the encoding menu's:
-        // the encoding in force goes to the top when the list lacks it.
-        let mut encodings: Vec<TextEncoding> = encoding::MENU.clone();
+        // The picker offers the user's own list, because that is the list the
+        // encoding menu offers and the one detection works through — a default
+        // the user cannot see anywhere else would be a setting they cannot
+        // reason about. A settings file can still hold a spelling the list does
+        // not: one of the encodings the Add menu can put back, chosen in an
+        // earlier build, or one the user has since taken out. It still decodes
+        // with it, so the picker has to show it rather than come up blank. Same
+        // rule as the encoding menu's: the encoding in force goes to the top
+        // when the list lacks it.
+        let mut encodings: Vec<TextEncoding> = settings.encoding_list.encodings().collect();
         let current = settings.encoding();
         if !encodings.contains(&current) {
             encodings.insert(0, current);
@@ -1062,12 +1132,12 @@ impl SettingsWindow {
 
         let priorities = v_flex()
             .gap_1()
-            .child(Button::new("encoding-priorities").small().label("Edit List…").disabled(true))
-            .child(note(
-                "Not implemented yet. CotEditor's encoding priority list decides which \
-                 encodings the Open dialog tries; SubText tries UTF-8 only.",
-                cx,
-            ))
+            .child(
+                Button::new("encoding-priorities")
+                    .small()
+                    .label("Edit List…")
+                    .on_click(cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx))),
+            )
             .child(
                 Checkbox::new("refer-to-encoding-tag")
                     .checked(settings.refer_to_encoding_tag)

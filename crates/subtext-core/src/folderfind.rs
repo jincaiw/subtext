@@ -57,7 +57,7 @@ use std::sync::{Arc, Mutex};
 use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::encoding::{DecodedFile, Detection, TextEncoding};
+use crate::encoding::{DecodedFile, Detection, DetectionOptions, TextEncoding};
 use crate::finder::{FindOptions, Searcher};
 
 /// The longest a displayed line fragment may be, in bytes.
@@ -933,7 +933,7 @@ fn decode_text(bytes: &[u8]) -> Option<String> {
         let (text, _) = encoding.decode(bytes);
         return Some(text);
     }
-    let decoded = DecodedFile::decode(bytes, TextEncoding::UTF8);
+    let decoded = DecodedFile::decode(bytes, TextEncoding::UTF8, &DetectionOptions::defaults());
     (decoded.detection != Detection::Default).then_some(decoded.text)
 }
 

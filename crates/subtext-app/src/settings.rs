@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use subtext_core::encoding::TextEncoding;
+use subtext_core::encoding::{DetectionOptions, EncodingList, TextEncoding};
 use subtext_core::filedrop::FileDropItem;
 use subtext_core::folderfind::FileScope;
 use subtext_core::line_ending::LineEnding;
@@ -580,6 +580,18 @@ pub struct Settings {
     /// Honour the encoding declared in the file rather than guessing.
     pub refer_to_encoding_tag: bool,
 
+    /// The encoding priority list: what the Text Encoding menus offer, and the
+    /// order the detector tries encodings in.
+    ///
+    /// CotEditor's `encodingList`, and the reason its Format pane has an
+    /// *Edit List…* button at all — the list is the user's, and both the menu
+    /// and the detector work from it rather than from a fixed registry. Stored
+    /// as identifiers, with `null` for a separator.
+    ///
+    /// Upstream keeps this in `UserDefaults` beside the rest of its
+    /// preferences, so it belongs in this file rather than in one of its own.
+    pub encoding_list: EncodingList,
+
     /// Continue a find from the other end of the document.
     pub find_wrap_around: bool,
     /// Interpret `\n` and friends in the find field.
@@ -690,6 +702,9 @@ impl Default for Settings {
             default_line_ending: LineEnding::LF,
             default_syntax: None,
             refer_to_encoding_tag: true,
+            // Upstream's `DefaultSettings.encodings`, which is the menu's
+            // groups with a separator between each pair.
+            encoding_list: EncodingList::defaults(),
             find_wrap_around: true,
             find_escape_sequences: false,
             find_regex: false,
@@ -731,6 +746,31 @@ impl Settings {
     /// The encoding new documents are created with.
     pub fn encoding(&self) -> TextEncoding {
         TextEncoding::from_identifier(&self.default_encoding).unwrap_or(TextEncoding::UTF8)
+    }
+
+    /// The encodings the detector may try, in the order the list puts them.
+    ///
+    /// A `Vec` rather than the iterator [`EncodingList::encodings`] hands back,
+    /// because [`DetectionOptions`] borrows a slice and that borrow has to
+    /// outlive the call — so the caller owns this and hands the borrow on.
+    pub fn detection_candidates(&self) -> Vec<TextEncoding> {
+        self.encoding_list.encodings().collect()
+    }
+
+    /// What the detector is allowed to try, as the settings have it.
+    ///
+    /// The list and the *Refer to encoding declaration* switch travel together
+    /// because they are the two things upstream's `DetectionOptions` carries
+    /// that SubText has settings for. The lifetime is the candidates' rather
+    /// than the settings', so the borrow ends where the vector does.
+    pub fn detection_options<'a>(
+        &self,
+        candidates: &'a [TextEncoding],
+    ) -> DetectionOptions<'a> {
+        DetectionOptions {
+            candidates,
+            respects_declaration: self.refer_to_encoding_tag,
+        }
     }
 
     /// The whitespace one indentation step is made of.

@@ -34,6 +34,7 @@ pub mod color_sheet;
 pub mod command_bar;
 pub mod dialogs;
 pub mod dispatch;
+pub mod encoding_list_sheet;
 pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;
@@ -129,6 +130,7 @@ pub fn run() {
                     .iter()
                     .map(|theme| theme.name.clone())
                     .collect(),
+                encoding_list: settings.encoding_list.clone(),
                 snippets: settings.snippets.clone(),
                 // The user's scripts, read before the first window exists so
                 // that the Script menu is theirs from the first frame.

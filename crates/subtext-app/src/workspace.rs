@@ -249,6 +249,14 @@ pub struct Workspace {
     /// mark it dirty.
     loading: bool,
     settings_window: Option<AnyWindowHandle>,
+    /// The settings window's view, for the commands that act on the window
+    /// rather than on the document: *Edit Snippets…* asks for a pane and
+    /// *Customize Encodings List…* asks the Format pane to present its sheet.
+    ///
+    /// Weak, because the window owns the view. The handle above says whether
+    /// the window is still up; this says whether there is still something to
+    /// talk to, and the two are cleared together.
+    settings_view: Option<WeakEntity<SettingsWindow>>,
     about_window: Option<AnyWindowHandle>,
     /// The Quick Actions bar, while it is up. It is a panel over this window
     /// rather than part of it, so it is tracked the way the settings window is.
@@ -391,6 +399,7 @@ impl Workspace {
             status: None,
             loading: false,
             settings_window: None,
+            settings_view: None,
             about_window: None,
             quick_actions_window: None,
             last_color_code_color: colorcode::Color::BLACK,
@@ -649,7 +658,9 @@ impl Workspace {
             return;
         }
 
-        match Document::open(&path, self.settings.encoding()) {
+        let candidates = self.settings.detection_candidates();
+        let options = self.settings.detection_options(&candidates);
+        match Document::open(&path, self.settings.encoding(), &options) {
             Ok(document) => {
                 let syntax_name = self.syntaxes.syntax_for_path(&path).name.clone();
                 self.settings.note_recent(&path);
@@ -776,6 +787,8 @@ impl Workspace {
 
     /// Reload the active document from disk, discarding the buffer.
     pub fn revert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let candidates = self.settings.detection_candidates();
+        let options = self.settings.detection_options(&candidates);
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
@@ -783,7 +796,7 @@ impl Workspace {
             self.set_status("This document has never been saved", cx);
             return;
         }
-        match document.document.revert() {
+        match document.document.revert(&options) {
             Ok(()) => {
                 let text = document.document.text().to_string();
                 self.loading = true;
@@ -1490,6 +1503,7 @@ impl Workspace {
             theme: self.theme.name.clone(),
             syntaxes: self.syntax_names(),
             themes: self.theme_names(),
+            encoding_list: self.settings.encoding_list.clone(),
             snippets: self.settings.snippets.clone(),
             scripts: self.scripts.clone(),
             recent_documents: self.settings.recent_documents.clone(),
@@ -2470,10 +2484,6 @@ impl Workspace {
         subtext_core::line_ending::ALL
     }
 
-    pub fn encodings(&self) -> &'static [TextEncoding] {
-        &subtext_core::encoding::MENU
-    }
-
     // ---- inspectors ------------------------------------------------------
 
     /// The Text ▸ Inspect Character panel.
@@ -2575,6 +2585,45 @@ impl Workspace {
         self.open_settings(Some(pane), cx);
     }
 
+    /// Bring up the encoding list editor: the settings window on the Format
+    /// pane, with the *Edit List…* dialog over it.
+    ///
+    /// Upstream's `showEncodingsListEditor` is these two steps in this order —
+    /// `openPane(.format)`, then a request the pane answers by presenting the
+    /// sheet it owns. SubText has the pane open the dialog itself, so what
+    /// crosses between the two windows is a call rather than a request; but the
+    /// call has to wait for the window, because `open_settings` defers the
+    /// window's creation and there is nothing to call until that has run. Both
+    /// defers go on the same queue, in this order, so the second one sees the
+    /// handle the first one stored.
+    pub fn show_encoding_list_editor(&mut self, cx: &mut Context<Self>) {
+        self.open_settings(Some(SettingsPane::Format), cx);
+
+        let weak = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            // Read and release the Workspace borrow before touching the
+            // settings window: `edit_encoding_list` reads the settings back
+            // through this Workspace, and nesting that read inside its own
+            // update would hit GPUI's re-entrant entity guard.
+            //
+            // The view is held weakly, so `WeakEntity::update_in` is the call
+            // for it: it finds the entity's own window instead of taking one,
+            // which is what a deferred effect has. `Entity::update_in` would
+            // need a `VisualContext`, and an effect only has the `App`.
+            let view = weak
+                .read_with(cx, |workspace, _| workspace.settings_view.clone())
+                .ok()
+                .flatten();
+            let Some(view) = view else {
+                return;
+            };
+            view.update_in(cx, |settings, window, cx| {
+                settings.edit_encoding_list(window, cx);
+            })
+            .ok();
+        });
+    }
+
     /// Bring the settings window forward, opening it if it is not up.
     ///
     /// `pane` is `None` when the caller does not care which pane is showing,
@@ -2582,26 +2631,22 @@ impl Workspace {
     /// already arranged would be a surprise.
     fn open_settings(&mut self, pane: Option<SettingsPane>, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
-            // `downcast` is how a handle that has been stored as *any* window
-            // becomes one whose root view this module knows the type of; a
-            // handle for a window that has since been reused for something else
-            // fails it and is dropped.
-            let shown = handle
-                .downcast::<SettingsWindow>()
-                .is_some_and(|handle| {
-                    handle
-                        .update(cx, |settings, window, cx| {
-                            window.activate_window();
-                            if let Some(pane) = pane {
-                                settings.show(pane, cx);
-                            }
-                        })
-                        .is_ok()
-                });
-            if shown {
+            // The window's root view is the Base `Root`, not the settings view:
+            // `gpui_kit::open_window` wraps whatever the builder returns, so
+            // that the window carries the component facilities — overlays,
+            // notifications, focus restoration — a view cannot install itself.
+            // The view is therefore held separately, and the handle is only
+            // asked whether the window is still up.
+            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+                if let (Some(pane), Some(view)) =
+                    (pane, self.settings_view.as_ref().and_then(WeakEntity::upgrade))
+                {
+                    view.update(cx, |settings, cx| settings.show(pane, cx));
+                }
                 return;
             }
             self.settings_window = None;
+            self.settings_view = None;
         }
 
         let workspace = cx.entity();
@@ -2629,11 +2674,14 @@ impl Workspace {
                 return;
             }
             let root = weak.clone();
-            let opened = cx.open_window(options, move |window, cx| {
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 cx.new(|cx| SettingsWindow::new(root, pane, window, cx))
             });
             workspace.update(cx, |workspace, cx| match opened {
-                Ok(handle) => workspace.settings_window = Some(handle.into()),
+                Ok((handle, settings)) => {
+                    workspace.settings_window = Some(handle);
+                    workspace.settings_view = Some(settings.downgrade());
+                }
                 Err(error) => workspace.set_status(error.to_string(), cx),
             });
         });
@@ -2652,8 +2700,8 @@ impl Workspace {
             is_resizable: false,
             ..Default::default()
         };
-        match cx.open_window(options, |_, cx| cx.new(|_| AboutView::new())) {
-            Ok(handle) => self.about_window = Some(handle.into()),
+        match gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| AboutView::new())) {
+            Ok((handle, _about)) => self.about_window = Some(handle),
             Err(error) => self.set_status(error.to_string(), cx),
         }
     }
@@ -2715,11 +2763,11 @@ impl Workspace {
                 return;
             }
             let root = weak.clone();
-            let opened = cx.open_window(options, move |window, cx| {
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 cx.new(|cx| CommandBar::new(commands, root, document_window, window, cx))
             });
             workspace.update(cx, |workspace, cx| match opened {
-                Ok(handle) => workspace.quick_actions_window = Some(handle.into()),
+                Ok((handle, _panel)) => workspace.quick_actions_window = Some(handle),
                 Err(error) => workspace.set_status(error.to_string(), cx),
             });
         });

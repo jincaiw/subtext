@@ -127,16 +127,10 @@ impl Workspace {
                 self.notice("Syntax analysis reset", cx)
             }
             // Upstream's `showEncodingsListEditor`: the settings window's Format
-            // pane, where the encoding list is edited. The pane is the first
-            // half of what upstream does — it then asks the pane to open the
-            // list editor, which this build does not have.
-            "CustomizeEncodings" => {
-                self.show_settings_pane(SettingsPane::Format, cx);
-                self.notice(
-                    "The encoding list is fixed; SubText offers every encoding it can read",
-                    cx,
-                );
-            }
+            // pane, and then the encoding list editor over it. The list is what
+            // the Encoding menu is built from and what detection works through,
+            // so the menu bar is rebuilt by the dialog's OK rather than here.
+            "CustomizeEncodings" => self.show_encoding_list_editor(cx),
             "OpenScriptsFolder" => self.open_scripts_folder(cx),
             "MakeFontStandard" => self.set_font(None, cx),
             "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),

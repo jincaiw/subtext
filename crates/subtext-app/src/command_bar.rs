@@ -612,6 +612,7 @@ mod tests {
             theme: "Solarized Dark".into(),
             syntaxes: vec!["HTML".into(), "Markdown".into(), "Ruby".into()],
             themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
+            encoding_list: subtext_core::encoding::EncodingList::defaults(),
             snippets: Vec::new(),
             scripts: Vec::new(),
             recent_documents: Vec::new(),

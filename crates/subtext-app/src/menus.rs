@@ -91,6 +91,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{Action, App, Menu, MenuItem};
 
+use subtext_core::encoding::EncodingList;
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
 use subtext_core::scripts::Item as ScriptItem;
 use subtext_core::snippets::{Shortcut, Snippet};
@@ -185,6 +186,12 @@ pub struct MenuState {
     pub syntaxes: Vec<String>,
     /// Every theme, in the order the Format ▸ Theme submenu lists them.
     pub themes: Vec<String>,
+    /// The user's encoding priority list, in the order the Format ▸ Text
+    /// Encoding submenu lists it.
+    ///
+    /// The whole list, separators and all: they are what cuts the submenu into
+    /// groups, and upstream's own menu builder maps them item by item.
+    pub encoding_list: EncodingList,
     /// The user's snippets.
     pub snippets: Vec<Snippet>,
     /// The user's scripts, as the folder they live in holds them.
@@ -707,6 +714,11 @@ fn themes(state: &MenuState) -> Vec<MenuItem> {
 /// * and the submenu ends with a separator and *Customize Encodings List…*,
 ///   whatever the list holds.
 ///
+/// The list is the user's, edited in the Format settings pane — see
+/// [`EncodingList`]. Upstream reads it from `UserDefaults` on every open; here
+/// it arrives in the [`MenuState`], and the settings pane rebuilds the bar when
+/// it changes.
+///
 /// The encoding in force is checked. The pair matters there: a UTF-8 document
 /// with a byte-order mark is checked on the *with BOM* item, not on the plain
 /// one, which is what upstream's `validateUserInterfaceItem` compares.
@@ -716,20 +728,18 @@ fn themes(state: &MenuState) -> Vec<MenuItem> {
 /// the same way.
 fn encodings(state: &MenuState) -> Vec<MenuItem> {
     encoding_items(
-        &FileEncoding::menu_groups(),
+        &FileEncoding::menu_groups(&state.encoding_list),
         state.document.as_ref().map(|document| document.encoding),
     )
 }
 
 /// The items of Format ▸ Text Encoding: `groups` with `current` checked.
 ///
-/// The list is a parameter rather than read from the registry in here, because
-/// the one branch below only fires when the list *lacks* the encoding in force.
-/// Upstream's list is the user's and can lack anything; SubText's is the
-/// registry and cannot, so nothing the application does reaches that branch
-/// today. It is here anyway — it is upstream's behaviour, and the day the list
-/// becomes editable the branch has to already be right. The tests are what
-/// exercise it until then.
+/// The list is a parameter rather than read from the registry in here because
+/// the branch below fires only when the list *lacks* the encoding in force —
+/// which is the ordinary case now that the list is the user's. The document's
+/// encoding goes to the top, behind a separator, so the menu can always show
+/// what the document is in even when the user has taken that encoding out.
 fn encoding_items(groups: &[Vec<FileEncoding>], current: Option<FileEncoding>) -> Vec<MenuItem> {
     let mut items = Vec::with_capacity(groups.iter().map(Vec::len).sum::<usize>() + groups.len() + 2);
 
@@ -820,6 +830,7 @@ mod tests {
             theme: "Solarized Dark".into(),
             syntaxes: vec!["HTML".into(), "Markdown".into(), "Ruby".into()],
             themes: vec!["Solarized Dark".into(), "Solarized Light".into()],
+            encoding_list: EncodingList::defaults(),
             snippets: Vec::new(),
             scripts: Vec::new(),
             recent_documents: Vec::new(),
@@ -1058,7 +1069,7 @@ mod tests {
     fn the_encoding_menu_is_the_registry_in_upstream_s_groups() {
         let menus = build(&state());
         let groups = grouped(&labels(&menus, TEXT_ENCODING_MENU));
-        let registry = FileEncoding::menu_groups();
+        let registry = FileEncoding::menu_groups(&EncodingList::defaults());
 
         assert_eq!(groups.len(), registry.len() + 1, "one group per registry group, plus the tail");
         for (group, registry) in groups.iter().zip(registry.iter()) {
