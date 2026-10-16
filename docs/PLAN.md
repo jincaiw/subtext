@@ -2450,9 +2450,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
-| 结果表不能按列排序 | 上游 `sortOrder` 可点表头排序；这里的 `Table` 没有排序。 |
-| 结果表的单元格里没有匹配高亮 | 上游给每个捕获组背景着色；SubText 的 `line` 是纯文本。 |
-| 结果表字号没有标准菜单项通路 | 上游那三个命令同时挂在 View 菜单的 *Bigger Font* / *Smaller Font* / *Reset Font* 上；这里只有表格的右键菜单（那三个菜单项作用于编辑器字号）。 |
 | `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
 | 查找面板没有正则速查与高级选项弹层 | 上游字段行两端各有一个（`RegularExpressionReferenceView` / `FindSettingsView` 的 10 个开关）；SubText 的三个复选框覆盖其中三个。 |
 | 查找面板没有 Recent Searches / Recent Replacements 历史菜单 | 上游两个字段的附件行左边各有一个 `HistoryMenu`（最多 64 字符截断 + *Clear Recent…*），值存在 `UserDefaults` 里。SubText 没有「最近查找」的持久化存储，附件行只有消息与清空按钮。 |

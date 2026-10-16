@@ -195,7 +195,7 @@
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 查找 / 替换 | `show_find` | ✅ 上游的**独立浮动窗口**（标题 *Find & Replace*，520×190 居中）：两个 44pt 圆角字段、三个复选框（Regular Expression / Ignore Case / In Selection）、结果消息在**查找字段的尾随边缘**上（`1/4` 或 `4 matches`，字段为空时不画，旁边是清空按钮）、**`Find All` 的结果列表**（`[⌃]` + `Found N matches in "文件名."` + `Find text: 查询` + `Line`/`Matched Text` 两列表格，默认收起、打开时窗口长高 200 点）、`[Find All] [Replace All] … [Replace] [◀] [▶]`。没有 Find All 下拉、没有正则速查与高级选项弹层、没有 Recent Searches 历史菜单，结果表不能多选/排序，见缺口表 |
+| 查找 / 替换 | `show_find` | ✅ 上游的**独立浮动窗口**（标题 *Find & Replace*，520×190 居中）：两个 44pt 圆角字段、三个复选框（Regular Expression / Ignore Case / In Selection）、结果消息在**查找字段的尾随边缘**上（`1/4` 或 `4 matches`，字段为空时不画，旁边是清空按钮）、**`Find All` 的结果列表**（`[⌃]` + `Found N matches in "文件名."` + `Find text: 查询` + `Line`/`Matched Text` 两列表格，默认收起、打开时窗口长高 200 点；行可多选（⌘ 切换 / ⇧ 范围）、⌘C 复制选中行、`Line` 表头排序（`range.location` 键）、捕获组按上游 decompose 算法着色、只选一行时编辑器选区跟随；标准 Bigger/Smaller/Reset Font 与 Copy 在表格聚焦时作用于表格）、`[Find All] [Replace All] … [Replace] [◀] [▶]`。没有 Find All 下拉、没有正则速查与高级选项弹层、没有 Recent Searches 历史菜单，捕获着色不跟随系统强调色，见缺口表 |
 | 替换 | `show_find(true)` | ✅ |
 | 查找下一个 / 上一个 | `find_step(±)` | ✅ |
 | 查找全部 | `find_all` | ✅ |

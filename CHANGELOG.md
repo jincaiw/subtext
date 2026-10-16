@@ -91,10 +91,16 @@
 - **`Find All` 的结果列表**：面板中间那一段 —— 上游三段纵向 split 的第二段，
   默认收起、`Find All` 找到东西才打开并占 200 点。现在也有：`[⌃]`
   折叠按钮加粗体的 `Found N matches in "文件名."`、一行 `Find text: 查询`、
-  一个两列表格（`Line` 右对齐窄栏 / `Matched Text` 尾截断），点一行把编辑器选区
-  放到那个匹配上，右键出 *Text Size ▸ Bigger / Smaller / Reset to Default*。
-  打开与折叠时面板窗口跟着长高、收回。行号是**六种**换行符的口径（与状态栏一致），
-  表头的头部截断按**字形簇**回退 16 个而不是按标量。
+  一个两列表格（`Line` 右对齐窄栏 / `Matched Text` 尾截断），右键出
+  *Text Size ▸ Bigger / Smaller / Reset to Default*。打开与折叠时面板窗口跟着长高、
+  收回。行号是**六种**换行符的口径（与状态栏一致），表头的头部截断按**字形簇**
+  回退 16 个而不是按标量。行可以像上游一样**多选**（⌘ 切换、⇧ 范围），
+  `⌘C` 把选中行按显示顺序放到剪贴板；只选一行时编辑器选区跟着移过去。
+  `Line` 表头可以点按排序（升/降），排序重排的是同一份行数组，
+  复制顺序随之。正则捕获时每个捕获组按上游 `textHighlighterColor.decompose`
+  的同一算法（实测默认强调色 α0.4 均分色相）画背景色，重叠处最细的组赢 ——
+  group 0（整匹配）也画。菜单栏的 *Bigger/Smaller/Reset Font* 与 *Copy*
+  在表格持有键盘焦点时作用于表格，其余时候照旧归编辑器。
 - **新增 *In Selection***：只在选区里查找。它是把搜索的 **scope** 收窄，匹配仍然是
   整篇的偏移量，所以编辑器选中它们时不需要换算。
 - **警告检查器按上游重排成两栏**：`Inspector ▸ Warnings` 原来是一列自己编的提示文字，
@@ -252,16 +258,16 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**638** 项测试全部通过（v0.1.0 是 124 项）：
+**651** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 375 |
-| `subtext-app` | 226 |
+| `subtext-core` | 379 |
+| `subtext-app` | 235 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **638** |
+| **合计** | **651** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
