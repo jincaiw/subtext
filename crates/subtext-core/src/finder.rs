@@ -77,6 +77,25 @@ impl Searcher {
 
     /// Every match in `text`, in document order and non-overlapping.
     pub fn find_all(&self, text: &str, scope: &Range<usize>) -> Vec<Range<usize>> {
+        self.find_all_with_captures(text, scope)
+            .iter()
+            .map(|captures| captures[0].clone().expect("group 0 always participates"))
+            .collect()
+    }
+
+    /// Every match with its capture groups, in document order.
+    ///
+    /// Group 0 is the whole match; the remaining entries follow the pattern's
+    /// capture groups, `None` where a group did not participate in that match.
+    /// A literal search has exactly one group, so every entry is
+    /// `[Some(range)]` — the result table's highlighter keys off the group
+    /// count either way, the way upstream's `numberOfCaptureGroups + 1`
+    /// colours do.
+    pub fn find_all_with_captures(
+        &self,
+        text: &str,
+        scope: &Range<usize>,
+    ) -> Vec<Vec<Option<Range<usize>>>> {
         if self.empty {
             return Vec::new();
         }
@@ -87,8 +106,13 @@ impl Searcher {
         }
         let haystack = &text[start..end];
         self.regex
-            .find_iter(haystack)
-            .map(|m| start + m.start()..start + m.end())
+            .captures_iter(haystack)
+            .map(|captures| {
+                captures
+                    .iter()
+                    .map(|group| group.map(|matched| start + matched.start()..start + matched.end()))
+                    .collect()
+            })
             .collect()
     }
 
@@ -290,6 +314,28 @@ mod tests {
         let searcher = Searcher::new("hello", &options).unwrap();
         let text = "Hello world, hello there";
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
+    }
+
+    #[test]
+    fn find_all_with_captures_returns_group_zero_and_optional_groups_in_order() {
+        let text = "a=1 b=two";
+        let options = FindOptions { regex: true, ..Default::default() };
+        let searcher = Searcher::new(r"([a-z])=(1|(two))", &options).unwrap();
+        let found = searcher.find_all_with_captures(text, &(0..text.len()));
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0], vec![Some(0..3), Some(0..1), Some(2..3), None]);
+        assert_eq!(found[1], vec![Some(4..9), Some(4..5), Some(6..9), Some(6..9)]);
+    }
+
+    #[test]
+    fn find_all_with_captures_preserves_document_offsets_for_a_scoped_search() {
+        let text = "prefix alpha suffix";
+        let options = FindOptions { regex: true, ..Default::default() };
+        let searcher = Searcher::new(r"(alpha)", &options).unwrap();
+        assert_eq!(
+            searcher.find_all_with_captures(text, &(7..12)),
+            vec![vec![Some(7..12), Some(7..12)]]
+        );
     }
 
     #[test]

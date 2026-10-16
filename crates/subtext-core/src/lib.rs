@@ -40,7 +40,7 @@ pub use folderfind::{
     Options as FolderFindOptions, Progress, Query, Search, SearchError, Summary, Target,
 };
 pub use line_ending::LineEnding;
-pub use findresult::{MatchLine, match_lines, truncate_head};
+pub use findresult::{MatchLine, match_lines, match_lines_with_captures, truncate_head, truncate_head_with_ranges};
 pub use matcher::{AbbreviatedMatch, abbreviated_match, abbreviated_matched_ranges};
 pub use multireplace::{MultipleReplace, Outcome, PatternError, Replacement, Settings};
 pub use scripts::{

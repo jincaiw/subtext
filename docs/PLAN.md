@@ -232,7 +232,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.21 | 警告检查器按上游重排成两栏 | 上游是 `VSplitView` 的两个面板（不兼容字符 / 不一致换行符），各带状态行与表格；SubText 是一列自编的提示。顺带查出保存路径丢掉了有损标志，会把 `&#65533;` 静默写进文件 | ✅ |
 | 8.22 | 查找面板改成独立的浮动窗口 | 上游 `FindPanelController` 是 `NSPanel`（标题 *Find & Replace*），内容是三段纵向布局；SubText 是窗口内的一条横条。顺带补上 *In Selection*。**照抄注释会写错三处**：位置消息是 `1/4` 不是 `1 of 4`、消息是字段的尾随附件不是独立一行、焦点必须给在面板自己的窗口里 | ✅ |
 | 8.23 | *Find All* 的结果列表 | §8.22 之后面板中间那一段还空着 —— 上游是**三段**纵向 split，中间是默认收起、打开占 200 点的结果表。顺带查出结果表的行号是**六种**换行符的口径，而 `textops` 里已有的扫描器只有三种 | ✅ |
-| 8.24 | 结果表多选、高亮与标准字号命令 | 上游剩余差异已核实。gpui-kit `DataTable` 可复用虚拟滚动/排序/键盘导航，但其 `TableState` 必须在自身 `Context` 中构造，且内建行选择单行；实现应把 DataTable 实体归 `FindPanel`，Workspace 持有 range-based selection，再桥接修饰键选择/复制与聚焦时的标准字号命令 | 待办 |
+| 8.24 | 结果表多选、高亮与标准字号命令 | DataTable 实体归 `FindPanel`（唯一有 `Context<TableState<_>>` 的地方），delegate 无状态地 live-read Workspace：行、选择集（match range 为稳定身份）、显示序都只有 Workspace 一份。修饰键选择在 cell `on_mouse_down` 读 `MouseDownEvent.modifiers`（组件在行点击处 stop_propagation，外层拿不到）；重叠捕获组按「最细参与组赢」逐字节归属（上游 addAttribute 后写覆盖）；⌘C 与 Copy 菜单、Bigger/Smaller/ResetFont 按 `find_results_focused` 先于编辑器 fallback 分流；Line 列可排序（`range.location` 键），排序原地重排 `find.results` 保持单一显示序。捕获序列基色实测 `controlAccentColor`（genericRGB HSB 0.6085/0.9591/0.9984）α0.4 色相均分 | 完成 |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2449,7 +2449,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
-| 结果表不支持多选与「复制选中行」 | 上游的 `Table` 是 `Set<Match.ID>` 多选，且 `.copyable(...)` 让 ⌘C 复制所有选中行。gpui-kit 0.7.3 的 `DataTable` 虚拟滚动、排序、键盘导航齐全，但内建行选择是单行（`TableEvent::SelectRow(usize)`），而且 row click 会在组件内部 `stop_propagation`，`render_td` 又运行于 `Context<TableState<_>>`、拿不到产品 `Workspace`。**不要把组件实体建到 `Workspace::new`**：那个构造器只有 `Context<Workspace>`，`TableState::new` 要自己的 `Context<TableState<_>>`。后续应把 DataTable entity 放到 `FindPanel::new`（面板 view 的 Context），Workspace 只保留按 match range 的 selection model，由面板把数据快照推入 delegate；修饰键选择需在 cell handler / 有明确 owner 的桥接层处理，⌘C 只在表格焦点时复制当前选中的行文本。`BiggerFont` / `SmallerFont` / `ResetFont` 必须在编辑器 fallback 前按表格焦点分流，右键与标准菜单命令复用同一 workspace setter。 |
+| 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
 | 结果表不能按列排序 | 上游 `sortOrder` 可点表头排序；这里的 `Table` 没有排序。 |
 | 结果表的单元格里没有匹配高亮 | 上游给每个捕获组背景着色；SubText 的 `line` 是纯文本。 |
 | 结果表字号没有标准菜单项通路 | 上游那三个命令同时挂在 View 菜单的 *Bigger Font* / *Smaller Font* / *Reset Font* 上；这里只有表格的右键菜单（那三个菜单项作用于编辑器字号）。 |

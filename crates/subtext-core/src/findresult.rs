@@ -60,22 +60,57 @@ pub struct MatchLine {
     pub inline_location: usize,
     /// The matched line, clamped around the match.
     pub line: String,
+    /// Each capture group's range *inside* [`Self::line`], group 0 first —
+    /// `None` where a group did not participate or fell outside the clamped
+    /// fragment. Upstream paints these with the decomposed highlighter colours
+    /// as background attributes on the cell's attributed string.
+    pub capture_ranges: Vec<Option<Range<usize>>>,
 }
 
 /// Build one row per match.
 pub fn match_lines(text: &str, matches: &[Range<usize>]) -> Vec<MatchLine> {
+    match_lines_with_captures(
+        text,
+        &matches
+            .iter()
+            .map(|range| vec![Some(range.clone())])
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Build one row per match, carrying each match's capture-group ranges.
+///
+/// Every entry of `matches` is one match's capture array, group 0 first —
+/// what [`crate::finder::Searcher::find_all_with_captures`] produces. Group 0
+/// always participates, so it is also the row's [`MatchLine::range`].
+pub fn match_lines_with_captures(
+    text: &str,
+    matches: &[Vec<Option<Range<usize>>>],
+) -> Vec<MatchLine> {
     let index = LineIndex::new(text);
     matches
         .iter()
-        .map(|range| {
+        .filter_map(|captures| {
+            let range = captures.first()?.as_ref()?;
             let (line_number, content) = index.locate(range.start);
             let fragment = clamp_around(&content, range, MAX_LINE_FRAGMENT, HEAD_PADDING);
-            MatchLine {
+            let capture_ranges = captures
+                .iter()
+                .map(|capture| {
+                    capture.as_ref().and_then(|capture| {
+                        let start = capture.start.max(fragment.start);
+                        let end = capture.end.min(fragment.end);
+                        (start < end).then_some(start - fragment.start..end - fragment.start)
+                    })
+                })
+                .collect();
+            Some(MatchLine {
                 range: range.clone(),
                 line_number,
                 inline_location: range.start.saturating_sub(fragment.start),
+                capture_ranges,
                 line: text[fragment].to_string(),
-            }
+            })
         })
         .collect()
 }
@@ -87,28 +122,57 @@ pub fn match_lines(text: &str, matches: &[Range<usize>]) -> Vec<MatchLine> {
 /// more than `offset` composed characters before the match, so the match stays
 /// visible in a narrow column instead of scrolling off the right edge.
 pub fn truncate_head(line: &str, inline_location: usize, offset: usize) -> String {
-    if inline_location <= offset {
-        return line.to_string();
-    }
+    truncate_head_with_ranges(line, inline_location, offset, &[]).0
+}
 
-    // The cluster the match starts in, then `offset` clusters further back.
-    let mut boundary = cluster_start(line, inline_location);
-    for _ in 0..offset {
-        if boundary == 0 {
-            // The line is shorter than the requested head; upstream leaves it
-            // whole rather than replacing the whole string with `…`.
-            return line.to_string();
-        }
-        boundary = cluster_start(line, boundary - 1);
-    }
-    if boundary == 0 {
-        return line.to_string();
-    }
+/// Truncate a line at the same grapheme boundary as [`truncate_head`] and
+/// translate any character ranges into the returned string's byte offsets.
+///
+/// This is for annotated text such as capture-group highlights: the displayed
+/// string begins with a three-byte ellipsis, so the source ranges need to move
+/// with the visible tail rather than being applied to the pre-truncation line.
+/// Ranges that the cut removed come back as `None`, the way upstream drops a
+/// capture whose intersection with the visible fragment is empty.
+pub fn truncate_head_with_ranges(
+    line: &str,
+    inline_location: usize,
+    offset: usize,
+    ranges: &[Option<Range<usize>>],
+) -> (String, Vec<Option<Range<usize>>>) {
+    let Some(boundary) = head_truncation_boundary(line, inline_location, offset) else {
+        return (line.to_string(), ranges.to_vec());
+    };
 
     let mut truncated = String::with_capacity(line.len() - boundary + 3);
     truncated.push('…');
     truncated.push_str(&line[boundary..]);
-    truncated
+    let translated = ranges
+        .iter()
+        .map(|range| {
+            let range = range.as_ref()?;
+            let start = range.start.max(boundary);
+            let end = range.end.min(line.len());
+            (start < end).then_some(3 + start - boundary..3 + end - boundary)
+        })
+        .collect();
+    (truncated, translated)
+}
+
+/// The source byte index to replace with the ellipsis, if this line must be
+/// truncated. `None` means preserve the complete line.
+fn head_truncation_boundary(line: &str, inline_location: usize, offset: usize) -> Option<usize> {
+    if inline_location <= offset {
+        return None;
+    }
+
+    let mut boundary = cluster_start(line, inline_location);
+    for _ in 0..offset {
+        if boundary == 0 {
+            return None;
+        }
+        boundary = cluster_start(line, boundary - 1);
+    }
+    (boundary > 0).then_some(boundary)
 }
 
 /// Cut `content` down to `max_length` bytes around `target`.
@@ -239,6 +303,30 @@ mod tests {
         let line = "abcdefghijklmnopqMATCH";
         // 17 characters before the match: keep 16 of them.
         assert_eq!(truncate_head(line, 17, CELL_HEAD_OFFSET), "…bcdefghijklmnopqMATCH");
+    }
+
+    #[test]
+    fn truncating_a_highlighted_line_rebases_capture_ranges_after_the_ellipsis() {
+        let line = "abcdefghijklmnopqMATCH";
+        let groups = vec![Some(17..22), Some(17..22), None];
+        let (shown, shifted) = truncate_head_with_ranges(line, 17, CELL_HEAD_OFFSET, &groups);
+        assert_eq!(shown, "…bcdefghijklmnopqMATCH");
+        // The cut removes one byte and the ellipsis adds three, so "MATCH"
+        // moves to 19..24 in the displayed string.
+        assert_eq!(shifted, vec![Some(19..24), Some(19..24), None]);
+        assert_eq!(&shown[shifted[0].as_ref().unwrap().clone()], "MATCH");
+    }
+
+    #[test]
+    fn truncating_a_highlighted_line_keeps_a_partial_capture_intersection() {
+        let line = "abcdefghijklmnopqMATCH";
+        // "ab" hangs over the cut; its intersection with the visible tail is
+        // just "b", the way upstream paints the intersection that survives.
+        let groups = vec![Some(0..2), Some(17..22)];
+        let (shown, shifted) = truncate_head_with_ranges(line, 17, CELL_HEAD_OFFSET, &groups);
+        assert_eq!(shown, "…bcdefghijklmnopqMATCH");
+        assert_eq!(shifted, vec![Some(3..4), Some(19..24)]);
+        assert_eq!(&shown[shifted[0].as_ref().unwrap().clone()], "b");
     }
 
     #[test]

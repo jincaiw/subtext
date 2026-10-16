@@ -78,6 +78,11 @@ impl Workspace {
             }
 
             // ---- editing ----------------------------------------------
+            // The Find All result table owns Copy while it holds the keyboard
+            // focus — upstream's `.copyable` puts the selected rows on the
+            // pasteboard — and the editor keeps the text engine's behaviour
+            // everywhere else.
+            "Copy" if self.find_results_focused() => self.copy_find_results(cx),
             // Undo, redo, cut, copy, paste and select all are bound in the
             // editor's own key context, which is more specific than this one,
             // so the text engine handles them while the editor has focus. The
@@ -138,6 +143,16 @@ impl Workspace {
             "OpenScriptsFolder" => self.open_scripts_folder(cx),
             "MakeFontStandard" => self.set_font(None, cx),
             "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),
+            // Upstream's result view receives the standard Text Size commands
+            // through `.onCommand` while it holds the focus, ahead of the text
+            // view; the same three commands sit on its context menu.
+            "BiggerFont" if self.find_results_focused() => {
+                self.step_find_result_font_size(true, cx)
+            }
+            "SmallerFont" if self.find_results_focused() => {
+                self.step_find_result_font_size(false, cx)
+            }
+            "ResetFont" if self.find_results_focused() => self.reset_find_result_font_size(cx),
             "BiggerFont" => self.bump_font(1.0, cx),
             "SmallerFont" => self.bump_font(-1.0, cx),
             "ResetFont" => {

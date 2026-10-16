@@ -89,7 +89,7 @@ use crate::settings::{
 };
 use crate::settings_window::SettingsWindow;
 use crate::count_panel::{CountOptionsView, CountSheet};
-use crate::find_panel::FindPanel;
+use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
 
@@ -267,6 +267,10 @@ pub struct FindState {
     /// Ranges the last search found, kept so the panel and the status bar can
     /// report them without re-running the search.
     pub matches: Vec<Range<usize>>,
+    /// Each match's capture groups, in the same order as [`Self::matches`] —
+    /// group 0 first, `None` where a group did not participate. The result
+    /// table paints these with the decomposed highlighter colours.
+    pub capture_matches: Vec<Vec<Option<Range<usize>>>>,
     pub current: Option<usize>,
     pub error: Option<String>,
     /// The rows of the *Find All* result table.
@@ -275,6 +279,8 @@ pub struct FindState {
     /// highlights the matches and only when the result view is going to be
     /// shown, because a row costs a copy of its line — so this is a separate
     /// list rather than something derived from `matches` on every frame.
+    /// Sorting the table re-orders this list in place, the way upstream sorts
+    /// its own `matches` array, so this stays the one display order.
     pub results: Vec<MatchLine>,
     /// Whether the result section is showing.
     ///
@@ -350,6 +356,20 @@ pub struct Workspace {
     find: FindState,
     find_query: Entity<InputState>,
     find_replacement: Entity<InputState>,
+    /// The result-table rows the user has selected, as a set of match ranges.
+    ///
+    /// Upstream's `FindPanelResultView` keeps a `Set<Match.ID>`; the match
+    /// range is SubText's stable row identity, so a selection survives the
+    /// table being re-sorted. Copy reads it back in display order.
+    find_selected_ranges: Vec<Range<usize>>,
+    /// The row every extended selection grows from — the last row chosen as
+    /// the primary one, which is what shift-click and shift-arrow measure from.
+    find_selection_anchor: Option<Range<usize>>,
+    /// Whether the result table is the keyboard focus target, which routes
+    /// ⌘C and the standard font-size commands to the table instead of the
+    /// editor. Upstream gets this from the responder chain for free; here the
+    /// panel's focus listeners keep it current.
+    find_results_focused: bool,
     /// The sidebar's *Folder Find* pane. It owns its own query, options and
     /// results, because none of them belong to a document.
     folder_find: Entity<FolderFindPane>,
@@ -560,6 +580,9 @@ impl Workspace {
             find: FindState::default(),
             find_query,
             find_replacement,
+            find_selected_ranges: Vec::new(),
+            find_selection_anchor: None,
+            find_results_focused: false,
             folder_find,
             status: None,
             loading: false,
@@ -2062,6 +2085,11 @@ impl Workspace {
         };
         let was_open = self.find.results_open;
         self.find.results.clear();
+        self.find.capture_matches.clear();
+        // The rows are about to be rebuilt, so no selection can survive: the
+        // same pass upstream prunes stale ids with.
+        self.find_selected_ranges.clear();
+        self.find_selection_anchor = None;
         self.find.results_open = false;
         if was_open {
             self.resize_find_panel(cx);
@@ -2069,6 +2097,7 @@ impl Workspace {
         let query = self.query(cx);
         if query.is_empty() {
             self.find.matches.clear();
+            self.find.capture_matches.clear();
             self.find.current = None;
             self.find.error = None;
             cx.notify();
@@ -2085,7 +2114,13 @@ impl Workspace {
         };
         match finder::Searcher::new(&query, &self.find_options()) {
             Ok(searcher) => {
-                self.find.matches = searcher.find_all(&text, &scope);
+                self.find.capture_matches = searcher.find_all_with_captures(&text, &scope);
+                self.find.matches = self
+                    .find
+                    .capture_matches
+                    .iter()
+                    .map(|captures| captures[0].clone().expect("group 0 always participates"))
+                    .collect();
                 self.find.error = None;
                 if self.find.current.is_some_and(|index| index >= self.find.matches.len()) {
                     self.find.current = None;
@@ -2093,6 +2128,7 @@ impl Workspace {
             }
             Err(error) => {
                 self.find.matches.clear();
+                self.find.capture_matches.clear();
                 self.find.error = Some(error.to_string());
             }
         }
@@ -2143,7 +2179,11 @@ impl Workspace {
             return;
         }
         if let Some(text) = self.active_text(cx) {
-            self.find.results = findresult::match_lines(&text, &self.find.matches);
+            // The rows carry their capture-group ranges: the table paints each
+            // group with the decomposed highlighter colours, group 0 included,
+            // exactly as upstream builds the attributed line string.
+            self.find.results =
+                findresult::match_lines_with_captures(&text, &self.find.capture_matches);
             self.find.results_open = true;
             self.resize_find_panel(cx);
         }
@@ -2179,14 +2219,124 @@ impl Workspace {
             .ok();
     }
 
+    /// Apply a click on the result row whose match is `range`.
+    ///
+    /// This is upstream's `Table(selection:)` behaviour: a plain click selects
+    /// that one row, ⌘-click toggles it in the set, and ⇧-click selects the
+    /// display-order span from the anchor row. With exactly one row selected
+    /// the editor's selection moves to the match, the way upstream's
+    /// `onChange(of: selection)` calls `selectMatch` only for a single row.
+    pub fn select_find_result_range(
+        &mut self,
+        range: Range<usize>,
+        modifiers: gpui_kit::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        let visible = self
+            .find
+            .results
+            .iter()
+            .map(|row| row.range.clone())
+            .collect::<Vec<_>>();
+        let Some(target) = visible.iter().position(|row| *row == range) else {
+            return;
+        };
+        let (selected, anchor) = apply_row_selection(
+            &self.find_selected_ranges,
+            self.find_selection_anchor
+                .as_ref()
+                .and_then(|anchor| visible.iter().position(|row| *row == *anchor)),
+            target,
+            modifiers.shift,
+            modifiers.platform || modifiers.control,
+            &visible,
+        );
+        self.find_selected_ranges = selected;
+        self.find_selection_anchor = anchor.and_then(|index| visible.get(index).cloned());
+        // With exactly one row selected the editor's selection moves to the
+        // match, the way upstream's `onChange(of: selection)` does.
+        if let [only] = &self.find_selected_ranges[..]
+            && let Some(index) = self.find.matches.iter().position(|match_| match_ == only)
+        {
+            self.select_match(index, cx);
+        }
+        cx.notify();
+    }
+
+    /// Select a result row by its display position — the keyboard path.
+    pub fn select_find_result_index(
+        &mut self,
+        row_ix: usize,
+        extend: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(range) = self.find.results.get(row_ix).map(|row| row.range.clone()) else {
+            return;
+        };
+        self.select_find_result_range(
+            range,
+            gpui_kit::Modifiers { shift: extend, ..Default::default() },
+            cx,
+        );
+    }
+
+    /// Sort the result rows by their `Line` column — upstream's
+    /// `KeyPathComparator(\.range.location)` — re-ordering the rows in place so
+    /// this list stays the one display order the table and *Copy* both read.
+    pub fn sort_find_results(&mut self, descending: bool, cx: &mut Context<Self>) {
+        if descending {
+            self.find
+                .results
+                .sort_by_key(|row| std::cmp::Reverse(row.range.start));
+        } else {
+            self.find.results.sort_by_key(|row| row.range.start);
+        }
+        cx.notify();
+    }
+
+    /// Copy the selected rows' line fragments, newline-separated, in display
+    /// order — upstream's `.copyable(matches.filter(with: selection))`.
+    pub fn copy_find_results(&self, cx: &mut Context<Self>) {
+        let lines = self
+            .find
+            .results
+            .iter()
+            .filter(|row| self.find_selected_ranges.contains(&row.range))
+            .map(|row| row.line.clone())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return;
+        }
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(lines.join("\n")));
+    }
+
+    /// Whether the result table is the keyboard focus target.
+    pub fn find_results_focused(&self) -> bool {
+        self.find_results_focused
+    }
+
+    /// Record whether the result table has the keyboard focus.
+    ///
+    /// The panel's focus listeners keep this current; it only routes commands,
+    /// so a change that nobody observed is not worth a redraw.
+    pub fn focus_find_results(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.find_results_focused != focused {
+            self.find_results_focused = focused;
+            cx.notify();
+        }
+    }
+
+    /// The result-table rows the user has selected.
+    pub fn selected_find_result_ranges(&self) -> &[Range<usize>] {
+        &self.find_selected_ranges
+    }
+
     /// Select the match a result row stands for.
     ///
     /// The row's `range` is the match itself, so this is the same selection the
     /// editor's own *Find Next* would make.
     pub fn select_find_result(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
-        if let Some(index) = self.find.matches.iter().position(|match_| *match_ == range) {
-            self.select_match(index, cx);
-        }
+        self.select_find_result_range(range, gpui_kit::Modifiers::default(), cx);
     }
 
     /// The result rows and whether the section is open, for the panel.
