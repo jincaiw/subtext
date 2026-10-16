@@ -24,6 +24,12 @@ pub struct FindOptions {
     pub escape_sequences: bool,
     /// Restrict matches to the current selection.
     pub in_selection: bool,
+    /// Let `.` match line separators — upstream's *Dot matches line separators*
+    /// (`findRegexIsSingleline`).
+    pub singleline: bool,
+    /// Let `^` and `$` match the start and end of lines — upstream's
+    /// *Anchors match lines* (`findRegexIsMultiline`).
+    pub multiline: bool,
 }
 
 impl Default for FindOptions {
@@ -35,6 +41,10 @@ impl Default for FindOptions {
             wrap_around: true,
             escape_sequences: false,
             in_selection: false,
+            // Upstream's defaults: `findRegexIsSingleline: false`,
+            // `findRegexIsMultiline: true`.
+            singleline: false,
+            multiline: true,
         }
     }
 }
@@ -70,7 +80,8 @@ impl Searcher {
         };
         let regex = RegexBuilder::new(&pattern)
             .case_insensitive(!options.case_sensitive)
-            .multi_line(true)
+            .multi_line(options.multiline)
+            .dot_matches_new_line(options.singleline)
             .build()?;
         Ok(Self { regex, empty: false })
     }
@@ -336,6 +347,31 @@ mod tests {
             searcher.find_all_with_captures(text, &(7..12)),
             vec![vec![Some(7..12), Some(7..12)]]
         );
+    }
+
+    #[test]
+    fn singleline_lets_dot_match_line_separators() {
+        let text = "one\ntwo";
+        let options = FindOptions { regex: true, singleline: true, ..Default::default() };
+        let searcher = Searcher::new("one.two", &options).unwrap();
+        assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
+
+        let options = FindOptions { regex: true, singleline: false, ..Default::default() };
+        let searcher = Searcher::new("one.two", &options).unwrap();
+        assert!(searcher.find_all(text, &(0..text.len())).is_empty());
+    }
+
+    #[test]
+    fn multiline_controls_whether_anchors_match_lines() {
+        let text = "x\ny";
+        // Upstream's default: anchors match lines.
+        let options = FindOptions { regex: true, multiline: true, ..Default::default() };
+        let searcher = Searcher::new(r"^y", &options).unwrap();
+        assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
+
+        let options = FindOptions { regex: true, multiline: false, ..Default::default() };
+        let searcher = Searcher::new(r"^y", &options).unwrap();
+        assert!(searcher.find_all(text, &(0..text.len())).is_empty());
     }
 
     #[test]

@@ -670,6 +670,19 @@ pub struct Settings {
     /// rest of the panel.
     pub find_result_font_size: f32,
 
+    /// Keep searching as the query is typed — upstream's
+    /// `findSearchesIncrementally`, default on.
+    pub find_searches_incrementally: bool,
+    /// Let `.` match line separators — upstream's `findRegexIsSingleline`.
+    pub find_regex_is_singleline: bool,
+    /// Let `^` and `$` match line boundaries — upstream's
+    /// `findRegexIsMultiline`, default on.
+    pub find_regex_is_multiline: bool,
+    /// Unescape `\n` and friends in the replacement text before a regex
+    /// replacement runs — upstream's `findRegexUnescapesReplacementString`,
+    /// default on.
+    pub find_regex_unescapes_replacement: bool,
+
     /// The recent find strings, latest last — upstream's `findHistory`.
     ///
     /// The two history menus in the find panel read these; a find or replace
@@ -817,6 +830,11 @@ impl Default for Settings {
             find_whole_word: false,
             find_in_selection: false,
             find_result_font_size: DEFAULT_FIND_RESULT_FONT_SIZE,
+            // Upstream's defaults for the advanced find options.
+            find_searches_incrementally: true,
+            find_regex_is_singleline: false,
+            find_regex_is_multiline: true,
+            find_regex_unescapes_replacement: true,
             find_history: Vec::new(),
             replace_history: Vec::new(),
             enables_remote_editing: false,
@@ -967,6 +985,8 @@ impl Settings {
             wrap_around: self.find_wrap_around,
             escape_sequences: self.find_escape_sequences,
             in_selection: false,
+            singleline: self.find_regex_is_singleline,
+            multiline: self.find_regex_is_multiline,
         }
     }
 

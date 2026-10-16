@@ -25,7 +25,7 @@
 use std::ops::Range;
 
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -120,10 +120,10 @@ impl FindPanel {
         Self { workspace, table, _results_blur: blur }
     }
 
-    /// The `?` trigger and quick-reference popover for the regex syntax —
-    /// upstream's `HelpLink` + `detachablePopover` pair. The popover manages
-    /// its own open state and closes on an outside click.
-    fn regex_reference_button(&self) -> impl IntoElement {
+/// The `?` trigger and quick-reference popover for the regex syntax —
+/// upstream's `HelpLink` + `detachablePopover` pair. The popover manages
+/// its own open state and closes on an outside click.
+fn regex_reference_button(&self) -> impl IntoElement {
         Popover::new("regex-reference")
             .trigger(
                 Button::new("regex-reference-trigger")
@@ -143,6 +143,29 @@ impl FindPanel {
                     .max_h(rems(9.))
                     .overflow_y_scroll()
                     .child(regular_expression_reference(cx))
+            })
+    }
+
+    /// The `⋯` trigger for the advanced find options — upstream's
+    /// *Advanced options* button and its `FindSettingsView` popover.
+    fn advanced_options_button(&self) -> impl IntoElement {
+        let workspace = self.workspace.clone();
+        Popover::new("find-advanced")
+            .trigger(
+                Button::new("find-advanced-trigger")
+                    .ghost()
+                    .compact()
+                    .icon(gpui_kit::assets::IconName::CircleEllipsis)
+                    .accessibility_label("Advanced options")
+                    .tooltip("Show advanced options"),
+            )
+            .content(move |_, _, cx| {
+                // Same window-bound limit as the quick reference.
+                div()
+                    .id("find-advanced-scroll")
+                    .max_h(rems(9.))
+                    .overflow_y_scroll()
+                    .child(advanced_find_options(&workspace, cx))
             })
     }
 
@@ -227,6 +250,7 @@ impl Render for FindPanel {
                 case_sensitive,
                 in_selection,
                 self.regex_reference_button().into_any_element(),
+                self.advanced_options_button().into_any_element(),
             ))
             // Upstream's panel is a three-part vertical split — the fields, the
             // result list, the buttons — and the middle part is collapsed until
@@ -1136,6 +1160,177 @@ impl FindPanel {
     }
 }
 
+/// The advanced find options popover — upstream's `FindSettingsView`: an
+/// untitled pair (*Wrap search around*, *Search incrementally*), then the
+/// *Textual Search* and *Regular Expression Search* sections.
+///
+/// Four switches whose behaviour SubText's engine cannot reproduce
+/// (strict equivalence, diacritics, width, TR#29 boundaries) are shown
+/// disabled with the reason in their tooltip, the way the settings panes
+/// handle unreachable toggles — none of them pretends to work.
+fn advanced_find_options(
+    workspace: &WeakEntity<Workspace>,
+    cx: &App,
+) -> gpui_kit::AnyElement {
+    let Some(workspace_entity) = workspace.upgrade() else {
+        return div().into_any_element();
+    };
+    let settings = &workspace_entity.read(cx).settings;
+    let wrap = settings.find_wrap_around;
+    let incremental = settings.find_searches_incrementally;
+    let whole_word = settings.find_whole_word;
+    let singleline = settings.find_regex_is_singleline;
+    let multiline = settings.find_regex_is_multiline;
+    let unescape = settings.find_regex_unescapes_replacement;
+    let weak = workspace.clone();
+
+    let header = |title: &'static str| {
+        div().font_weight(FontWeight::SEMIBOLD).child(title.to_string())
+    };
+    v_flex()
+        .w(rems(17.))
+        .gap_3()
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(cx.theme().secondary)
+                .child("Advanced Find Options"),
+        )
+        .child(
+            v_flex()
+                .gap_2()
+                .child(
+                    advanced_toggle(
+                        "find-adv-wrap",
+                        "Wrap search around",
+                        wrap,
+                        "",
+                        weak.clone(),
+                        |workspace, on| workspace.settings.find_wrap_around = on,
+                    ),
+                )
+                .child(
+                    advanced_toggle(
+                        "find-adv-incremental",
+                        "Search incrementally",
+                        incremental,
+                        "",
+                        weak.clone(),
+                        |workspace, on| {
+                            workspace.settings.find_searches_incrementally = on
+                        },
+                    ),
+                ),
+        )
+        .child(
+            v_flex()
+                .gap_2()
+                .child(header("Textual Search"))
+                .child(advanced_toggle(
+                    "find-adv-whole-word",
+                    "Match only whole words",
+                    whole_word,
+                    "Restrict search results to whole words.",
+                    weak.clone(),
+                        |workspace, on| workspace.settings.find_whole_word = on,
+                ))
+                .child(disabled_toggle(
+                    "find-adv-strict",
+                    "Distinguish characters strictly",
+                    "The regex engine has no strict character-equivalence mode.",
+                ))
+                .child(disabled_toggle(
+                    "find-adv-diacritics",
+                    "Ignore diacritical marks",
+                    "The regex engine cannot ignore diacritical marks.",
+                ))
+                .child(disabled_toggle(
+                    "find-adv-width",
+                    "Ignore width differences",
+                    "The regex engine cannot ignore character width.",
+                )),
+        )
+        .child(
+            v_flex()
+                .gap_2()
+                .child(header("Regular Expression Search"))
+                .child(advanced_toggle(
+                    "find-adv-singleline",
+                    "Dot matches line separators",
+                    singleline,
+                    "Allow . to match any character, including newline characters (singleline).",
+                    weak.clone(),
+                    |workspace, on| {
+                        workspace.settings.find_regex_is_singleline = on
+                    },
+                ))
+                .child(advanced_toggle(
+                    "find-adv-multiline",
+                    "Anchors match lines",
+                    multiline,
+                    "Allow ^ and $ to match the start and end of lines (multiline).",
+                    weak.clone(),
+                    |workspace, on| {
+                        workspace.settings.find_regex_is_multiline = on
+                    },
+                ))
+                .child(disabled_toggle(
+                    "find-adv-boundaries",
+                    "Use Unicode word boundaries",
+                    "The engine's \\b is already Unicode-aware; TR#29 boundaries are not implemented.",
+                ))
+                .child(advanced_toggle(
+                    "find-adv-unescape",
+                    "Unescape replacement text",
+                    unescape,
+                    "Unescape metacharacters with backslash in replacement text.",
+                    weak.clone(),
+                    |workspace, on| {
+                        workspace.settings.find_regex_unescapes_replacement = on
+                    },
+                )),
+        )
+        .into_any_element()
+}
+
+/// One live advanced-options switch: upstream's `Toggle` + `.help`, which
+/// writes the setting through and persists it.
+fn advanced_toggle(
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    tooltip: &'static str,
+    workspace: WeakEntity<Workspace>,
+    field: fn(&mut Workspace, bool),
+) -> Checkbox {
+    let checkbox = Checkbox::new(id).checked(checked).label(label);
+    let checkbox = if tooltip.is_empty() {
+        checkbox
+    } else {
+        checkbox.tooltip(tooltip)
+    };
+    checkbox.on_click(move |checked, _, cx| {
+        let checked = *checked;
+        workspace
+            .update(cx, |workspace, cx| {
+                field(workspace, checked);
+                let _ = workspace.settings.save();
+                cx.notify();
+            })
+            .ok();
+    })
+}
+
+/// One of the four switches SubText's engine cannot reproduce: shown with the
+/// upstream default and disabled, the reason in its tooltip.
+fn disabled_toggle(id: &'static str, label: &'static str, tooltip: &'static str) -> Checkbox {
+    Checkbox::new(id)
+        .checked(false)
+        .label(label)
+        .disabled(true)
+        .tooltip(tooltip)
+}
+
 /// The short result message, spelled the way upstream's `FindResult` spells it.
 ///
 /// `positionMessage` wins over `message` while one match is current — and it is
@@ -1152,13 +1347,15 @@ fn result_message(count: usize, current: usize, error: Option<&str>) -> Option<(
 
 /// The row of switches between the fields and the buttons. `regex_reference`
 /// is the quick-reference popover trigger upstream places right after the
-/// *Regular Expression* switch (its `HelpLink`).
+/// *Regular Expression* switch (its `HelpLink`); `advanced_options` is the
+/// `⋯` trigger at the row's trailing end.
 fn options_row(
     workspace: WeakEntity<Workspace>,
     regex: bool,
     case_sensitive: bool,
     in_selection: bool,
     regex_reference: gpui_kit::AnyElement,
+    advanced_options: gpui_kit::AnyElement,
 ) -> impl IntoElement {
     let switch = |id: &'static str, label: &'static str, checked: bool, field: fn(&mut Workspace, bool)| {
         let workspace = workspace.clone();
@@ -1202,6 +1399,7 @@ fn options_row(
             },
         ))
         .child(div().flex_1())
+        .child(advanced_options)
 }
 
 #[cfg(test)]

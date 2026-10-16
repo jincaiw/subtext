@@ -111,6 +111,14 @@
   *Basic Regular Expression Syntax* 速查 —— 五组定义（字符 / 锚点 / 量词 /
   扩展组 / 反向引用）逐条照搬，两列布局，尾部是通向 ICU 规范的外链。
   弹层在面板窗口内限高滚动（上游的可拖出 popover 能浮在窗口外，GPUI 做不到）。
+- **高级查找选项弹层**：字段行右端的 ⋯ 按钮弹出上游 `FindSettingsView` 的
+  三节十个开关。其中六个真实生效 —— *Wrap search around* 与
+  *Match only whole words* 是原有设置，*Search incrementally* 是新能力
+  （输入即搜，Find All 的结果表不受它影响），*Dot matches line separators*、
+  *Anchors match lines* 与 *Unescape replacement text* 接进正则引擎
+  （`^`/`$` 不再固定按行匹配，替换文本里的 `\n` 默认被解字）。另外四个
+  （严格逐字符等价、忽略变音符、忽略全半角宽度、TR#29 词边界）是 regex
+  引擎没有的能力：开关照列、禁用并在提示里说明原因。
 - **新增 *In Selection***：只在选区里查找。它是把搜索的 **scope** 收窄，匹配仍然是
   整篇的偏移量，所以编辑器选中它们时不需要换算。
 - **警告检查器按上游重排成两栏**：`Inspector ▸ Warnings` 原来是一列自己编的提示文字，
@@ -268,12 +276,12 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**652** 项测试全部通过（v0.1.0 是 124 项）：
+**654** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 379 |
-| `subtext-app` | 236 |
+| `subtext-core` | 381 |
+| `subtext-app` | 238 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |

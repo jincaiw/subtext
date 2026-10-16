@@ -111,6 +111,8 @@ impl Query {
             wrap_around: false,
             escape_sequences: false,
             in_selection: false,
+            singleline: false,
+            multiline: true,
         };
         Searcher::new(&self.find_string, &options)
             .map_err(|error| QueryError::InvalidRegularExpression(error.to_string()))

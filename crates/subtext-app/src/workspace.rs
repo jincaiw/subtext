@@ -361,6 +361,7 @@ pub struct Workspace {
     next_document_id: u64,
     find: FindState,
     find_query: Entity<InputState>,
+    _find_query_changes: Subscription,
     find_replacement: Entity<InputState>,
     /// The result-table rows the user has selected, as a set of match ranges.
     ///
@@ -524,6 +525,17 @@ impl Workspace {
             .unwrap_or_else(|| themes.default_theme().clone());
 
         let find_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+        // Typing in the find field searches as it goes — upstream's
+        // `findSearchesIncrementally`, default on. The search leaves the
+        // *Find All* table alone; it only updates the match state.
+        let find_query_changes = cx.subscribe(
+            &find_query,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.incremental_search(cx);
+                }
+            },
+        );
         // Upstream's second placeholder is *Replace with*, not *Replace* — it is
         // a prepositional phrase there, and the panel's window title already
         // says which command this is.
@@ -585,6 +597,7 @@ impl Workspace {
             next_document_id: 1,
             find: FindState::default(),
             find_query,
+            _find_query_changes: find_query_changes,
             find_replacement,
             find_selected_ranges: Vec::new(),
             find_selection_anchor: None,
@@ -2086,9 +2099,6 @@ impl Workspace {
     /// *Find All* pass, and a stale row would point at a range the new query
     /// never produced. Upstream collapses the result view on the same events.
     pub fn refresh_matches(&mut self, cx: &mut Context<Self>) {
-        let Some(text) = self.active_text(cx) else {
-            return;
-        };
         let was_open = self.find.results_open;
         self.find.results.clear();
         self.find.capture_matches.clear();
@@ -2102,6 +2112,38 @@ impl Workspace {
         if was_open {
             self.resize_find_panel(cx);
         }
+        self.run_search(cx);
+    }
+
+    /// Search again without touching the *Find All* result table — upstream's
+    /// `incrementalSearch`. It updates the match state only: the rows belong
+    /// to the last *Find All* pass and keep showing it.
+    ///
+    /// Upstream's `shouldSearchIncrementally` gates this the same way: the
+    /// setting is on, the search is not scoped to the selection, and the query
+    /// is neither empty nor (for a regex) invalid.
+    pub fn incremental_search(&mut self, cx: &mut Context<Self>) {
+        if !self.settings.find_searches_incrementally || self.settings.find_in_selection {
+            return;
+        }
+        if self.query(cx).is_empty() {
+            return;
+        }
+        if self.settings.find_regex {
+            // An invalid regex would only clear the state on every keystroke;
+            // upstream's guard skips the search instead.
+            if finder::Searcher::new(&self.query(cx), &self.find_options()).is_err() {
+                return;
+            }
+        }
+        self.run_search(cx);
+    }
+
+    /// The search itself, shared by the full refresh and the incremental one.
+    fn run_search(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
         let query = self.query(cx);
         if query.is_empty() {
             self.find.matches.clear();
@@ -2546,7 +2588,13 @@ impl Workspace {
         let Some(text) = self.active_text(cx) else {
             return;
         };
-        let replacement = self.replacement(cx);
+        let replacement = if self.settings.find_regex
+            && self.settings.find_regex_unescapes_replacement
+        {
+            finder::unescape(&self.replacement(cx))
+        } else {
+            self.replacement(cx)
+        };
         let searcher = match finder::Searcher::new(&self.query(cx), &self.find_options()) {
             Ok(searcher) => searcher,
             Err(error) => {
@@ -2595,7 +2643,16 @@ impl Workspace {
                 return;
             }
         };
-        let replacement = self.replacement(cx);
+        let typed_replacement = self.replacement(cx);
+        // The message compares against what the user typed, so it records the
+        // raw text; the unescaping happens only where the replacement runs.
+        let replacement = if self.settings.find_regex
+            && self.settings.find_regex_unescapes_replacement
+        {
+            finder::unescape(&typed_replacement)
+        } else {
+            typed_replacement.clone()
+        };
         // *In Selection* narrows the scope rather than the pattern: the
         // matches come back as offsets into the whole buffer either way, so
         // nothing downstream has to know the search was bounded.
@@ -2616,7 +2673,7 @@ impl Workspace {
         // was — upstream notifies "0 replaced" and notes the history all the
         // same; only an empty string is skipped, by the append guard.
         self.note_replace_history(cx);
-        self.find.replace_result = Some((count, replacement.clone()));
+        self.find.replace_result = Some((count, typed_replacement.clone()));
         if count == 0 {
             self.set_status("No matches", cx);
             return;
