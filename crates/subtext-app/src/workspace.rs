@@ -287,6 +287,12 @@ pub struct FindState {
     /// Upstream's middle split item is collapsed until a *Find All* finds
     /// something, and the panel's own chevron collapses it again.
     pub results_open: bool,
+    /// The last replace action's outcome, as the count and the replacement
+    /// text it ran with — the `"\(count) replaced"` message the panel draws at
+    /// the replacement field's trailing edge, shown only while the field still
+    /// holds that text, the way upstream clears it in
+    /// `onChange(of: replacementString)`.
+    pub replace_result: Option<(usize, String)>,
 }
 
 /// The **Find & Replace** panel's window size, in points.
@@ -2087,9 +2093,11 @@ impl Workspace {
         self.find.results.clear();
         self.find.capture_matches.clear();
         // The rows are about to be rebuilt, so no selection can survive: the
-        // same pass upstream prunes stale ids with.
+        // same pass upstream prunes stale ids with. The replace message also
+        // dies with its query, upstream's `onChange(of: findString)`.
         self.find_selected_ranges.clear();
         self.find_selection_anchor = None;
+        self.find.replace_result = None;
         self.find.results_open = false;
         if was_open {
             self.resize_find_panel(cx);
@@ -2146,6 +2154,10 @@ impl Workspace {
     /// Step through the matches, wrapping at either end when the settings say
     /// to — CotEditor's default is to wrap.
     pub fn find_step(&mut self, forward: bool, cx: &mut Context<Self>) {
+        // Every find command lands the query in the history, matched or not —
+        // upstream notes it after the beep as well; only the empty string is
+        // skipped, which the append guard handles.
+        self.note_find_history(cx);
         if self.find.matches.is_empty() {
             self.refresh_matches(cx);
         }
@@ -2187,6 +2199,7 @@ impl Workspace {
             self.find.results_open = true;
             self.resize_find_panel(cx);
         }
+        self.note_find_history(cx);
         self.set_status(format!("{count} match(es)"), cx);
     }
 
@@ -2310,6 +2323,12 @@ impl Workspace {
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(lines.join("\n")));
     }
 
+    /// The last replace action's outcome — the count and the replacement text
+    /// it ran with — for the panel's replacement-field message.
+    pub fn replace_result_message(&self) -> Option<(usize, String)> {
+        self.find.replace_result.clone()
+    }
+
     /// Whether the result table is the keyboard focus target.
     pub fn find_results_focused(&self) -> bool {
         self.find_results_focused
@@ -2383,6 +2402,79 @@ impl Workspace {
     /// CotEditor is that Highlight All paints without selecting.
     pub fn highlight_all(&mut self, cx: &mut Context<Self>) {
         self.find_all(cx);
+    }
+
+    /// Record the current find string in the recent-searches history —
+    /// upstream's `noteFindHistory`, which every find action calls (the
+    /// incremental ones aside, which SubText does not have). An empty query is
+    /// never recorded, upstream's `appendHistory` guard.
+    fn note_find_history(&mut self, cx: &mut Context<Self>) {
+        let value = self.query(cx).to_string();
+        if value.is_empty() {
+            return;
+        }
+        self.settings.find_history = crate::find_panel::append_unique_history(
+            std::mem::take(&mut self.settings.find_history),
+            value,
+        );
+        let _ = self.settings.save();
+    }
+
+    /// Record the current find **and** replacement strings — upstream's
+    /// `noteReplaceHistory`, which every replace action calls.
+    fn note_replace_history(&mut self, cx: &mut Context<Self>) {
+        let find = self.query(cx).to_string();
+        let replace = self.replacement(cx).to_string();
+        if !find.is_empty() {
+            self.settings.find_history = crate::find_panel::append_unique_history(
+                std::mem::take(&mut self.settings.find_history),
+                find,
+            );
+        }
+        if !replace.is_empty() {
+            self.settings.replace_history = crate::find_panel::append_unique_history(
+                std::mem::take(&mut self.settings.replace_history),
+                replace,
+            );
+        }
+        let _ = self.settings.save();
+    }
+
+    /// Empty one of the histories — the menus' *Clear Recent …* item.
+    pub fn clear_find_history(&mut self, cx: &mut Context<Self>) {
+        self.settings.find_history.clear();
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    /// Empty the replacement history — the replacement menu's *Clear* item.
+    pub fn clear_replace_history(&mut self, cx: &mut Context<Self>) {
+        self.settings.replace_history.clear();
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    /// Fill one of the two fields from a history menu, **without** starting a
+    /// search — upstream writes the binding, and a binding write does not run
+    /// the text view's action.
+    pub fn set_find_field(
+        &mut self,
+        field: crate::find_panel::FindField,
+        value: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match field {
+            crate::find_panel::FindField::Query => {
+                self.find_query
+                    .update(cx, |state, cx| state.set_value(&value, window, cx));
+            }
+            crate::find_panel::FindField::Replacement => {
+                self.find_replacement
+                    .update(cx, |state, cx| state.set_value(&value, window, cx));
+            }
+        }
+        cx.notify();
     }
 
     pub fn clear_highlights(&mut self, cx: &mut Context<Self>) {
@@ -2482,6 +2574,10 @@ impl Workspace {
             });
         });
 
+        // Upstream's `replaceAndFind` notes both histories and reports the
+        // single replacement at the replacement field.
+        self.note_replace_history(cx);
+        self.find.replace_result = Some((1, replacement.clone()));
         self.refresh_matches(cx);
         self.find_step(true, cx);
     }
@@ -2516,6 +2612,11 @@ impl Workspace {
             finder::ReplacementSyntax::Regex,
             &scope,
         );
+        // The histories and the field message are recorded whatever the count
+        // was — upstream notifies "0 replaced" and notes the history all the
+        // same; only an empty string is skipped, by the append guard.
+        self.note_replace_history(cx);
+        self.find.replace_result = Some((count, replacement.clone()));
         if count == 0 {
             self.set_status("No matches", cx);
             return;

@@ -233,6 +233,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.22 | 查找面板改成独立的浮动窗口 | 上游 `FindPanelController` 是 `NSPanel`（标题 *Find & Replace*），内容是三段纵向布局；SubText 是窗口内的一条横条。顺带补上 *In Selection*。**照抄注释会写错三处**：位置消息是 `1/4` 不是 `1 of 4`、消息是字段的尾随附件不是独立一行、焦点必须给在面板自己的窗口里 | ✅ |
 | 8.23 | *Find All* 的结果列表 | §8.22 之后面板中间那一段还空着 —— 上游是**三段**纵向 split，中间是默认收起、打开占 200 点的结果表。顺带查出结果表的行号是**六种**换行符的口径，而 `textops` 里已有的扫描器只有三种 | ✅ |
 | 8.24 | 结果表多选、高亮与标准字号命令 | DataTable 实体归 `FindPanel`（唯一有 `Context<TableState<_>>` 的地方），delegate 无状态地 live-read Workspace：行、选择集（match range 为稳定身份）、显示序都只有 Workspace 一份。修饰键选择在 cell `on_mouse_down` 读 `MouseDownEvent.modifiers`（组件在行点击处 stop_propagation，外层拿不到）；重叠捕获组按「最细参与组赢」逐字节归属（上游 addAttribute 后写覆盖）；⌘C 与 Copy 菜单、Bigger/Smaller/ResetFont 按 `find_results_focused` 先于编辑器 fallback 分流；Line 列可排序（`range.location` 键），排序原地重排 `find.results` 保持单一显示序。捕获序列基色实测 `controlAccentColor`（genericRGB HSB 0.6085/0.9591/0.9984）α0.4 色相均分 | 完成 |
+| 8.25 | 查找面板的历史菜单与替换结果消息 | 上游 `HistoryMenu`：两个字段左上角各一个 icon-only 菜单（放大镜 / 铅笔），读 `UserDefaults` 的 `findHistory` / `replaceHistory`（上限 20、去重后追加尾部、空串不记）；条目 >64 字符显示截断，点击只填字段不触发搜索；尾部 *Clear Recent …* 空历史时禁用。**文字内边距是关键**：上游 `FindPanelTextClipView` 写明 `leadingPadding = 32 // for history button`、`trailingPadding = 24 // for clear button`，SubText 用 `pl(32)/pr(24)` 还原。替换动作（Replace / Replace All）同时记两个历史并在替换字段尾随边缘显示 `"N replaced"`，替换文本一变即清（`onChange(of: replacementString)`）。数据在 `Settings.find_history` / `replace_history` + `FindState.replace_result`，规则抽纯函数 `append_unique_history` | 完成 |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2429,7 +2430,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（651 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（652 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在 `a9bc177`、§8.23 落在 `73071fb`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**§8.24 落在 `f3ef4e3`（实现）与 `2150f38`（发布文档同步：CHANGELOG 扩写 Find All 条目、测试数 651、缺口表清理三条已解决项），标签移到 `2150f38`**，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 按它重建，打包后的 bundle 再冒烟一次（存活 6 秒、stderr 0 字节）。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
@@ -2452,8 +2453,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
 | `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
 | 查找面板没有正则速查与高级选项弹层 | 上游字段行两端各有一个（`RegularExpressionReferenceView` / `FindSettingsView` 的 10 个开关）；SubText 的三个复选框覆盖其中三个。 |
-| 查找面板没有 Recent Searches / Recent Replacements 历史菜单 | 上游两个字段的附件行左边各有一个 `HistoryMenu`（最多 64 字符截断 + *Clear Recent…*），值存在 `UserDefaults` 里。SubText 没有「最近查找」的持久化存储，附件行只有消息与清空按钮。 |
-| 替换字段没有自己的结果消息 | 上游替换字段的附件显示 `.replace` 动作的结果（`"\(count) replaced"`）；SubText 的 `FindState` 只记查找结果，不记「刚才替换了几个」。 |
+| 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
 | 查找面板不记住窗口位置 | 上游 `windowFrameAutosaveName = "Find Panel"`；SubText 每次居中打开。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
 | 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |

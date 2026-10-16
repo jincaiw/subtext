@@ -584,6 +584,11 @@ pub const DEFAULT_OUTLINE_FONT_SIZE: f32 = 11.0;
 /// points, and the floor its *Smaller* command stops at.
 pub const DEFAULT_FIND_RESULT_FONT_SIZE: f32 = 11.0;
 
+/// How many entries each find-panel history keeps, latest last.
+///
+/// Upstream's `TextFinderSettings.maximumRecents`.
+pub const FIND_HISTORY_LIMIT: usize = 20;
+
 /// The sidebar's three width constraints, in rem.
 ///
 /// The minimum is where a file name and its icon still fit, the default is what
@@ -664,6 +669,15 @@ pub struct Settings {
     /// is the one surface the user is expected to zoom independently of the
     /// rest of the panel.
     pub find_result_font_size: f32,
+
+    /// The recent find strings, latest last — upstream's `findHistory`.
+    ///
+    /// The two history menus in the find panel read these; a find or replace
+    /// action appends to them (deduplicated, at most [`FIND_HISTORY_LIMIT`]
+    /// entries) the same way upstream appends to `UserDefaults`.
+    pub find_history: Vec<String>,
+    /// The recent replacement strings, latest last — upstream's `replaceHistory`.
+    pub replace_history: Vec<String>,
 
     /// Accept `rmate` connections from a remote host.
     pub enables_remote_editing: bool,
@@ -803,6 +817,8 @@ impl Default for Settings {
             find_whole_word: false,
             find_in_selection: false,
             find_result_font_size: DEFAULT_FIND_RESULT_FONT_SIZE,
+            find_history: Vec::new(),
+            replace_history: Vec::new(),
             enables_remote_editing: false,
             remote_editing_port: 52698,
             // CotEditor's `colorCodeType` default is `1`, which is `Hex`.

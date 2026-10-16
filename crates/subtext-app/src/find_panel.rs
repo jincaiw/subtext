@@ -30,20 +30,21 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
-    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     table::{Column, ColumnSort, DataTable, TableDelegate, TableState},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, Focusable as _, FontWeight, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render, Styled as _, Subscription,
-    WeakEntity, Window, div, hsla, px, rems,
+    Anchor, App, AppContext as _, Context, Entity, Focusable as _, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render,
+    Styled as _, Subscription, WeakEntity, Window, div, hsla, px, rems,
 };
 
 use subtext_core::findresult::CELL_HEAD_OFFSET;
 use subtext_core::truncate_head_with_ranges;
 
+use crate::settings::FIND_HISTORY_LIMIT;
 use crate::workspace::Workspace;
 
 /// How tall the two text fields are.
@@ -170,6 +171,19 @@ impl Render for FindPanel {
         } else {
             result_message(count, current, error.as_deref())
         };
+        // The replacement field's own message: only a *replace* action's
+        // result, and only while the field still holds the text it ran with —
+        // upstream clears it in `onChange(of: replacementString)`.
+        let replacement_value = replacement.read(cx).value().to_string();
+        let replace_message = if replacement_value.is_empty() {
+            None
+        } else {
+            workspace
+                .read(cx)
+                .replace_result_message()
+                .filter(|(_, text)| *text == replacement_value)
+                .map(|(count, _)| (format!("{count} replaced"), false))
+        };
 
         v_flex()
             .size_full()
@@ -177,8 +191,8 @@ impl Render for FindPanel {
             .p_4()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.render_field(&query, message, window, cx))
-            .child(self.render_field(&replacement, None, window, cx))
+            .child(self.render_field(&query, message, FindField::Query, window, cx))
+            .child(self.render_field(&replacement, replace_message, FindField::Replacement, window, cx))
             .child(options_row(
                 self.workspace.clone(),
                 regex,
@@ -709,6 +723,29 @@ pub(crate) fn apply_row_selection(
     (vec![visible[target].clone()], Some(target))
 }
 
+/// Which of the panel's two fields a history menu (or a fill action) speaks to.
+///
+/// Public because [`Workspace::set_find_field`] takes one; the menus are this
+/// module's UI, but filling a field is a workspace action.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FindField {
+    Query,
+    Replacement,
+}
+
+/// Append `value` to a find-panel history: deduplicated, latest last, capped at
+/// [`FIND_HISTORY_LIMIT`] entries — upstream's `Collection.appendUnique`,
+/// which `TextFinderSettings.appendHistory` wraps. An empty value is the
+/// caller's business: upstream guards it there, and so does ours.
+pub(crate) fn append_unique_history(mut history: Vec<String>, value: String) -> Vec<String> {
+    history.retain(|entry| *entry != value);
+    history.push(value);
+    if history.len() > FIND_HISTORY_LIMIT {
+        history.drain(..history.len() - FIND_HISTORY_LIMIT);
+    }
+    history
+}
+
 impl FindPanel {
     /// One of the panel's two text fields.
     ///
@@ -725,6 +762,7 @@ impl FindPanel {
         &self,
         state: &Entity<InputState>,
         message: Option<(String, bool)>,
+        history: FindField,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -736,8 +774,26 @@ impl FindPanel {
             cx.theme().border
         };
         let state = state.clone();
+        let histories = self
+            .workspace
+            .upgrade()
+            .map(|workspace| {
+                let settings = &workspace.read(cx).settings;
+                match history {
+                    FindField::Query => &settings.find_history,
+                    FindField::Replacement => &settings.replace_history,
+                }
+                .clone()
+            })
+            .unwrap_or_default();
+        let workspace = self.workspace.clone();
+        let (menu_title, clear_title) = match history {
+            FindField::Query => ("Recent Searches", "Clear Recent Searches"),
+            FindField::Replacement => ("Recent Replacements", "Clear Recent Replacements"),
+        };
 
         div()
+            .relative()
             .h(rems(FIELD_HEIGHT))
             .w_full()
             .rounded(px(7.))
@@ -745,11 +801,23 @@ impl FindPanel {
             .border_color(border)
             .overflow_hidden()
             .child(
-                Input::new(&state)
-                    .appearance(false)
+                // The text area keeps clear of the two overlays — upstream's
+                // `FindPanelTextClipView` narrows the text the same way:
+                // 32 points leading for the history button, 24 trailing for
+                // the clear one. (The replacement field's message then adds
+                // its own trailing inset through `Input::suffix`, which is
+                // upstream's `contentInsets` layering on top.)
+                div()
                     .w_full()
                     .h_full()
-                    .when_some(message, |input, (text, is_error)| {
+                    .pl(px(32.))
+                    .pr(px(24.))
+                    .child(
+                        Input::new(&state)
+                            .appearance(false)
+                            .w_full()
+                            .h_full()
+                            .when_some(message, |input, (text, is_error)| {
                         input.suffix(
                             h_flex()
                                 .gap_1()
@@ -782,6 +850,76 @@ impl FindPanel {
                                 ),
                         )
                     }),
+            ),
+            )
+            .child(
+                // Upstream overlays the history menu at the field's top-leading
+                // corner — an icon-only `Menu`, 34 points of its own.
+                div().absolute().top_1().left_1().child(
+                    Button::new(("find-history", history as usize))
+                        .ghost()
+                        .compact()
+                        .icon(match history {
+                            FindField::Query => gpui_kit::assets::IconName::Search,
+                            FindField::Replacement => gpui_kit::assets::IconName::Pencil,
+                        })
+                        .accessibility_label(menu_title)
+                        .tooltip(menu_title)
+                        .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _, _| {
+                            let mut menu = menu;
+                            if !histories.is_empty() {
+                                menu = menu.item(PopupMenuItem::label(menu_title));
+                                for entry in &histories {
+                                    // Entries past 64 characters show truncated
+                                    // with an ellipsis, upstream's title rule.
+                                    let shown: String = if entry.chars().count() <= 64 {
+                                        entry.clone()
+                                    } else {
+                                        let head: String = entry.chars().take(64).collect();
+                                        format!("{head}…")
+                                    };
+                                    let workspace = workspace.clone();
+                                    let value = entry.clone();
+                                    menu = menu.item(
+                                        PopupMenuItem::new(shown).on_click(
+                                            move |_, window, cx| {
+                                                workspace
+                                                    .update(cx, |workspace, cx| {
+                                                        workspace.set_find_field(
+                                                            history,
+                                                            value.clone(),
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    })
+                                                    .ok();
+                                            },
+                                        ),
+                                    );
+                                }
+                                menu = menu.separator();
+                            }
+                            let workspace = workspace.clone();
+                            menu.item(
+                                PopupMenuItem::new(clear_title)
+                                    .disabled(histories.is_empty())
+                                    .on_click(move |_, _, cx| {
+                                        match history {
+                                            FindField::Query => workspace
+                                                .update(cx, |workspace, cx| {
+                                                    workspace.clear_find_history(cx)
+                                                })
+                                                .ok(),
+                                            FindField::Replacement => workspace
+                                                .update(cx, |workspace, cx| {
+                                                    workspace.clear_replace_history(cx)
+                                                })
+                                                .ok(),
+                                        };
+                                    }),
+                            )
+                        }),
+                    ),
             )
     }
 
@@ -926,7 +1064,11 @@ fn options_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_row_selection, hsb_components_to_hsl, highlighter_colors, result_message};
+    use super::{
+        append_unique_history, apply_row_selection, hsb_components_to_hsl, highlighter_colors,
+        result_message,
+    };
+    use crate::settings::FIND_HISTORY_LIMIT;
 
     #[test]
     fn a_plain_click_selects_one_row_and_moves_the_anchor() {
@@ -1007,6 +1149,25 @@ mod tests {
             assert!((color.l - l).abs() < 1e-4);
             assert_eq!(color.a, 0.4);
         }
+    }
+
+    #[test]
+    fn appending_to_a_history_deduplicates_moves_to_the_end_and_caps() {
+        let history = append_unique_history(Vec::new(), "a".into());
+        let history = append_unique_history(history, "b".into());
+        assert_eq!(history, vec!["a", "b"]);
+
+        // A repeat moves the entry to the end rather than being ignored.
+        let history = append_unique_history(history, "a".into());
+        assert_eq!(history, vec!["b", "a"]);
+
+        let mut history = (0..FIND_HISTORY_LIMIT as u32)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>();
+        history = append_unique_history(history, "new".into());
+        assert_eq!(history.len(), FIND_HISTORY_LIMIT);
+        assert_eq!(history.first().unwrap(), "1");
+        assert_eq!(history.last().unwrap(), "new");
     }
 
     #[test]
