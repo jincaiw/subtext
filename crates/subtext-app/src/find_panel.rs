@@ -31,6 +31,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    popover::Popover,
     table::{Column, ColumnSort, DataTable, TableDelegate, TableState},
     v_flex,
 };
@@ -38,7 +39,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, App, AppContext as _, Context, Entity, Focusable as _, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render,
-    Styled as _, Subscription, WeakEntity, Window, div, hsla, px, rems,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, hsla, px,
+    rems,
 };
 
 use subtext_core::findresult::CELL_HEAD_OFFSET;
@@ -116,6 +118,32 @@ impl FindPanel {
             }))
         };
         Self { workspace, table, _results_blur: blur }
+    }
+
+    /// The `?` trigger and quick-reference popover for the regex syntax —
+    /// upstream's `HelpLink` + `detachablePopover` pair. The popover manages
+    /// its own open state and closes on an outside click.
+    fn regex_reference_button(&self) -> impl IntoElement {
+        Popover::new("regex-reference")
+            .trigger(
+                Button::new("regex-reference-trigger")
+                    .ghost()
+                    .compact()
+                    .icon(gpui_kit::assets::IconName::CircleQuestionMark)
+                    .accessibility_label("Show quick reference")
+                    .tooltip("Show quick reference for regular expression syntax."),
+            )
+            .content(|_, _, cx| {
+                // The panel window is short, and a GPUI overlay cannot leave
+                // its window the way upstream's detachable popover can — so
+                // the reference scrolls inside the panel instead, and its full
+                // height is reached by making the window taller.
+                div()
+                    .id("regex-reference-scroll")
+                    .max_h(rems(9.))
+                    .overflow_y_scroll()
+                    .child(regular_expression_reference(cx))
+            })
     }
 
     /// Run a command on the document window.
@@ -198,6 +226,7 @@ impl Render for FindPanel {
                 regex,
                 case_sensitive,
                 in_selection,
+                self.regex_reference_button().into_any_element(),
             ))
             // Upstream's panel is a three-part vertical split — the fields, the
             // result list, the buttons — and the middle part is collapsed until
@@ -746,6 +775,115 @@ pub(crate) fn append_unique_history(mut history: Vec<String>, value: String) -> 
     history
 }
 
+// The regular-expression quick reference, entry for entry upstream's
+// `RegularExpressionReferenceView.Definition` tables. It is data, not prose —
+// the panel's help popover renders these tables verbatim.
+const REGEX_CHARACTERS: &[(&str, &str)] = &[
+    (".", "any character"),
+    (r"\R", "new line character"),
+    (r"\t", "tab character"),
+    (r"\w", "word character"),
+    (r"\s", "whitespace character"),
+    (r"\S", "non-whitespace character"),
+    (r"\d", "decimal number"),
+    ("[A-Z]", "any character in range A to Z"),
+    ("[^A-Z]", "any character not in range A to Z"),
+];
+const REGEX_ANCHORS: &[(&str, &str)] = &[
+    ("^", "beginning of the line"),
+    ("$", "end of the line"),
+    (r"\b", "word boundary"),
+];
+const REGEX_QUANTIFIERS: &[(&str, &str)] = &[
+    ("?", "1 or 0 times"),
+    ("*", "0 or more times"),
+    ("+", "1 or more times"),
+    ("{n,m}", "at least n but not more than m times"),
+    ("{n,}", "at least n times"),
+    ("{,n}", "at least 0 but not more than n times"),
+    ("{n}", "n times"),
+];
+const REGEX_EXTENDED_GROUPS: &[(&str, &str)] = &[
+    ("(?=subexp)", "look-ahead"),
+    ("(?<=subexp)", "look-behind"),
+];
+const REGEX_BACK_REFERENCE: &[(&str, &str)] = &[("$1", "first match")];
+
+/// One titled group of the reference — upstream's `DefinitionList`: a
+/// semibold secondary heading over a term/description list.
+fn definition_list(
+    title: &'static str,
+    definitions: &[(&'static str, &'static str)],
+    cx: &App,
+) -> gpui_kit::Div {
+    let mut list = v_flex().gap_1().min_w(rems(12.5)).child(
+        div()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(cx.theme().secondary)
+            .child(title.to_string()),
+    );
+    for (term, description) in definitions {
+        list = list.child(
+            h_flex()
+                .gap_2()
+                .child(div().font_weight(FontWeight::MEDIUM).child(term.to_string()))
+                .child(div().child(description.to_string())),
+        );
+    }
+    list
+}
+
+/// The reference panel's content — upstream's `RegularExpressionReferenceView`:
+/// a two-column layout of five definition groups, then the engine note with
+/// its ICU link.
+fn regular_expression_reference(cx: &App) -> gpui_kit::AnyElement {
+    let icu_url = "https://unicode-org.github.io/icu/userguide/strings/regexp.html";
+    let secondary = cx.theme().secondary;
+    v_flex()
+        .gap_3()
+        .child(
+            div()
+                .text_xl()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("Basic Regular Expression Syntax"),
+        )
+        .child(
+            h_flex()
+                .items_start()
+                .gap_3()
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(definition_list("Characters", REGEX_CHARACTERS, cx))
+                        .child(definition_list("Anchors", REGEX_ANCHORS, cx)),
+                )
+                .child(
+                    // A one-physical-pixel divider between the two columns.
+                    div().w(px(1.)).h_full().bg(cx.theme().border),
+                )
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(definition_list("Quantifiers", REGEX_QUANTIFIERS, cx))
+                        .child(definition_list("Extended Groups", REGEX_EXTENDED_GROUPS, cx))
+                        .child(definition_list("Back Reference", REGEX_BACK_REFERENCE, cx)),
+                ),
+        )
+        .child(
+            h_flex()
+                .justify_end()
+                .text_color(secondary)
+                .child("The syntax conforms to the ")
+                .child(
+                    gpui_kit::base::Link::new("regex-icu-link")
+                        .href(icu_url)
+                        .child("ICU Regular Expressions"),
+                )
+                .child(" specifications."),
+        )
+        .into_any_element()
+}
+
 impl FindPanel {
     /// One of the panel's two text fields.
     ///
@@ -1012,12 +1150,15 @@ fn result_message(count: usize, current: usize, error: Option<&str>) -> Option<(
     }
 }
 
-/// The row of switches between the fields and the buttons.
+/// The row of switches between the fields and the buttons. `regex_reference`
+/// is the quick-reference popover trigger upstream places right after the
+/// *Regular Expression* switch (its `HelpLink`).
 fn options_row(
     workspace: WeakEntity<Workspace>,
     regex: bool,
     case_sensitive: bool,
     in_selection: bool,
+    regex_reference: gpui_kit::AnyElement,
 ) -> impl IntoElement {
     let switch = |id: &'static str, label: &'static str, checked: bool, field: fn(&mut Workspace, bool)| {
         let workspace = workspace.clone();
@@ -1043,6 +1184,7 @@ fn options_row(
         .child(switch("find-regex", "Regular Expression", regex, |workspace, on| {
             workspace.settings.find_regex = on;
         }))
+        .child(regex_reference)
         .child(switch(
             "find-case",
             "Ignore Case",

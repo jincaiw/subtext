@@ -234,6 +234,7 @@ v0.1.0 的设置窗口是**照猜测写的**：上游有 9 个面板，SubText �
 | 8.23 | *Find All* 的结果列表 | §8.22 之后面板中间那一段还空着 —— 上游是**三段**纵向 split，中间是默认收起、打开占 200 点的结果表。顺带查出结果表的行号是**六种**换行符的口径，而 `textops` 里已有的扫描器只有三种 | ✅ |
 | 8.24 | 结果表多选、高亮与标准字号命令 | DataTable 实体归 `FindPanel`（唯一有 `Context<TableState<_>>` 的地方），delegate 无状态地 live-read Workspace：行、选择集（match range 为稳定身份）、显示序都只有 Workspace 一份。修饰键选择在 cell `on_mouse_down` 读 `MouseDownEvent.modifiers`（组件在行点击处 stop_propagation，外层拿不到）；重叠捕获组按「最细参与组赢」逐字节归属（上游 addAttribute 后写覆盖）；⌘C 与 Copy 菜单、Bigger/Smaller/ResetFont 按 `find_results_focused` 先于编辑器 fallback 分流；Line 列可排序（`range.location` 键），排序原地重排 `find.results` 保持单一显示序。捕获序列基色实测 `controlAccentColor`（genericRGB HSB 0.6085/0.9591/0.9984）α0.4 色相均分 | 完成 |
 | 8.25 | 查找面板的历史菜单与替换结果消息 | 上游 `HistoryMenu`：两个字段左上角各一个 icon-only 菜单（放大镜 / 铅笔），读 `UserDefaults` 的 `findHistory` / `replaceHistory`（上限 20、去重后追加尾部、空串不记）；条目 >64 字符显示截断，点击只填字段不触发搜索；尾部 *Clear Recent …* 空历史时禁用。**文字内边距是关键**：上游 `FindPanelTextClipView` 写明 `leadingPadding = 32 // for history button`、`trailingPadding = 24 // for clear button`，SubText 用 `pl(32)/pr(24)` 还原。替换动作（Replace / Replace All）同时记两个历史并在替换字段尾随边缘显示 `"N replaced"`，替换文本一变即清（`onChange(of: replacementString)`）。数据在 `Settings.find_history` / `replace_history` + `FindState.replace_result`，规则抽纯函数 `append_unique_history` | 完成 |
+| 8.26 | 正则速查弹层 | 上游 `RegularExpressionReferenceView` 的五组定义（Characters 9 / Anchors 3 / Quantifiers 7 / Extended Groups 2 / Back Reference 1）逐条照搬为数据常量，两列布局 + 1px 分隔线 + ICU 外链说明（`base::Link`，外链用 Link 是设计规范的分界）。触发是选项行 *Regular Expression* 右侧的 ？ 按钮（组件 Popover 非受控：自带点击切换与点外关闭）。**形态差异**：上游是可拖出窗口的 `detachablePopover`，GPUI overlay 无法离开窗口 —— 弹层限高 9rem（窗口最小 150pt 内必完整）内容滚动，缺口表记账。上游尾部的 HelpLink（本地帮助锚点 `about_regex`）省略，SubText 无帮助系统 | 完成 |
 
 **非目标（v0.2 仍不做）**：打印、AppleScript（`Help ▸ AppleScript Dictionary`，
 即让别的应用驱动 CotEditor 的 scripting dictionary）、书写方向 RTL、工具栏自定义。
@@ -2452,7 +2453,8 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
 | `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
-| 查找面板没有正则速查与高级选项弹层 | 上游字段行两端各有一个（`RegularExpressionReferenceView` / `FindSettingsView` 的 10 个开关）；SubText 的三个复选框覆盖其中三个。 |
+| 正则速查弹层在窗口内限高滚动 | 上游的 `detachablePopover` 可以拖出窗口自由悬浮，内容完整展开；GPUI 的 overlay 无法离开窗口，弹层限高 9rem 内容滚动（§8.26）。上游尾部还有指向本地帮助的 HelpLink（`about_regex` 锚点），SubText 没有帮助系统，省略。 |
+| 查找面板没有高级选项弹层 | 上游字段行右端的 ellipsis 按钮弹出 `FindSettingsView`（增量搜索、替换转义等 10 个开关）；SubText 尚未做这颗按钮与弹层。 |
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
 | 查找面板不记住窗口位置 | 上游 `windowFrameAutosaveName = "Find Panel"`；SubText 每次居中打开。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
