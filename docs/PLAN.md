@@ -2457,14 +2457,25 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 11.1 | 自动补全 *Suggest completions while typing*（上游插入后 250ms 防抖 + 词前缀/长度/后邻条件；面板开关当前禁用） | 待办 |
-| 11.2 | Find All 按钮的下拉（*Highlight All* 可做；*Select All* 需编辑器多选） | 待办 |
-| 11.3 | 查找面板记住窗口位置与大小（上游 `windowFrameAutosaveName`） | 待办 |
+| 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（编辑器无多选，禁用） | ✅ |
+| 11.3 | 查找面板记住窗口位置与大小：`Settings.find_panel_frame`（x/y/w/h），`show_find` 新建路径以 `WindowBounds::Windowed` 恢复、激活与 `resize_find_panel` 时记录（上游由 macOS 自动存，SubText 在 workspace 触碰面板的时刻存）。探针实测：存储帧 [700,422,520,222] 重启后 origin/size 逐一恢复 | ✅ |
 | 11.4 | 警告检查器按列排序与窄窗布局（上游 SwiftUI `Table` 行为） | 待办 |
 | 11.5 | Inspect Character 的 *闪一下选中范围*（上游 `showFindIndicator`） | 待办 |
 | 11.6 | 菜单校验置灰：*Straighten Quotes* 随选区、大纲导航无条目时置灰；「生成表里每个命令都有人认领」做成常设门禁脚本 | 待办 |
 | 11.7 | 文档检查器 `Tags` 行（binary plist 读取） | 待办 |
 | 11.8 | Unicode 规范化的 3 个 Apple 形态（需 CaseFolding / HFS+ 表，工作量大） | 待办 |
 | 11.9 | 补全候选列表虚拟化、IME 合成态（框架不暴露合成态，先记账） | 待办 |
+
+---
+
+## 阶段 12 — 验证与发布 v0.3.0
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 12.1 | 全量测试 + clippy 零警告（655 项） | ✅ |
+| 12.2 | CHANGELOG / README / FEATURE-MATRIX 同步 | ✅ |
+| 12.3 | 打包 `dist/SubText.app` + zip，打包后 bundle 冒烟 | ✅ |
+| 12.4 | 提交、打 `v0.3.0` 标签 | ✅ |
 
 ---
 

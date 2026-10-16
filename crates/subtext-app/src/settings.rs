@@ -683,6 +683,11 @@ pub struct Settings {
     /// default on.
     pub find_regex_unescapes_replacement: bool,
 
+    /// The find panel's last frame, `[x, y, width, height]` — upstream's
+    /// `windowFrameAutosaveName = "Find Panel"`. The panel reopens where the
+    /// user left it.
+    pub find_panel_frame: Option<[f32; 4]>,
+
     /// The recent find strings, latest last — upstream's `findHistory`.
     ///
     /// The two history menus in the find panel read these; a find or replace
@@ -835,6 +840,7 @@ impl Default for Settings {
             find_regex_is_singleline: false,
             find_regex_is_multiline: true,
             find_regex_unescapes_replacement: true,
+            find_panel_frame: None,
             find_history: Vec::new(),
             replace_history: Vec::new(),
             enables_remote_editing: false,

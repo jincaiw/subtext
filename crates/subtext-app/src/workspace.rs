@@ -2200,6 +2200,7 @@ impl Workspace {
         if let Some(handle) = self.find_window {
             if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
                 self.find_window_owner = Some(owner);
+                self.remember_find_frame(cx);
                 // `refresh_matches` drops the previous Find All's rows, so a
                 // panel that was left open with the result table showing comes
                 // back collapsed and at the collapsed height.
@@ -2215,18 +2216,33 @@ impl Workspace {
         self.refresh_matches(cx);
 
         let weak = cx.entity().downgrade();
+        // The frame is read before the defer: the closure must not borrow
+        // `self`, and the value cannot change between here and the next tick
+        // in any way the panel did not already account for.
+        let saved_frame = self.settings.find_panel_frame;
         cx.defer(move |cx| {
             if weak.upgrade().is_none() {
                 return;
             }
+            // Reopen at the frame the user left the panel at — upstream's
+            // `windowFrameAutosaveName`. A stored frame without a screen to
+            // hold it is the platform's problem there; GPUI clamps a windowed
+            // frame on its own as well.
+            let window_bounds = match saved_frame {
+                Some([x, y, width, height]) => WindowBounds::Windowed(gpui_kit::Bounds {
+                    origin: gpui_kit::point(px(x), px(y)),
+                    size: gpui_kit::size(px(width), px(height)),
+                }),
+                None => WindowBounds::centered(
+                    gpui_kit::size(px(FIND_PANEL_WIDTH), px(FIND_PANEL_HEIGHT)),
+                    cx,
+                ),
+            };
             let options = WindowOptions {
                 // A utility window is a short column of rows, so it opens at
                 // the size those rows need rather than filling the screen, and
                 // the minimum is the width below which the button row wraps.
-                window_bounds: Some(WindowBounds::centered(
-                    gpui_kit::size(px(FIND_PANEL_WIDTH), px(FIND_PANEL_HEIGHT)),
-                    cx,
-                )),
+                window_bounds: Some(window_bounds),
                 window_min_size: Some(gpui_kit::size(px(FIND_PANEL_MIN_WIDTH), px(150.))),
                 ..Default::default()
             };
@@ -2455,7 +2471,7 @@ impl Workspace {
     /// makes the panel taller; the panel is resizable there and the user can
     /// drag it back. Here the window owns its own size, so opening and closing
     /// the section adds and removes the same 200 points.
-    fn resize_find_panel(&self, cx: &mut Context<Self>) {
+    fn resize_find_panel(&mut self, cx: &mut Context<Self>) {
         let Some(handle) = self.find_window else {
             return;
         };
@@ -2469,6 +2485,30 @@ impl Workspace {
                 window.resize(gpui_kit::size(width, px(height)));
             })
             .ok();
+        self.remember_find_frame(cx);
+    }
+
+    /// Save the panel's current frame for the next opening — the write side of
+    /// upstream's `windowFrameAutosaveName`, which macOS updates whenever the
+    /// window moves or resizes. SubText has no such callback, so the frame is
+    /// remembered at the moments the workspace touches the panel: showing and
+    /// resizing it.
+    fn remember_find_frame(&mut self, cx: &mut Context<Self>) {
+        let Some(handle) = self.find_window else {
+            return;
+        };
+        if let Ok(frame) = handle.update(cx, |_, window, _| {
+            let bounds = window.bounds();
+            [
+                f32::from(bounds.origin.x),
+                f32::from(bounds.origin.y),
+                f32::from(bounds.size.width),
+                f32::from(bounds.size.height),
+            ]
+        }) {
+            self.settings.find_panel_frame = Some(frame);
+            let _ = self.settings.save();
+        }
     }
 
     /// Apply a click on the result row whose match is `range`.

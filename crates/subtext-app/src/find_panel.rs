@@ -26,7 +26,7 @@ use std::ops::Range;
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonVariants as _, DropdownButton},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
@@ -1087,6 +1087,7 @@ impl FindPanel {
 
     /// The button row: `[Find All ▾] [Replace All] … [Replace] [◀|▶]`.
     fn render_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let menu_workspace = self.workspace.clone();
         h_flex()
             .w_full()
             .gap_2()
@@ -1095,14 +1096,34 @@ impl FindPanel {
                 // Upstream's *Find All* is a menu with a primary action: the
                 // click finds, the chevron offers the two other ways of using
                 // the same matches.
-                Button::new("find-all")
-                    .small()
-                    .label("Find All")
-                    .tooltip("Find and list all matches.")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.on_document(cx, |workspace, _window, cx| workspace.find_all(cx));
-                        let _ = window;
-                    })),
+                DropdownButton::new("find-all-dropdown")
+                    .button(
+                        Button::new("find-all")
+                            .small()
+                            .label("Find All")
+                            .tooltip("Find and list all matches.")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.on_document(cx, |workspace, _window, cx| {
+                                    workspace.find_all(cx)
+                                });
+                                let _ = window;
+                            })),
+                    )
+                    .dropdown_menu(move |menu, _, _| {
+                        let highlight = menu_workspace.clone();
+                        menu.item(
+                            PopupMenuItem::new("Highlight All").on_click(move |_, _, cx| {
+                                highlight
+                                    .update(cx, |workspace, cx| workspace.highlight_all(cx))
+                                    .ok();
+                            }),
+                        )
+                        .item(
+                            // Upstream selects every match in one go; SubText's
+                            // editor has no multi-selection to put them in.
+                            PopupMenuItem::new("Select All").disabled(true),
+                        )
+                    }),
             )
             .child(
                 Button::new("replace-all")

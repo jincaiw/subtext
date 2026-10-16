@@ -289,10 +289,14 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
-## [Unreleased]
+## [0.3.0] — 2026-10-17
 
 ### 新增
 
+- **Find All 的分体下拉**：主体点击查找，caret 菜单给 *Highlight All* 与
+  *Select All*（后者在编辑器支持多选前禁用）——上游 `Menu(primaryAction:)` 的形态。
+- **查找面板记住窗口位置与大小**：关掉再 ⌘F，面板回到上次所在的帧
+  （上游 `windowFrameAutosaveName`）。
 - **关闭有未保存改动的文档会先询问**：上游 `DocumentClosingAlert` 的
   *Save* / *Don't Save* / *Cancel*（Don't Save 为破坏性样式），文案逐句对齐；
   有损时 *Save* 变 *Save Available Text* 并在正文写明不兼容字符将被替换或删除。
