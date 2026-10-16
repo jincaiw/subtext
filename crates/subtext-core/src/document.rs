@@ -54,6 +54,10 @@ pub struct Document {
     /// The file's length when we last read or wrote it, used as a cheap
     /// second signal when the filesystem's timestamps are coarse.
     saved_len: Option<u64>,
+    /// Whether a lossy save is permitted without asking again — upstream's
+    /// `allowsLossySaving`, set for the rest of the session once the user has
+    /// answered *Save Available Text*.
+    allows_lossy_saving: bool,
 }
 
 impl Document {
@@ -77,6 +81,7 @@ impl Document {
             dirty: false,
             saved_at: None,
             saved_len: None,
+            allows_lossy_saving: false,
         }
     }
 
@@ -110,6 +115,7 @@ impl Document {
             dirty: false,
             saved_at: metadata.as_ref().and_then(|m| m.modified().ok()),
             saved_len: metadata.as_ref().map(|m| m.len()),
+            allows_lossy_saving: false,
         })
     }
 
@@ -127,6 +133,7 @@ impl Document {
             dirty: false,
             saved_at: None,
             saved_len: None,
+            allows_lossy_saving: false,
         }
     }
 
@@ -176,6 +183,18 @@ impl Document {
 
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Whether lossy saves go through without asking — upstream's
+    /// `allowsLossySaving`.
+    pub fn allows_lossy_saving(&self) -> bool {
+        self.allows_lossy_saving
+    }
+
+    /// Set [`Self::allows_lossy_saving`], from the *Save Available Text*
+    /// answer.
+    pub fn set_allows_lossy_saving(&mut self, allowed: bool) {
+        self.allows_lossy_saving = allowed;
     }
 
     pub fn is_untitled(&self) -> bool {
@@ -266,7 +285,10 @@ impl Document {
             detection: self.detection,
         };
         let (bytes, lossy) = file.encode_checked();
-        if lossy {
+        // Upstream's `allowsLossySaving`: once the user has answered *Save
+        // Available Text*, the rest of the session saves through without
+        // asking again.
+        if lossy && !self.allows_lossy_saving {
             return Err(DocumentError::LossyEncoding(file.encoding.name));
         }
 
@@ -401,6 +423,31 @@ mod tests {
 
         // Text the encoding *can* spell saves as before.
         document.set_text("hello world".to_string(), true);
+        assert!(document.save(Some(path.clone())).is_ok());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn allowing_lossy_saving_writes_the_substituted_file() {
+        // Upstream's *Save Available Text*: once allowed, the save goes
+        // through with the incompatible characters substituted, and the rest
+        // of the session saves through without asking again.
+        let encoding = TextEncoding::from_identifier("shift_jis").expect("Shift JIS");
+        let mut document = Document::untitled(
+            FileEncoding { encoding, with_utf8_bom: false },
+            LineEnding::LF,
+        );
+        document.set_text("hello 👾 world".to_string(), true);
+
+        let path = std::env::temp_dir().join("subtext-lossy-allowed.txt");
+        assert!(document.save(Some(path.clone())).is_err());
+
+        document.set_allows_lossy_saving(true);
+        assert!(document.save(Some(path.clone())).is_ok());
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains('👾'));
+        // A second save does not ask again — the flag is per session.
+        document.set_text("hello 👾👾 world".to_string(), true);
         assert!(document.save(Some(path.clone())).is_ok());
         std::fs::remove_file(&path).ok();
     }

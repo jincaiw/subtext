@@ -289,6 +289,19 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
+## [Unreleased]
+
+### 新增
+
+- **关闭有未保存改动的文档会先询问**：上游 `DocumentClosingAlert` 的
+  *Save* / *Don't Save* / *Cancel*（Don't Save 为破坏性样式），文案逐句对齐；
+  有损时 *Save* 变 *Save Available Text* 并在正文写明不兼容字符将被替换或删除。
+  空文档与干净文档不打扰。
+- **有损保存的三选**：按 Shift JIS 等编码保存遇到不兼容字符时，弹
+  *Save Available Text* / *Review Incompatible Characters* / *Cancel* ——
+  第一项为本会话允许有损写盘（上游 `allowsLossySaving`），第二项打开
+  Warnings 检查器。此前只有「取消」一条路。
+
 ## [0.1.0] — 2026-10-14
 
 首个版本。以 [GPUI Kit](https://github.com/longbridge/gpui-kit) 0.7.3 重写

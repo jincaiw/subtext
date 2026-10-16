@@ -2439,6 +2439,35 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ---
 
+## 阶段 10 — v0.3 重估后的文档安全网 ✅
+
+上游 HEAD（2026-10-13）与 v0.2.0 的全面对照（评估于 2026-10-17）发现的最大缺口不在
+面板，而在**文档生命周期**：关闭有未保存改动的文档没有任何确认（上游 `canClose`
+会问 Save / Don't Save / Cancel），有损保存只有「取消」一条路（上游给
+*Save Available Text* / *Review Incompatible Characters* / *Cancel* 三选）。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 10.1 | 关闭确认：`close_document` 在 `is_dirty` 时弹上游 `DocumentClosingAlert` 文案的对话框（Save / Don't Save / Cancel，Don't Save 为 destructive）；有损时 Save 变 *Save Available Text* 并在正文说明。命名文档保存成功即关；未命名文档打开保存面板，其结果异步到达、标签保持打开（再次点击关闭时文档已干净，直接关）——与上游「面板确认即关」的一步差异记缺口表。空文档与干净文档不打扰 | ✅ |
+| 10.2 | 有损保存三选：core `Document` 加会话级 `allows_lossy_saving`（上游 `allowsLossySaving`），`save` 在有损且未允许时拒绝；`write_to` 的 `LossyEncoding` 分支弹上游 `DocumentSavingError` 文案的三选对话框，*Save Available Text* 置位后重试写盘，*Review Incompatible Characters* 打开 Warnings 检查器 | ✅ |
+| 10.3 | core 测试：允许有损后写入替换物、第二次保存不再询问 | ✅ |
+
+## 阶段 11 — v0.3 待排（重估清单，按价值排序）
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 11.1 | 自动补全 *Suggest completions while typing*（上游插入后 250ms 防抖 + 词前缀/长度/后邻条件；面板开关当前禁用） | 待办 |
+| 11.2 | Find All 按钮的下拉（*Highlight All* 可做；*Select All* 需编辑器多选） | 待办 |
+| 11.3 | 查找面板记住窗口位置与大小（上游 `windowFrameAutosaveName`） | 待办 |
+| 11.4 | 警告检查器按列排序与窄窗布局（上游 SwiftUI `Table` 行为） | 待办 |
+| 11.5 | Inspect Character 的 *闪一下选中范围*（上游 `showFindIndicator`） | 待办 |
+| 11.6 | 菜单校验置灰：*Straighten Quotes* 随选区、大纲导航无条目时置灰；「生成表里每个命令都有人认领」做成常设门禁脚本 | 待办 |
+| 11.7 | 文档检查器 `Tags` 行（binary plist 读取） | 待办 |
+| 11.8 | Unicode 规范化的 3 个 Apple 形态（需 CaseFolding / HFS+ 表，工作量大） | 待办 |
+| 11.9 | 补全候选列表虚拟化、IME 合成态（框架不暴露合成态，先记账） | 待办 |
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
@@ -2461,7 +2490,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
 | 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |
 | 警告检查器的表格横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器；上游的 SwiftUI `Table` 会压缩并截断。 |
-| 有损保存只能取消，不能「照原样保存」 | 上游 `LossyEncodingError` 给 *Change Encoding* 与 *Cancel*，关闭文档时还多一个 *Save Available Text*。SubText 只做取消，并把改编码指到状态栏的编码选择器。 |
+| 关闭未命名文档时保存不会自动关闭标签 | 上游保存面板确认后继续关闭流程；SubText 的保存面板结果异步到达，标签保持打开，需要再关一次（此时不再询问）。其余关闭语义已与上游一致（阶段 10）。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小，但一个字符的前缀在大文件里可以有很多行。 |
 | 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器不暴露这个状态。 |
 | 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |

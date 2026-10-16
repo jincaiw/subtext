@@ -984,7 +984,7 @@ impl Workspace {
         let text = self.documents[index].editor().read(cx).value().to_string();
         self.documents[index].document.set_text(text, true);
 
-        match self.documents[index].document.save(target) {
+        match self.documents[index].document.save(target.clone()) {
             Ok(()) => {
                 if let Some(path) = self.documents[index].document.path() {
                     let path = path.to_path_buf();
@@ -997,10 +997,81 @@ impl Workspace {
                 let name = self.documents[index].document.display_name();
                 self.set_status(format!("Saved {name}"), cx);
             }
+            Err(subtext_core::DocumentError::LossyEncoding(name)) => {
+                self.ask_lossy_saving(name, target, window, cx);
+            }
             Err(error) => self.set_status(error.to_string(), cx),
         }
         let _ = window;
         cx.notify();
+    }
+
+    /// The lossy-save alert — upstream's `DocumentSavingError(code:
+    /// .lossyEncoding)`. *Save Available Text* permits lossy saving for the
+    /// rest of the session and writes; *Review Incompatible Characters*
+    /// opens the Warnings inspector without saving; *Cancel* does nothing.
+    fn ask_lossy_saving(
+        &mut self,
+        name: &'static str,
+        target: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let message =
+            format!("The document contains characters incompatible with “{name}”.");
+        let body = "Incompatible characters are either substituted or removed in saving. \
+                    Do you want to save anyway?";
+        let workspace = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, _| {
+            let save = workspace.clone();
+            let review = workspace.clone();
+            let save_target = target.clone();
+            dialog
+                .w(window.rem_size() * 26.)
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(div().text_sm().child(message.clone()))
+                        .child(div().text_sm().child(body)),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("lossy-review")
+                                .label("Review Incompatible Characters")
+                                .on_click(move |_, window, cx| {
+                                    review
+                                        .update(cx, |workspace, cx| {
+                                            workspace.show_inspector(
+                                                InspectorPane::Warnings,
+                                                cx,
+                                            )
+                                        })
+                                        .ok();
+                                    window.close_dialog(cx);
+                                }),
+                        )
+                        .child(
+                            Button::new("lossy-save")
+                                .label("Save Available Text")
+                                .primary()
+                                .on_click(move |_, window, cx| {
+                                    save.update(cx, |workspace, cx| {
+                                        if let Some(open) =
+                                            workspace.documents.get_mut(workspace.active)
+                                        {
+                                            open.document.set_allows_lossy_saving(true);
+                                        }
+                                        workspace.write_to(save_target.clone(), window, cx);
+                                    })
+                                    .ok();
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
+                .on_ok(|_, _, _| false)
+        });
     }
 
     /// Reload the active document from disk, discarding the buffer.
@@ -1045,6 +1116,10 @@ impl Workspace {
     /// Closing by identity rather than by position is what lets a tab's close
     /// affordance be wired to the tab it belongs to: the active index is not
     /// the clicked tab, and by the time the click runs the list may have moved.
+    ///
+    /// A document with unsaved changes asks first — upstream's `canClose` —
+    /// and a clean one closes without a word (upstream also suppresses the
+    /// question for an empty draft).
     pub fn close_document(
         &mut self,
         id: DocumentId,
@@ -1054,9 +1129,131 @@ impl Workspace {
         let Some(index) = self.documents.iter().position(|document| document.id == id) else {
             return;
         };
+        if self.documents[index].document.is_dirty() {
+            self.ask_close_document(id, window, cx);
+            return;
+        }
         if self.documents.len() <= 1 {
             // CotEditor closes the window with the last document; SubText keeps
             // one document open so the application stays usable.
+            self.new_document(window, cx);
+            return;
+        }
+        self.close_document_now(index, window, cx);
+    }
+
+    /// The unsaved-changes alert — upstream's `DocumentClosingAlert`. A
+    /// lossy-to-save document replaces *Save* with *Save Available Text* and
+    /// says so in the body, exactly as upstream swaps its buttons.
+    ///
+    /// The *Save* answer writes a named document and then closes it. An
+    /// untitled one opens the save panel, whose outcome arrives
+    /// asynchronously, so the tab stays open either way and a second close on
+    /// the now-clean document succeeds without asking.
+    fn ask_close_document(
+        &mut self,
+        id: DocumentId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.documents.iter().position(|document| document.id == id) else {
+            return;
+        };
+        let open = &self.documents[index];
+        let name = open.document.display_name();
+        let encoding_name = open.document.encoding().name;
+        let lossy = !open.document.allows_lossy_saving()
+            && !subtext_core::incompatible_characters(open.document.text(), open.document.encoding())
+                .is_empty();
+
+        let message = if lossy {
+            format!(
+                "Do you want to save the changes made to the document “{name}”?\n\
+                 The document contains characters incompatible with “{encoding_name}”."
+            )
+        } else {
+            format!("Do you want to save the changes made to the document “{name}”?")
+        };
+        let body = if lossy {
+            "Your changes will be lost if you don’t save them. Incompatible characters \
+             are either substituted or removed in saving."
+        } else {
+            "Your changes will be lost if you don’t save them."
+        };
+
+        let workspace = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, _| {
+            let save = workspace.clone();
+            let discard = workspace.clone();
+            let save_label =
+                if lossy { "Save Available Text" } else { "Save" };
+            let save_button = Button::new("close-save").label(save_label).on_click(
+                move |_, window, cx| {
+                    save.update(cx, |workspace, cx| {
+                        let index = workspace
+                            .documents
+                            .iter()
+                            .position(|document| document.id == id);
+                        let Some(index) = index else { return };
+                        workspace.documents[index]
+                            .document
+                            .set_allows_lossy_saving(true);
+                        workspace.write_to(None, window, cx);
+                        let clean = !workspace.documents[index].document.is_dirty();
+                        if clean {
+                            workspace.close_document_now(index, window, cx);
+                        }
+                    })
+                    .ok();
+                    window.close_dialog(cx);
+                },
+            );
+            dialog
+                .w(window.rem_size() * 26.)
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(div().text_sm().child(message.clone()))
+                        .child(div().text_sm().child(body)),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("close-discard")
+                                .label("Don’t Save")
+                                .danger()
+                                .on_click(move |_, window, cx| {
+                                    discard
+                                        .update(cx, |workspace, cx| {
+                                            let index = workspace
+                                                .documents
+                                                .iter()
+                                                .position(|document| document.id == id);
+                                            if let Some(index) = index {
+                                                workspace.close_document_now(index, window, cx);
+                                            }
+                                        })
+                                        .ok();
+                                    window.close_dialog(cx);
+                                }),
+                        )
+                        .child(save_button),
+                )
+                .on_ok(|_, _, _| false)
+        });
+    }
+
+    /// The removal itself, once a close has been confirmed.
+    fn close_document_now(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.documents.len() <= 1 {
+            // The confirmation may also land on the last document's tab; a
+            // confirmed close there still leaves one document open.
             self.new_document(window, cx);
             return;
         }
