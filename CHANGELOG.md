@@ -281,11 +281,11 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 | Crate | 数量 |
 | --- | --- |
 | `subtext-core` | 381 |
-| `subtext-app` | 238 |
+| `subtext-app` | 236 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **651** |
+| **合计** | **654** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
 
