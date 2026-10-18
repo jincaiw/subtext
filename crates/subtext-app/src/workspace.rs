@@ -1009,6 +1009,7 @@ impl Workspace {
         if grew {
             self.schedule_automatic_completion(cx);
         }
+        self.flash_matching_bracket(cx);
         cx.notify();
     }
 
@@ -2722,6 +2723,40 @@ impl Workspace {
             .ok();
         })
         .detach();
+    }
+
+    /// Flash the bracket that pairs with the one just typed.
+    ///
+    /// Upstream's `highlightMatchingSymbol`, which runs on every selection
+    /// change while `highlightsBraces` is on. The editor reports *edits*, not
+    /// caret moves, so this fires when the text changes and the caret then sits
+    /// right after a bracket — which is the case the feature is for: typing
+    /// `(` leaves the caret inside the pair, and the `)` lights up.
+    ///
+    /// Only `()`, `{}` and `[]` are considered, as upstream does here; quotes
+    /// need the double-delimiter scan and a syntax of their own, and that path
+    /// upstream feeds a different candidate list.
+    fn flash_matching_bracket(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
+        let selection = self.active_selection(cx);
+        if !selection.is_empty() {
+            return;
+        }
+        let caret = selection.start;
+        if caret == 0 {
+            return;
+        }
+        let Some((start, _)) = text[..caret].char_indices().next_back() else {
+            return;
+        };
+        let Some(range) =
+            textops::matching_symbol_pair(&text, start, &textops::SymbolPair::BRACES)
+        else {
+            return;
+        };
+        self.flash_find_indicator(range, cx);
     }
 
     /// The active pane's marks collection.

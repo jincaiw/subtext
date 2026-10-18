@@ -2160,7 +2160,7 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 | `Standard words` 依旧是关的 | AppKit 的系统词表在系统文本引擎里，Rust 侧够不着 —— Mode 面板早就把它禁用并写了理由，这一轮没有改变这一点。 |
 | 查找指示器没有淡出 | 上游 `showFindIndicator` 的黄色标记会淡出；SubText 用文字装饰（`TextDecoration`）画背景，只能整块出现与消失 —— 淡出要逐帧重绘整行，装饰做不到。 |
 | 增量搜索不把全部匹配涂灰 | 上游增量搜索会把所有匹配涂成 `.unemphasizedSelectedTextBackgroundColor`，并在窗口失焦或面板关闭时取消；SubText 只移动光标 + 闪当前匹配，全部匹配只在 *Find All* 表里体现。 |
-| 括号配对闪烁未做 | 上游 `highlightMatchingSymbol` 在光标紧贴括号时闪出配对的那一个（`showFindIndicator` 的第四处调用）；SubText 没有「贴着括号高亮配对」这个特性本身，所以没有可闪的对象。 |
+| ~~括号配对闪烁未做~~ | **§13.4 关掉了**：`textops::matching_symbol_pair` + `on_pane_changed` 的闪烁；差别是只在编辑后闪、不在纯光标移动时闪（编辑器不报后者）。 |
 | 菜单项不能按状态置灰 | 上游用 `NSMenuItem` 的 `validateUserInterfaceItem` 让 *Straighten Quotes*（选区为空时）与大纲导航（无条目时）变灰；GPUI 的 `MenuItem` 是**构造时**决定 `disabled`，且 `Action` 变体的字段私有、没有 action 访问器 —— 构造完就再也认不出哪一条是哪个命令。所以 SubText 只能让命令**照常可点**、由 dispatch 在状态栏说明为什么不动（与「未实现的命令在状态栏说明原因」同一条规则）。真要置灰得改 `tools/generate_menu.py`，让生成表接收运行期状态 |
 | 警告检查器不高亮编辑器里的全部问题字符 | 上游扫描完会把所有不兼容范围涂成 `.unemphasizedSelectedTextBackgroundColor`；SubText 只在表里列出来，编辑器里没有任何标记（`TextDecorationCollection` 已具备这个能力，尚未接） |
 | 粘贴也可能弹出自动补全 | 上游从 `insertText` 触发，粘贴走的是另一条路；SubText 只看缓冲区是否**变长**（编辑器的 `Change` 事件不带编辑来源），所以粘贴到词尾时列表也会在 250ms 后弹出。撤销与删除不会（缓冲区变短）。 |
@@ -2480,10 +2480,10 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 13.1 | 全量测试 + clippy 零警告（655 项） | ✅ |
-| 13.2 | CHANGELOG / README / FEATURE-MATRIX 同步 | ✅ |
-| 13.3 | 打包 `dist/SubText.app` + zip，打包后 bundle 冒烟 | ✅ |
-| 13.4 | 提交、打 `v0.3.0` 标签 | ✅ |
+| 12.1 | 全量测试 + clippy 零警告（655 项） | ✅ |
+| 12.2 | CHANGELOG / README / FEATURE-MATRIX 同步 | ✅ |
+| 12.3 | 打包 `dist/SubText.app` + zip，打包后 bundle 冒烟 | ✅ |
+| 12.4 | 提交、打 `v0.3.0` 标签 | ✅ |
 
 ---
 
@@ -2501,9 +2501,9 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 12.1 | 缺口表对齐：删 6 条过时行、改写 1 条（警告表滚动）、补 3 条（括号配对闪烁 / 指示器无淡出 / 菜单置灰） | ✅ |
-| 12.2 | 增量搜索把**全部匹配**涂灰：`Pane` 加第二个 `TextDecorationCollection`（`marks`，与一次性的 `indicator` 分开，因为寿命不同），`run_incremental_search` 跑完就设；查询清空时清、查找面板窗口关闭时清（`App::on_window_closed` 比对 `WindowId`，这正是上游在面板关闭时调 `unhighlight(nil)` 的那一步） | ✅ |
-| 12.3 | 警告检查器把**每个问题字符**涂灰：`show_inspector(Warnings)` 时按扫描结果设标记，切到别的面板时清除（上游在 `onDisappear` 清除） | ✅ |
+| 13.1 | 缺口表对齐：删 6 条过时行、改写 1 条（警告表滚动）、补 3 条（括号配对闪烁 / 指示器无淡出 / 菜单置灰） | ✅ |
+| 13.2 | 增量搜索把**全部匹配**涂灰：`Pane` 加第二个 `TextDecorationCollection`（`marks`，与一次性的 `indicator` 分开，因为寿命不同），`run_incremental_search` 跑完就设；查询清空时清、查找面板窗口关闭时清（`App::on_window_closed` 比对 `WindowId`，这正是上游在面板关闭时调 `unhighlight(nil)` 的那一步） | ✅ |
+| 13.3 | 警告检查器把**每个问题字符**涂灰：`show_inspector(Warnings)` 时按扫描结果设标记，切到别的面板时清除（上游在 `onDisappear` 清除） | ✅ |
 
 **颜色**：上游是 `.unemphasizedSelectedTextBackgroundColor`。先用 `theme().tokens.selection`，
 在浅色主题下几乎看不见（该令牌的 alpha 太低）；换成 `theme().muted` 后与 macOS 那块灰
@@ -2511,7 +2511,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 12.4 | 括号配对闪烁：先补「光标贴着括号时高亮配对」这个特性本身（上游 `highlightMatchingSymbol`），再让它复用 §11.5 的指示器 | 待办 |
+| 13.4 | 括号配对闪烁：core 新增 `matching_symbol_pair`（给定括号的字节偏移，返回配对括号的**一字符范围**；按对计数嵌套，`()` `{}` `[]` 三对，与上游 `indexOfSymbolPair` 在本题上的分支一致），3 条测试（嵌套、不配对、多字节）。应用侧在 `on_pane_changed` 里、光标为空且紧跟在括号后面时，用 §11.5 的指示器闪出配对那个。**与上游的一处差别**：上游在每次选区变化时都跑（`didChangeSelection`），编辑器只报**编辑**不报光标移动，所以只在改动后闪 —— 打字 `(` 后 `)` 会亮，用箭头键移到括号旁不会 | ✅ |
 | 13.5 | 菜单项按状态置灰：让 `tools/generate_menu.py` 产出**接收运行期状态**的菜单（现在的生成表是静态树，构造后认不出哪条是哪个命令） | 待办 |
 | 13.6 | 查找指示器淡出：要逐帧重绘整行，先评估 `with_animation` 能否作用在文字装饰上 | 待办 |
 
@@ -2544,7 +2544,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
-| 括号配对闪烁未做 | 上游 `highlightMatchingSymbol` 在光标紧贴括号时闪出配对的那一个；SubText 没有「贴着括号高亮配对」这个特性本身，所以没有可闪的对象（§11.5 的指示器已具备能力）。 |
 | 查找指示器没有淡出 | 上游 `showFindIndicator` 的黄色标记会淡出；SubText 用文字装饰画背景，只能整块出现与消失 —— 淡出要逐帧重绘整行，装饰做不到。 |
 | 菜单项不能按状态置灰 | 上游用 `NSMenuItem` 的 `validateUserInterfaceItem` 让 *Straighten Quotes*（空选区）与大纲导航（无条目）变灰；GPUI 的 `MenuItem` 在构造时定死 `disabled`，`Action` 变体字段私有且无访问器 —— 构造后认不出哪条是哪个命令。要置灰得让 `tools/generate_menu.py` 接收运行期状态 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |

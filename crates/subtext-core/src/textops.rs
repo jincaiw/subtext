@@ -1520,6 +1520,72 @@ impl SymbolPair {
     ];
 }
 
+/// The partner of the bracket at `index`, as a one-character range.
+///
+/// This is the question *highlight matching brace* asks: the caret sits right
+/// after a bracket, so which bracket closes (or opens) it? It is CotEditor's
+/// `indexOfSymbolPair(at:candidates:in:ignoring:escapeCharacter:)` for the case
+/// that path actually uses — `SymbolPair.braces`, no pair to ignore, no escape
+/// character — so nesting is counted and a stray closer ends the search.
+///
+/// `index` is a byte offset onto the bracket itself; the answer is the partner's
+/// range, or `None` when the bracket is unmatched. An escape character would
+/// make `\(` not an opener; the brace-highlighting path upstream passes none,
+/// so neither does this.
+pub fn matching_symbol_pair(
+    text: &str,
+    index: usize,
+    candidates: &[SymbolPair],
+) -> Option<Range<usize>> {
+    if index >= text.len() || !text.is_char_boundary(index) {
+        return None;
+    }
+    let here = text[index..].chars().next()?;
+    let pair = candidates
+        .iter()
+        .find(|pair| pair.begin == here || pair.end == here)?;
+    // A pair whose halves are the same character (a quote) is matched by
+    // counting hits, which is the double-delimiter path — not what brace
+    // highlighting asks, and not what this answers.
+    if pair.begin == pair.end {
+        return None;
+    }
+
+    if here == pair.begin {
+        let mut depth = 0i64;
+        for (offset, character) in text[index..].char_indices() {
+            if character == pair.begin {
+                depth += 1;
+            } else if character == pair.end {
+                depth -= 1;
+                if depth == 0 {
+                    let start = index + offset;
+                    return Some(start..start + character.len_utf8());
+                }
+            }
+        }
+        None
+    } else {
+        // One level deep already: this is the closer we are pairing, so the
+        // opener that takes the count to zero is its partner. Scanning back
+        // also steps over the closers of inner pairs, which is what makes
+        // `(a(b)c)` pair the outer halves when the caret sits before the last
+        // one.
+        let mut depth = 1i64;
+        for (offset, character) in text[..index].char_indices().rev() {
+            if character == pair.end {
+                depth += 1;
+            } else if character == pair.begin {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(offset..offset + character.len_utf8());
+                }
+            }
+        }
+        None
+    }
+}
+
 /// The nearest range enclosed by one of `candidates`, delimiters included.
 ///
 /// This answers the question *Select Enclosing Symbols* asks: starting from
@@ -1882,6 +1948,53 @@ impl LineIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The partner of a bracket, which is what *highlight matching brace* flashes.
+    #[test]
+    fn a_bracket_finds_its_partner() {
+        let braces = SymbolPair::BRACES;
+        let text = "(a(b)c)";
+        // The outer pair, from either half.
+        assert_eq!(matching_symbol_pair(text, 0, &braces), Some(6..7));
+        assert_eq!(matching_symbol_pair(text, 6, &braces), Some(0..1));
+        // The inner one: nesting is counted, not "the next closer".
+        assert_eq!(matching_symbol_pair(text, 2, &braces), Some(4..5));
+        assert_eq!(matching_symbol_pair(text, 4, &braces), Some(2..3));
+
+        // Each kind of pair is answered by its own halves.
+        assert_eq!(matching_symbol_pair("{[x]}", 0, &braces), Some(4..5));
+        assert_eq!(matching_symbol_pair("{[x]}", 1, &braces), Some(3..4));
+        assert_eq!(matching_symbol_pair("{[x]}", 3, &braces), Some(1..2));
+    }
+
+    #[test]
+    fn an_unmatched_bracket_has_no_partner() {
+        let braces = SymbolPair::BRACES;
+        assert_eq!(matching_symbol_pair("(a", 0, &braces), None);
+        assert_eq!(matching_symbol_pair("a)", 1, &braces), None);
+        // A closer that no opener accounts for ends the backward search rather
+        // than pairing across it.
+        assert_eq!(matching_symbol_pair(")(", 1, &braces), None);
+        // Interleaved kinds do not pair with each other.
+        assert_eq!(matching_symbol_pair("(]", 0, &braces), None);
+        // Not a bracket at all, out of range, and mid-character.
+        assert_eq!(matching_symbol_pair("abc", 0, &braces), None);
+        assert_eq!(matching_symbol_pair("(", 9, &braces), None);
+        assert_eq!(matching_symbol_pair("é(", 1, &braces), None);
+    }
+
+    #[test]
+    fn a_brackets_partner_is_a_byte_range() {
+        // The characters around the pair are not one byte each, so the answer
+        // has to be measured, not counted.
+        let braces = SymbolPair::BRACES;
+        let text = "é(ß)é";
+        let open = text.find('(').expect("the opener");
+        let close = text.find(')').expect("the closer");
+        assert_eq!(matching_symbol_pair(text, open, &braces), Some(close..close + 1));
+        assert_eq!(matching_symbol_pair(text, close, &braces), Some(open..open + 1));
+        assert_eq!(&text[open + 1..close], "ß");
+    }
 
     /// The whole document selected — what the Text-menu commands operate on
     /// when the user has picked everything.
