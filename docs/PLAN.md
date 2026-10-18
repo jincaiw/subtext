@@ -2470,7 +2470,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 11.6 | **命令覆盖门禁**（`menu_contract.rs`，随 `cargo test` 常设）：把三段链条读成文本并两两比对 —— 生成表点名的 action ⊆ bridge 的绑定表 ⊆ dispatch 的分支名。四条断言：① 解析器读到的东西有下限（解析器改形态时**响亮失败**而不是空差分）② 每个菜单 action 都有绑定 ③ 每个绑定名都有分支 ④ 只作例外的清单**不得变成化石**（第一次运行它就判定我为引擎命令写的例外表是多余的 —— 那些名字在 dispatch 里确有分支）。注入验证两向：改掉一个分支名 ⇒ ③ 红；删一条绑定 ⇒ ② 红。**置灰这半未做**：GPUI 的 `MenuItem::Action` 字段私有、也没有 action 访问器，构造后的条目无法按命令定位，`disabled(bool)` 只能在构造时给 —— 要按选区状态置灰，只能让生成表接收状态（改生成器），属设计决定，见缺口表 | ✅ |
 | 11.7 | 文档检查器 `Tags` 行：core 新增 `FinderTag` / `FinderColor` 与 `parse_finder_tags` —— 读 `com.apple.metadata:_kMDItemUserTags` 扩展属性（`getxattr` 两次：先问长度再取值），值是 **binary plist** 的字符串数组，每条 `"名字"` 或 `"名字\n颜色序号"`；自带一个只认「根为字符串数组」的 bplist 读取器（`bplist00` 头 + trailer 四个数 + 偏移表 + `0x5n`/`0x6n` 两种字符串），**不加依赖**。颜色序号 1..7 对应灰绿紫蓝黄红橙，越界一律无色（上游同）。UI：File 段在 Size 与 Permissions 之间，右侧右对齐**可换行**的「圆点 + 名字」，圆点 = 82% 不透明填充 + 同色描边，无色标签画空心圈；无标签画 tertiary 色的 `–`（上游 `Text.none`）。标签颜色是 Finder 调色板而非主题色，记为第 4 处颜色字面量例外 | ✅ |
 | 11.8 | Unicode 规范化的 Apple 形态：**Modified NFD** 与 **Modified NFC** 已做 —— 前者 = 逐字符 NFD **但跳过** HFS+ 保留原样的三段（U+2000–2FFF / U+F900–FAFF / U+2F800–2FA1F），再规范排序；后者 = 上游 `precomposedStringWithHFSPlusMapping` 的规则本身：把「非 Full_Composition_Exclusion」的**极大连续段**各做一次 NFC，排除字符原样穿过。两个算法都先用 swift 探针实测 `CFStringGetFileSystemRepresentation` 与上游那段正则的输出来对齐（Ω/K/Å/CJK 兼容汉字不分解、排除字符是屏障、`a U+0301 U+0316` 要重排）。`Full_Composition_Exclusion` 不查表而是**推**：无分解 → 不算；单例分解 / 首字符非起始符 / 分解后组合不回自己 → 算。**NFKC Case-Fold 仍拒做**：全量 case fold 是 `CaseFolding.txt` 那张表，`to_lowercase` 是另一个映射（`ß` 不会变成 `ss`） | ✅（2/3） |
-| 11.9 | 补全候选列表虚拟化、IME 合成态（框架不暴露合成态，先记账） | 待办 |
+| 11.9 | 补全候选列表虚拟化与 IME 合成态：**两项都判定不做，调查结论入账（工作树无残留）**。IME：编辑器内部确有 `ime_marked_range`，但字段是 `pub(super)`、没有任何访问器，`InputEvent` 也只有 `Change` / `PressEnter` / `Focus` / `Blur` —— 应用侧无从询问是否正在拼字。虚拟化：改用 `uniform_list` 后，它按首个条目的**测量高度**布局，而在弹窗里测到的是内边距高度（4px、内容高度 0），行全部重叠；显式给行 `.h(1.25rem)` 与让内容自然测量两版都试过，表现相同，已回退到原来的普通列。共享前缀的候选通常只有几十条，不值得为它改造布局 | 不做（记账） |
 
 ---
 
@@ -2508,8 +2508,8 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |
 | 警告检查器的表格横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器；上游的 SwiftUI `Table` 会压缩并截断。 |
 | 关闭未命名文档时保存不会自动关闭标签 | 上游保存面板确认后继续关闭流程；SubText 的保存面板结果异步到达，标签保持打开，需要再关一次（此时不再询问）。其余关闭语义已与上游一致（阶段 10）。 |
-| 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小，但一个字符的前缀在大文件里可以有很多行。 |
-| 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器不暴露这个状态。 |
+| 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
+| 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器**内部有** `ime_marked_range`，但字段是 `pub(super)` 且无访问器，`InputEvent` 也不带合成态 —— 应用侧够不着。 |
 | 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |
 | 高级计数的胶囊不能拖动 | 上游的 `DraggableHostingView` 让用户把它拖到正文的任何地方，还能把它拖到窗口边上。SubText 固定在正文右上角 —— 也就是新开一颗时它出现的位置。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
