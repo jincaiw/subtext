@@ -5189,9 +5189,10 @@ impl Workspace {
                 .child(inspector_row("Created", created.unwrap_or_default(), cx))
                 .child(inspector_row("Modified", modified.unwrap_or_default(), cx))
                 .child(inspector_row("Size", size.unwrap_or_default(), cx))
-                // Upstream draws a Tags row here. SubText does not read Finder
-                // tags at all — see the gap table in `docs/PLAN.md` — and a row
-                // that could never show anything is worse than no row.
+                .child(inspector_tags_row(
+                    attributes.as_ref().map_or(&[][..], |attributes| &attributes.tags),
+                    cx,
+                ))
                 .child(inspector_row("Permissions", permissions.unwrap_or_default(), cx))
                 .child(inspector_row("Owner", owner.unwrap_or_default(), cx))
                 .child(self.inspector_full_path(model.path(), cx))
@@ -6818,6 +6819,81 @@ fn inspector_row(
                 .child(label.into()),
         )
         .child(div().min_w_0().text_xs().truncate().child(value))
+}
+
+/// The File section's *Tags* row.
+///
+/// Upstream right-aligns a **wrapping** stack of colour dot + name pairs
+/// (`WrappingHStack(alignment: .trailing, horizontalSpacing: 7)`), and draws an
+/// en dash in the tertiary colour when the file has none. The dot is a filled
+/// circle at 82% opacity with a ring of its own colour — or, for a tag with no
+/// colour, a hollow circle ringed in the secondary colour.
+fn inspector_tags_row(tags: &[fileattrs::FinderTag], cx: &App) -> impl IntoElement {
+    let value: gpui_kit::AnyElement = if tags.is_empty() {
+        div()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child("–")
+            .into_any_element()
+    } else {
+        let mut list = h_flex()
+            .flex_wrap()
+            .justify_end()
+            // Upstream's `horizontalSpacing: 7` and the 4 points between a dot
+            // and its name.
+            .gap_x(rems(0.4375))
+            .gap_y_1();
+        for tag in tags {
+            let dot = match tag.color.rgb() {
+                Some((red, green, blue)) => {
+                    let colour = gpui_kit::Rgba {
+                        r: red as f32 / 255.,
+                        g: green as f32 / 255.,
+                        b: blue as f32 / 255.,
+                        a: 0.82,
+                    };
+                    let colour: gpui_kit::Hsla = colour.into();
+                    div()
+                        .w(px(9.))
+                        .h(px(9.))
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(colour)
+                        .border_1()
+                        .border_color(colour)
+                }
+                None => div()
+                    .w(px(9.))
+                    .h(px(9.))
+                    .flex_shrink_0()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(cx.theme().muted_foreground),
+            };
+            list = list.child(
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(dot)
+                    .child(div().text_xs().child(tag.name.clone())),
+            );
+        }
+        list.into_any_element()
+    };
+
+    h_flex()
+        .w_full()
+        .gap_3()
+        .items_start()
+        .justify_between()
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Tags"),
+        )
+        .child(div().min_w_0().child(value))
 }
 
 /// Hand `path` to the platform's file manager, with the file selected.

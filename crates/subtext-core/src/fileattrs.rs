@@ -23,6 +23,12 @@ pub struct FileAttributes {
     /// The owning account's name, or `None` where the platform cannot name it.
     /// See [`FileAttributes::read`].
     pub owner: Option<String>,
+    /// The Finder tags, read out of the file's extended attributes.
+    ///
+    /// Empty on platforms without the Finder, and on files the Finder has not
+    /// tagged — the two are indistinguishable to the inspector, which draws an
+    /// empty value either way.
+    pub tags: Vec<FinderTag>,
 }
 
 impl FileAttributes {
@@ -44,6 +50,8 @@ impl FileAttributes {
             size: metadata.len(),
             permissions: FilePermissions::of(&metadata),
             owner: owner_name(&metadata),
+            tags: finder_tags_value(path)
+                .map_or_else(Vec::new, |data| parse_finder_tags(&data)),
         })
     }
 }
@@ -289,5 +297,345 @@ mod tests {
         // No zero padding on the day, which is what `.abbreviated` produces.
         let day = formatted.split_once(", ").expect("a comma after the day").0;
         assert!(!day.ends_with('0') || day.len() == 2, "{formatted:?}");
+    }
+}
+
+// ---- Finder tags -------------------------------------------------------
+
+/// The colour half of a Finder tag.
+///
+/// Upstream's `FinderTag.Color`, whose raw values are what the extended
+/// attribute stores: 0 for "no colour", then the seven tinted ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinderColor {
+    None,
+    Gray,
+    Green,
+    Purple,
+    Blue,
+    Yellow,
+    Red,
+    Orange,
+}
+
+impl FinderColor {
+    /// The colour an extended attribute's index names.
+    ///
+    /// An index outside 0–7 is not a colour Finder can draw, and upstream
+    /// leaves the tag uncoloured rather than guessing.
+    pub fn from_index(index: u8) -> Self {
+        match index {
+            1 => Self::Gray,
+            2 => Self::Green,
+            3 => Self::Purple,
+            4 => Self::Blue,
+            5 => Self::Yellow,
+            6 => Self::Red,
+            7 => Self::Orange,
+            _ => Self::None,
+        }
+    }
+
+    /// The colour as macOS draws it, as red/green/blue.
+    ///
+    /// These are the system tag colours from the Finder's palette, not theme
+    /// roles: a file tagged red is red whatever theme SubText is wearing, which
+    /// is the whole point of a tag. They are the fourth of the recorded
+    /// colour-literal exceptions (see FEATURE-MATRIX).
+    pub fn rgb(self) -> Option<(u8, u8, u8)> {
+        Some(match self {
+            Self::None => return None,
+            Self::Gray => (0x8E, 0x8E, 0x93),
+            Self::Green => (0x28, 0xCD, 0x41),
+            Self::Purple => (0xAF, 0x52, 0xDE),
+            Self::Blue => (0x00, 0x7A, 0xFF),
+            Self::Yellow => (0xFF, 0xCC, 0x00),
+            Self::Red => (0xFF, 0x3B, 0x30),
+            Self::Orange => (0xFF, 0x95, 0x00),
+        })
+    }
+}
+
+/// One Finder tag: a name and the colour it was given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinderTag {
+    pub name: String,
+    pub color: FinderColor,
+}
+
+impl FinderTag {
+    /// Parse one string out of the extended attribute.
+    ///
+    /// The attribute stores `"Name"` or `"Name\nColourIndex"` — a newline and
+    /// the decimal index, which is what the Finder writes. A name containing a
+    /// newline would be split here too, exactly as upstream's
+    /// `split(separator: "\n")` does; the Finder does not allow one in a tag.
+    pub fn parse(string: &str) -> Option<Self> {
+        let mut parts = string.split('\n');
+        let name = parts.next()?;
+        if name.is_empty() {
+            return None;
+        }
+        let color = parts
+            .next()
+            .and_then(|index| index.parse::<u8>().ok())
+            .map_or(FinderColor::None, FinderColor::from_index);
+        Some(Self { name: name.to_string(), color })
+    }
+}
+
+/// The Finder tags stored in a `com.apple.metadata:_kMDItemUserTags` value.
+///
+/// That value is a **binary property list** holding one array of strings. A
+/// value that is not one — a truncated attribute, a standard (XML) plist, a
+/// different type altogether — yields no tags rather than an error: a document
+/// with no tags and a document with an unreadable tag attribute look the same
+/// in the inspector either way.
+pub fn parse_finder_tags(data: &[u8]) -> Vec<FinderTag> {
+    bplist_string_array(data)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|string| FinderTag::parse(string))
+        .collect()
+}
+
+/// The strings of a binary property list whose root is an array of strings.
+///
+/// Only what a tag attribute needs: `bplist00`, one root array, strings in
+/// ASCII or UTF-16. Anything else is `None`. The format is Apple's
+/// [binary property list][bplist], and the parts read here are the header, the
+/// trailer's four numbers, the offset table, and the two string markers.
+///
+/// [bplist]: https://opensource.apple.com/source/CF/CF-550/CFBinaryPList.c
+fn bplist_string_array(data: &[u8]) -> Option<Vec<String>> {
+    const HEADER: usize = 8;
+    const TRAILER: usize = 32;
+
+    if !data.starts_with(b"bplist00") || data.len() < HEADER + TRAILER {
+        return None;
+    }
+    let trailer = &data[data.len() - TRAILER..];
+    // The trailer's first six bytes are padding.
+    let offset_size = *trailer.get(6)? as usize;
+    let reference_size = *trailer.get(7)? as usize;
+    let object_count = big_endian(&trailer[8..16]) as usize;
+    let root = big_endian(&trailer[16..24]) as usize;
+    let table = big_endian(&trailer[24..32]) as usize;
+    if offset_size == 0 || offset_size > 8 || reference_size == 0 || reference_size > 8 {
+        return None;
+    }
+
+    // Where the object numbered `index` starts.
+    let offset_of = |index: usize| -> Option<usize> {
+        if index >= object_count {
+            return None;
+        }
+        let start = table.checked_add(index.checked_mul(offset_size)?)?;
+        big_endian(data.get(start..start + offset_size)?).try_into().ok()
+    };
+
+    let root_offset = offset_of(root)?;
+    let (count, mut cursor) = bplist_count(data, root_offset)?;
+    if data.get(root_offset)? >> 4 != 0xA {
+        return None;
+    }
+
+    let mut strings = Vec::with_capacity(count);
+    for _ in 0..count {
+        let reference = big_endian(data.get(cursor..cursor + reference_size)?) as usize;
+        cursor += reference_size;
+        strings.push(bplist_string(data, offset_of(reference)?)?);
+    }
+    Some(strings)
+}
+
+/// The element count at `offset`, and where its body begins.
+///
+/// A marker's low nibble is the count, except for `0xF`, which means "the count
+/// is the next object" — an integer whose own low nibble is the power of two
+/// number of bytes it occupies.
+fn bplist_count(data: &[u8], offset: usize) -> Option<(usize, usize)> {
+    let marker = *data.get(offset)?;
+    let low = (marker & 0x0F) as usize;
+    if low != 0x0F {
+        return Some((low, offset + 1));
+    }
+    let integer = *data.get(offset + 1)?;
+    if integer >> 4 != 0x1 {
+        return None;
+    }
+    let bytes = 1usize << (integer & 0x0F);
+    let start = offset + 2;
+    let count = big_endian(data.get(start..start + bytes)?) as usize;
+    Some((count, start + bytes))
+}
+
+/// One string object at `offset`: ASCII (`0x5`) or UTF-16BE (`0x6`).
+fn bplist_string(data: &[u8], offset: usize) -> Option<String> {
+    let marker = *data.get(offset)?;
+    let kind = marker >> 4;
+    let (length, body) = bplist_count(data, offset)?;
+    match kind {
+        0x5 => {
+            let bytes = data.get(body..body + length)?;
+            // The marker promises ASCII; anything else would be a writer bug,
+            // and a lossy read is better than dropping the tag.
+            Some(String::from_utf8_lossy(bytes).into_owned())
+        }
+        0x6 => {
+            let bytes = data.get(body..body + length * 2)?;
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .collect();
+            String::from_utf16(&units).ok()
+        }
+        _ => None,
+    }
+}
+
+/// A big-endian unsigned integer of however many bytes were handed over.
+fn big_endian(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0u64, |value, byte| (value << 8) | u64::from(*byte))
+}
+
+/// The `com.apple.metadata:_kMDItemUserTags` value of a file, on macOS.
+///
+/// The attribute is an extended attribute, which `std` has no API for, so this
+/// is `getxattr` twice: once for the size, once for the value. Other platforms
+/// have no Finder and no such attribute, and return `None`.
+#[cfg(target_os = "macos")]
+fn finder_tags_value(path: &Path) -> Option<Vec<u8>> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    const NAME: &str = "com.apple.metadata:_kMDItemUserTags";
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let name = CString::new(NAME).ok()?;
+
+    // SAFETY: both C strings outlive the calls, and a null buffer with a zero
+    // size is the documented way to ask for the value's length.
+    let size = unsafe {
+        libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0, 0, 0)
+    };
+    if size <= 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; size as usize];
+    // SAFETY: `buffer` is writable for exactly `size` bytes, which is what the
+    // call was told it has.
+    let read = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            0,
+            0,
+        )
+    };
+    if read <= 0 {
+        return None;
+    }
+    buffer.truncate(read as usize);
+    Some(buffer)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn finder_tags_value(_: &Path) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::*;
+
+    /// Real `bplist00` output, produced by `plistlib` with `FMT_BINARY`.
+    const TWO: &[u8] = &[
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa2, 0x01, 0x02, 0x57, 0x47, 0x72,
+        0x65, 0x65, 0x6e, 0x0a, 0x32, 0x54, 0x4e, 0x6f, 0x6e, 0x65, 0x08, 0x0b, 0x13, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x18,
+    ];
+    const ONE_RED: &[u8] = &[
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x55, 0x52, 0x65, 0x64,
+        0x0a, 0x36, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    ];
+    const EMPTY: &[u8] = &[
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa0, 0x08, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
+    ];
+    /// `["中文\n4"]` — a UTF-16BE string object, which is what a tag whose name
+    /// is not ASCII is stored as.
+    const CJK: &[u8] = &[
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x64, 0x4e, 0x2d, 0x65,
+        0x87, 0x00, 0x0a, 0x00, 0x34, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13,
+    ];
+
+    #[test]
+    fn tags_come_back_with_the_colour_the_attribute_names() {
+        // `"Green\n2"` is green, and `"None"` has no colour at all.
+        assert_eq!(
+            parse_finder_tags(TWO),
+            vec![
+                FinderTag { name: "Green".into(), color: FinderColor::Green },
+                FinderTag { name: "None".into(), color: FinderColor::None },
+            ]
+        );
+        assert_eq!(
+            parse_finder_tags(ONE_RED),
+            vec![FinderTag { name: "Red".into(), color: FinderColor::Red }]
+        );
+    }
+
+    #[test]
+    fn an_empty_array_is_no_tags() {
+        assert!(parse_finder_tags(EMPTY).is_empty());
+    }
+
+    #[test]
+    fn a_name_that_is_not_ascii_survives() {
+        // The attribute stores non-ASCII names as UTF-16, not UTF-8.
+        assert_eq!(
+            parse_finder_tags(CJK),
+            vec![FinderTag { name: "中文".into(), color: FinderColor::Blue }]
+        );
+    }
+
+    #[test]
+    fn a_value_that_is_not_a_tag_list_is_no_tags() {
+        // Truncated, wrong magic, an XML plist, and plain text: each is "this
+        // file has no tags", never a panic and never an error dialog.
+        assert!(parse_finder_tags(&TWO[..TWO.len() - 8]).is_empty());
+        assert!(parse_finder_tags(b"not a plist at all").is_empty());
+        assert!(parse_finder_tags(b"<?xml version=\"1.0\"?><plist><array/></plist>").is_empty());
+        assert!(parse_finder_tags(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_colour_index_macos_does_not_use_leaves_the_tag_uncoloured() {
+        assert_eq!(FinderColor::from_index(0), FinderColor::None);
+        assert_eq!(FinderColor::from_index(1), FinderColor::Gray);
+        assert_eq!(FinderColor::from_index(7), FinderColor::Orange);
+        assert_eq!(FinderColor::from_index(8), FinderColor::None);
+        // A name with no index is a tag with no colour.
+        assert_eq!(
+            FinderTag::parse("Later"),
+            Some(FinderTag { name: "Later".into(), color: FinderColor::None })
+        );
+        // An index that is not a number is treated the same way.
+        assert_eq!(
+            FinderTag::parse("Later\nred"),
+            Some(FinderTag { name: "Later".into(), color: FinderColor::None })
+        );
+        // An empty name is not a tag.
+        assert_eq!(FinderTag::parse(""), None);
+        assert_eq!(FinderTag::parse("\n3"), None);
     }
 }

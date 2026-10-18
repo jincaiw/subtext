@@ -1825,8 +1825,9 @@ Character       Code Point(s) · Name · Block · Category
    `shortName` 两张表逐条对齐（`Uppercase Letter (Lu)`）。
 3. **控制字符名**：Unicode 对 C0/C1 只写 `<control>`，上游自带 ASCII/ISO 6429 的名字表
    （`NULL`、`NEXT LINE`…），照搬 66 条。
-4. **Finder 标签**：**没做**，见缺口表。`Tags` 这一行因此没有画 —— 一行永远填不上的
-   比没有这一行更糟。
+4. ~~**Finder 标签**：没做，`Tags` 行因此没有画~~ —— **§11.7 关掉了**：
+   `fileattrs::parse_finder_tags` 自带一个只认「根为字符串数组」的 bplist 读取器
+   （不加依赖），`Tags` 行按上游画出圆点 + 名字（无色标签是空心圈）。
 
 #### 新增：文件属性
 
@@ -1848,7 +1849,7 @@ Character       Code Point(s) · Name · Block · Category
 
 | 偏差 | 说明 |
 | --- | --- |
-| 没有 `Tags` 行 | 上游从 `com.apple.metadata:_kMDItemUserTags` 扩展属性读，值是 **binary plist**（`PropertyListDecoder` 解成 `[String]`，每项 `"名字\n颜色序号"`）。Rust 侧要一个 bplist 解析器或新依赖，且非 macOS 没有对应属性。**这一轮没做**，行也没画。 |
+| ~~没有 `Tags` 行~~ | **§11.7 关掉了**：`getxattr` 读扩展属性 + 自带的 bplist 读取器，`Tags` 行已画。非 macOS 上属性不存在，行显示 `–`（与「没有打标签」同形）。 |
 | `Words` 与 ICU 不同 | 见上。规则内的用例全对，差别只在「词之间不写空格」的文字。 |
 | `Full Path` 是尾部截断 | 上游 `truncationMode(.middle)` 截中间，还带 `help` tooltip 且文本可选。GPUI 只有尾部截断，`div` 没有 tooltip，`div` 也不可选。 |
 | code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle.strokeBorder` 的方框里；SubText 用空格连起来。 |
@@ -2467,7 +2468,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 11.4 | 警告检查器按列排序与窄窗布局：两张表各自记 `sort`（上游两个 `@State sortOrder`，互不影响），点表头同列反向、换列从升序开始；活动列带 ▲/▼；排序是**稳定排序 + 反转**（等于上游的 `KeyPathComparator` 降序，平局也一致），Line 按**数字**比较（`2` 在 `10` 前，字符串比会反）；*Character* 列对不可见类别（控制/空白/行段分隔）显示 `U+XXXX`（上游按 Unicode general category，Rust 侧用 `is_control/is_whitespace` 覆盖同样四类）；点行高亮并选中编辑器（上游 `Table(selection:)`）。**窄窗**：表格改为在面板剩余高度内双向滚动，行不再溢出到下一节 | ✅ |
 | 11.5 | 查找指示器（上游 `showFindIndicator`）：每处编辑器一个 `TextDecorationCollection`，闪一下就是把匹配范围设成 `theme().yellow` α0.55 的**文字背景**（在字形之后，文字保持本色），700 ms 后清掉；每次闪带一个编号，旧计时器不会抹掉新标记。接在上游的四条路径上：查找下一个/上一个、点 *Find All* 结果行（都经 `select_match`）、文件夹查找跳转（`open_and_select`）、Inspect Character（先闪再弹 popover）。**顺带补上增量搜索漏掉的一半**：上游 `find(forward:isIncremental:)` 会选中匹配并闪，SubText 之前只更新计数；现在停止输入 200 ms 后跑一遍（上游 `Task.sleep(0.2)` 去抖）、把光标移到光标处或之后的匹配（`includingSelection`）并在无匹配时按 wrap 设置回到第一个，`find.current` 仍不设（上游增量传 `matchedRange = nil`） | ✅ |
 | 11.6 | **命令覆盖门禁**（`menu_contract.rs`，随 `cargo test` 常设）：把三段链条读成文本并两两比对 —— 生成表点名的 action ⊆ bridge 的绑定表 ⊆ dispatch 的分支名。四条断言：① 解析器读到的东西有下限（解析器改形态时**响亮失败**而不是空差分）② 每个菜单 action 都有绑定 ③ 每个绑定名都有分支 ④ 只作例外的清单**不得变成化石**（第一次运行它就判定我为引擎命令写的例外表是多余的 —— 那些名字在 dispatch 里确有分支）。注入验证两向：改掉一个分支名 ⇒ ③ 红；删一条绑定 ⇒ ② 红。**置灰这半未做**：GPUI 的 `MenuItem::Action` 字段私有、也没有 action 访问器，构造后的条目无法按命令定位，`disabled(bool)` 只能在构造时给 —— 要按选区状态置灰，只能让生成表接收状态（改生成器），属设计决定，见缺口表 | ✅ |
-| 11.7 | 文档检查器 `Tags` 行（binary plist 读取） | 待办 |
+| 11.7 | 文档检查器 `Tags` 行：core 新增 `FinderTag` / `FinderColor` 与 `parse_finder_tags` —— 读 `com.apple.metadata:_kMDItemUserTags` 扩展属性（`getxattr` 两次：先问长度再取值），值是 **binary plist** 的字符串数组，每条 `"名字"` 或 `"名字\n颜色序号"`；自带一个只认「根为字符串数组」的 bplist 读取器（`bplist00` 头 + trailer 四个数 + 偏移表 + `0x5n`/`0x6n` 两种字符串），**不加依赖**。颜色序号 1..7 对应灰绿紫蓝黄红橙，越界一律无色（上游同）。UI：File 段在 Size 与 Permissions 之间，右侧右对齐**可换行**的「圆点 + 名字」，圆点 = 82% 不透明填充 + 同色描边，无色标签画空心圈；无标签画 tertiary 色的 `–`（上游 `Text.none`）。标签颜色是 Finder 调色板而非主题色，记为第 4 处颜色字面量例外 | ✅ |
 | 11.8 | Unicode 规范化的 3 个 Apple 形态（需 CaseFolding / HFS+ 表，工作量大） | 待办 |
 | 11.9 | 补全候选列表虚拟化、IME 合成态（框架不暴露合成态，先记账） | 待办 |
 

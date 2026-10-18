@@ -144,7 +144,7 @@
 | 侧边栏 | `update_window_options` | ✅ |
 | 侧边栏 / 检查器的宽度 | `WindowOptions::sidebar_width` / `inspector_width` | ✅ 分隔线可拖动（`h_resizable`），宽度记在设置里；上游是 `NSSplitViewController` 的 `autosaveName`。侧栏 11–24 rem、检查器 12–26 rem，文档区吃富余 |
 | 检查器 | `update_window_options` | ✅ |
-| 文稿检查器 | `render_document_inspector` | ✅ 上游的四段：**File**（Created / Modified / Size / Permissions / Owner / Full Path + *Show in Finder*）· **Text Settings**（Encoding / Line Endings / Mode）· **Count**（三对计数带 `entire (selected)` + 三个位置量）· **Character**（code point，单标量再给 Name / Block / Category；无选区写 *Not selected*）。少了 `Tags` 一行，见缺口表 |
+| 文稿检查器 | `render_document_inspector` | ✅ 上游的四段：**File**（Created / Modified / Size / Permissions / Owner / Full Path + *Show in Finder*）· **Text Settings**（Encoding / Line Endings / Mode）· **Count**（三对计数带 `entire (selected)` + 三个位置量）· **Character**（code point，单标量再给 Name / Block / Category；无选区写 *Not selected*）。**`Tags` 行**读 `com.apple.metadata:_kMDItemUserTags`扩展属性（binary plist，自带的 bplist 读取器），逐条画「圆点 + 名字」、右对齐可换行，无色标签是空心圈，无标签画 `–`。标签颜色是 Finder 调色板而非主题色（第 4 处颜色字面量例外） |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
 | 警告检查器 | `render_warnings` | ✅ 上游的 `VSplitView` 两栏：**Incompatible Characters**（Line / Character / Converted）与 **Inconsistent Line Endings**（Line / Line Ending），各带 `Found N …` / `No issues found.` 状态行，两栏可拖动改高，点一行选中编辑器里那个字符。`Converted` 列显示 WHATWG 的替换物；**表头可排序**（同列反向、换列升序、活动列带箭头，`Line` 按数字比较），不可见字符在 *Character* 列显示 `U+XXXX`，点行高亮并选中编辑器；窄时双向滚动。编辑器里不高亮全部问题字符，见缺口表 |
 | 导航栏 | `render_navigation_bar(pane)` | ✅ **每个编辑分屏一条**（上游 `EditorViewController` 的第一项）：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 · 分屏按钮（右键改方向）。只有一个分屏时关闭按钮不可见 |
