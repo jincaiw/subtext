@@ -2480,10 +2480,40 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 12.1 | 全量测试 + clippy 零警告（655 项） | ✅ |
-| 12.2 | CHANGELOG / README / FEATURE-MATRIX 同步 | ✅ |
-| 12.3 | 打包 `dist/SubText.app` + zip，打包后 bundle 冒烟 | ✅ |
-| 12.4 | 提交、打 `v0.3.0` 标签 | ✅ |
+| 13.1 | 全量测试 + clippy 零警告（655 项） | ✅ |
+| 13.2 | CHANGELOG / README / FEATURE-MATRIX 同步 | ✅ |
+| 13.3 | 打包 `dist/SubText.app` + zip，打包后 bundle 冒烟 | ✅ |
+| 13.4 | 提交、打 `v0.3.0` 标签 | ✅ |
+
+---
+
+## 阶段 13 — 重估后的「临时标记」与缺口表对齐
+
+**重估（2026-10-18）**：阶段 11 清空后重新逐条对照上游，抓到两类问题。
+
+1. **缺口表里有 6 条早已做掉却没销账**：自动补全、警告表排序、文档检查器 `Tags` 行、
+   Inspect Character 的闪一下、规范化菜单项数、查找面板帧记忆。一份说谎的缺口表比没有
+   缺口表更糟 —— 它会让人重做已经做过的事，也会把真正剩下的问题埋在过时条目里。
+2. **上游的「临时标记」只做了一半**。§11.5 做的是**一次性**的黄闪（`showFindIndicator`）；
+   上游还有一族**持续到某个事件为止的灰底**（`.unemphasizedSelectedTextBackgroundColor`）：
+   增量搜索时每个匹配的灰底、警告检查器列出的每个问题字符的灰底。两者是不同的东西，
+   前者是动画，后者是状态。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 12.1 | 缺口表对齐：删 6 条过时行、改写 1 条（警告表滚动）、补 3 条（括号配对闪烁 / 指示器无淡出 / 菜单置灰） | ✅ |
+| 12.2 | 增量搜索把**全部匹配**涂灰：`Pane` 加第二个 `TextDecorationCollection`（`marks`，与一次性的 `indicator` 分开，因为寿命不同），`run_incremental_search` 跑完就设；查询清空时清、查找面板窗口关闭时清（`App::on_window_closed` 比对 `WindowId`，这正是上游在面板关闭时调 `unhighlight(nil)` 的那一步） | ✅ |
+| 12.3 | 警告检查器把**每个问题字符**涂灰：`show_inspector(Warnings)` 时按扫描结果设标记，切到别的面板时清除（上游在 `onDisappear` 清除） | ✅ |
+
+**颜色**：上游是 `.unemphasizedSelectedTextBackgroundColor`。先用 `theme().tokens.selection`，
+在浅色主题下几乎看不见（该令牌的 alpha 太低）；换成 `theme().muted` 后与 macOS 那块灰
+一致。两次都截了图比较，不是猜的。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 12.4 | 括号配对闪烁：先补「光标贴着括号时高亮配对」这个特性本身（上游 `highlightMatchingSymbol`），再让它复用 §11.5 的指示器 | 待办 |
+| 13.5 | 菜单项按状态置灰：让 `tools/generate_menu.py` 产出**接收运行期状态**的菜单（现在的生成表是静态树，构造后认不出哪条是哪个命令） | 待办 |
+| 13.6 | 查找指示器淡出：要逐帧重绘整行，先评估 `with_animation` 能否作用在文字装饰上 | 待办 |
 
 ---
 
@@ -2505,21 +2535,18 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 正则速查弹层在窗口内限高滚动 | 上游的 `detachablePopover` 可以拖出窗口自由悬浮，内容完整展开；GPUI 的 overlay 无法离开窗口，弹层限高 9rem 内容滚动（§8.26）。上游尾部还有指向本地帮助的 HelpLink（`about_regex` 锚点），SubText 没有帮助系统，省略。 |
 | 高级选项的四个开关在 SubText 里是禁用的 | 上游 *Distinguish characters strictly* / *Ignore diacritical marks* / *Ignore width differences* / *Use Unicode word boundaries*（TR#29）需要 ICU 的对应能力，regex 引擎没有；开关照列、禁用 + tooltip 说明（§8.26b）。 |
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
-| 查找面板不记住窗口位置 | 上游 `windowFrameAutosaveName = "Find Panel"`；SubText 每次居中打开。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
-| 警告检查器的表格不能按列排序 | 上游的表头可点排序；SubText 用无状态的 `Table`，行数是几个出问题的字符，不需要排序也不需要虚拟化。 |
-| 警告检查器的表格横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器；上游的 SwiftUI `Table` 会压缩并截断。 |
+| 警告检查器的表格在窄检查器里横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器。§11.4 之后表格在面板剩余高度内**双向**滚动（不再溢出到下一节），但上游的 SwiftUI `Table` 是压缩并截断列宽。 |
 | 关闭未命名文档时保存不会自动关闭标签 | 上游保存面板确认后继续关闭流程；SubText 的保存面板结果异步到达，标签保持打开，需要再关一次（此时不再询问）。其余关闭语义已与上游一致（阶段 10）。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
-| 补全不判断 IME 合成态 | 上游 `performCompletion` 先问 `hasMarkedText()`，正在拼字时不弹列表。GPUI 的编辑器**内部有** `ime_marked_range`，但字段是 `pub(super)` 且无访问器，`InputEvent` 也不带合成态 —— 应用侧够不着。 |
 | 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |
 | 高级计数的胶囊不能拖动 | 上游的 `DraggableHostingView` 让用户把它拖到正文的任何地方，还能把它拖到窗口边上。SubText 固定在正文右上角 —— 也就是新开一颗时它出现的位置。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
-| 高级计数的规范化菜单只有 4 项 | 上游列 `standardForms`（5）+ `modifiedForms`（2）。其中 NFKC Case-Fold 与两个 HFS+ 形态是 SubText 没有的 Unicode 数据，`normalize` 对它们是拒绝而不是近似 —— 列出来只会让计数静默地错。Text ▸ Unicode Normalizations 的**菜单**仍然列全 7 项并说明原因。 |
 | Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
-| Inspect Character 没有「闪一下选中范围」 | 上游在弹 popover 前还会 `showFindIndicator(for: selectedRange)` 把选中范围闪一次。GPUI 没有那个 API。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
-| 文档检查器没有 `Tags` 行 | **§8.16 重排后剩下的唯一一行缺口。** 上游从 `com.apple.metadata:_kMDItemUserTags` 扩展属性读标签，值是 **binary plist**：`PropertyListDecoder` 解成 `[String]`，每项 `"名字\n颜色序号"`（序号 0–7 → none/gray/green/purple/blue/yellow/red/orange）。Rust 侧要么写一个 bplist 解析器、要么加新依赖（`plist`），而 `xattr` 与那套调色板又都只有 macOS 有。这一轮没做，`Tags` 行也**没有画** —— 一行永远填不上的比没有这一行更糟。 |
+| 括号配对闪烁未做 | 上游 `highlightMatchingSymbol` 在光标紧贴括号时闪出配对的那一个；SubText 没有「贴着括号高亮配对」这个特性本身，所以没有可闪的对象（§11.5 的指示器已具备能力）。 |
+| 查找指示器没有淡出 | 上游 `showFindIndicator` 的黄色标记会淡出；SubText 用文字装饰画背景，只能整块出现与消失 —— 淡出要逐帧重绘整行，装饰做不到。 |
+| 菜单项不能按状态置灰 | 上游用 `NSMenuItem` 的 `validateUserInterfaceItem` 让 *Straighten Quotes*（空选区）与大纲导航（无条目）变灰；GPUI 的 `MenuItem` 在构造时定死 `disabled`，`Action` 变体字段私有且无访问器 —— 构造后认不出哪条是哪个命令。要置灰得让 `tools/generate_menu.py` 接收运行期状态 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
 | 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
 | 检查器的 code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle(cornerRadius: 3.5).strokeBorder` 的方框里；SubText 用空格连成一串。 |

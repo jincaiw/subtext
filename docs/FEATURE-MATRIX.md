@@ -146,7 +146,7 @@
 | 检查器 | `update_window_options` | ✅ |
 | 文稿检查器 | `render_document_inspector` | ✅ 上游的四段：**File**（Created / Modified / Size / Permissions / Owner / Full Path + *Show in Finder*）· **Text Settings**（Encoding / Line Endings / Mode）· **Count**（三对计数带 `entire (selected)` + 三个位置量）· **Character**（code point，单标量再给 Name / Block / Category；无选区写 *Not selected*）。**`Tags` 行**读 `com.apple.metadata:_kMDItemUserTags`扩展属性（binary plist，自带的 bplist 读取器），逐条画「圆点 + 名字」、右对齐可换行，无色标签是空心圈，无标签画 `–`。标签颜色是 Finder 调色板而非主题色（第 4 处颜色字面量例外） |
 | 大纲检查器 | `show_inspector(Outline)` | ✅ 可折叠 `Tree` + 子序列过滤 + 光标跟随 |
-| 警告检查器 | `render_warnings` | ✅ 上游的 `VSplitView` 两栏：**Incompatible Characters**（Line / Character / Converted）与 **Inconsistent Line Endings**（Line / Line Ending），各带 `Found N …` / `No issues found.` 状态行，两栏可拖动改高，点一行选中编辑器里那个字符。`Converted` 列显示 WHATWG 的替换物；**表头可排序**（同列反向、换列升序、活动列带箭头，`Line` 按数字比较），不可见字符在 *Character* 列显示 `U+XXXX`，点行高亮并选中编辑器；窄时双向滚动。编辑器里不高亮全部问题字符，见缺口表 |
+| 警告检查器 | `render_warnings` | ✅ 上游的 `VSplitView` 两栏：**Incompatible Characters**（Line / Character / Converted）与 **Inconsistent Line Endings**（Line / Line Ending），各带 `Found N …` / `No issues found.` 状态行，两栏可拖动改高，点一行选中编辑器里那个字符。`Converted` 列显示 WHATWG 的替换物；**表头可排序**（同列反向、换列升序、活动列带箭头，`Line` 按数字比较），不可见字符在 *Character* 列显示 `U+XXXX`，点行高亮并选中编辑器；窄时双向滚动。编辑器里也会把每个问题字符涂成灰底（切换到别的检查器面板时消失） |
 | 导航栏 | `render_navigation_bar(pane)` | ✅ **每个编辑分屏一条**（上游 `EditorViewController` 的第一项）：关闭分屏 · 分隔线 · 上一个 / 下一个 · 大纲菜单 · 分屏按钮（右键改方向）。只有一个分屏时关闭按钮不可见 |
 | 行号 | `update_editor_options` | ✅ |
 | 状态栏 | `render_status_bar` | ✅ **属于内容列**（上游挂在内容项的 bottom accessory 上），不跨侧栏与检查器：不可编辑徽标 · Lines / Characters / Words / Location / Line / Column（各由一个开关控制，有选区时 `entire (selected)`）· 文件大小 · 编码选择器 · 换行符选择器 |
@@ -196,7 +196,7 @@
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 查找 / 替换 | `show_find` | ✅ 上游的**独立浮动窗口**（标题 *Find & Replace*，520×190 居中）：两个 44pt 圆角字段、三个复选框（Regular Expression / Ignore Case / In Selection）、结果消息在**查找字段的尾随边缘**上（`1/4` 或 `4 matches`，字段为空时不画，旁边是清空按钮）、**`Find All` 的结果列表**（`[⌃]` + `Found N matches in "文件名."` + `Find text: 查询` + `Line`/`Matched Text` 两列表格，默认收起、打开时窗口长高 200 点；行可多选（⌘ 切换 / ⇧ 范围）、⌘C 复制选中行、`Line` 表头排序（`range.location` 键）、捕获组按上游 decompose 算法着色、只选一行时编辑器选区跟随；标准 Bigger/Smaller/Reset Font 与 Copy 在表格聚焦时作用于表格）、`[Find All ▾] [Replace All] … [Replace] [◀] [▶]`（Find All 是分体下拉：caret 菜单给 *Highlight All*，*Select All* 待编辑器多选）、正则速查 ？ 弹层、高级选项 ⋯ 弹层、Recent Searches / Recent Replacements 历史菜单、记住面板帧。**增量搜索**在停止输入 200 ms 后跑一遍、把光标移到匹配上并闪一下，但不涂灰全部匹配（上游会，见缺口表）。捕获着色不跟随系统强调色，见缺口表 |
+| 查找 / 替换 | `show_find` | ✅ 上游的**独立浮动窗口**（标题 *Find & Replace*，520×190 居中）：两个 44pt 圆角字段、三个复选框（Regular Expression / Ignore Case / In Selection）、结果消息在**查找字段的尾随边缘**上（`1/4` 或 `4 matches`，字段为空时不画，旁边是清空按钮）、**`Find All` 的结果列表**（`[⌃]` + `Found N matches in "文件名."` + `Find text: 查询` + `Line`/`Matched Text` 两列表格，默认收起、打开时窗口长高 200 点；行可多选（⌘ 切换 / ⇧ 范围）、⌘C 复制选中行、`Line` 表头排序（`range.location` 键）、捕获组按上游 decompose 算法着色、只选一行时编辑器选区跟随；标准 Bigger/Smaller/Reset Font 与 Copy 在表格聚焦时作用于表格）、`[Find All ▾] [Replace All] … [Replace] [◀] [▶]`（Find All 是分体下拉：caret 菜单给 *Highlight All*，*Select All* 待编辑器多选）、正则速查 ？ 弹层、高级选项 ⋯ 弹层、Recent Searches / Recent Replacements 历史菜单、记住面板帧。**增量搜索**在停止输入 200 ms 后跑一遍、把光标移到匹配上并闪一下、并把**所有匹配涂成灰底**（面板关闭或清空查询时消失），但不涂灰全部匹配（上游会，见缺口表）。捕获着色不跟随系统强调色，见缺口表 |
 | 替换 | `show_find(true)` | ✅ |
 | 查找下一个 / 上一个 | `find_step(±)` | ✅ 命中后编辑器选区移到该匹配，并在匹配上闪一下黄色标记（上游 `showFindIndicator`） |
 | 查找全部 | `find_all` | ✅ |

@@ -206,6 +206,13 @@ struct Pane {
     /// owns one for its lifetime: creating one per flash would leave a new
     /// collection behind on every find.
     indicator: gpui_kit::base::input::TextDecorationCollection,
+    /// The collection the *unemphasized* marks use — every match while an
+    /// incremental search is running, and the warnings inspector's offenders.
+    ///
+    /// Separate from `indicator` because the two have different lifetimes: the
+    /// flash is a moment, the marks last as long as the thing that asked for
+    /// them.
+    marks: gpui_kit::base::input::TextDecorationCollection,
     _subscription: Subscription,
 }
 
@@ -656,6 +663,13 @@ pub struct Workspace {
     /// thrown away when either moves. A memo rather than state: nothing outside
     /// the pane reads it, and recomputing it does not change what is drawn.
     incompatible_cache: std::cell::RefCell<Option<(u64, TextEncoding, Vec<subtext_core::IncompatibleCharacter>)>>,
+    /// Watches for the find panel closing.
+    ///
+    /// The panel is a window of its own and reports nothing on the way out, but
+    /// its incremental-search marks live on in the document — upstream drops
+    /// them in `unhighlight(nil)`, which the panel's close triggers. Watching
+    /// window closes is the equivalent seam here.
+    _find_panel_closed: Option<Subscription>,
 }
 
 impl Workspace {
@@ -791,7 +805,20 @@ impl Workspace {
             find_indicator: 0,
             incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
+            _find_panel_closed: None,
         };
+        // The incremental search's grey marks belong to the panel's lifetime,
+        // not to the document's.
+        let weak = cx.entity().downgrade();
+        this._find_panel_closed = Some(cx.on_window_closed(move |cx, id| {
+            weak.update(cx, |workspace, cx| {
+                if workspace.find_window.is_some_and(|handle| handle.window_id() == id) {
+                    workspace.find_window = None;
+                    workspace.clear_editor_marks(cx);
+                }
+            })
+            .ok();
+        }));
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(SCRIPT_POLL).await;
@@ -903,8 +930,11 @@ impl Workspace {
         let indicator = editor.update(cx, |state, cx| {
             state.create_decorations_collection(Vec::new(), cx)
         });
+        let marks = editor.update(cx, |state, cx| {
+            state.create_decorations_collection(Vec::new(), cx)
+        });
         let subscription = self.subscribe_pane(&editor, window, cx);
-        Pane { editor, indicator, _subscription: subscription }
+        Pane { editor, indicator, marks, _subscription: subscription }
     }
 
     /// Follow one pane's buffer back into the document model.
@@ -2570,6 +2600,12 @@ impl Workspace {
     /// reporting the count while the caret moves.
     fn run_incremental_search(&mut self, cx: &mut Context<Self>) {
         self.run_search(cx);
+        // Upstream marks every match while the query is being typed:
+        // `client.updateBackgroundColor(.unemphasizedSelectedTextBackgroundColor,
+        // ranges: matches)`. The marks go away with the panel (see the
+        // window-closed observer) or when the query is emptied.
+        let matches = self.find.matches.clone();
+        self.set_editor_marks(&matches, cx);
         let selection = self.active_selection(cx);
         // A match starting at the caret counts as the one to show — upstream's
         // `includingSelection`, which is what keeps typing on the same match
@@ -2601,6 +2637,7 @@ impl Workspace {
             self.find.capture_matches.clear();
             self.find.current = None;
             self.find.error = None;
+            self.clear_editor_marks(cx);
             cx.notify();
             return;
         }
@@ -2685,6 +2722,45 @@ impl Workspace {
             .ok();
         })
         .detach();
+    }
+
+    /// The active pane's marks collection.
+    fn marks_collection(&self) -> Option<gpui_kit::base::input::TextDecorationCollection> {
+        self.documents
+            .get(self.active)
+            .map(|document| document.panes[document.active_pane].marks.clone())
+    }
+
+    /// Paint `ranges` with the unemphasized-selection tint.
+    ///
+    /// This is upstream's `updateBackgroundColor(.unemphasizedSelectedText‌BackgroundColor,
+    /// ranges:)` — the grey macOS puts behind every match while an incremental
+    /// search is running, and behind every character the warnings inspector
+    /// lists. The tint is the theme's selection colour used as a **text
+    /// background**, so the glyphs keep their own colour.
+    fn set_editor_marks(&mut self, ranges: &[Range<usize>], cx: &mut Context<Self>) {
+        let style = gpui_kit::HighlightStyle {
+            background_color: Some(cx.theme().muted),
+            ..Default::default()
+        };
+        let Some(marks) = self.marks_collection() else {
+            return;
+        };
+        marks.set(
+            ranges
+                .iter()
+                .cloned()
+                .map(|range| gpui_kit::base::input::TextDecoration::new(range, style))
+                .collect(),
+            cx,
+        );
+    }
+
+    /// Drop the marks, if there are any.
+    fn clear_editor_marks(&mut self, cx: &mut Context<Self>) {
+        if let Some(marks) = self.marks_collection() {
+            marks.clear(cx);
+        }
     }
 
     /// Step through the matches, wrapping at either end when the settings say
@@ -3265,6 +3341,19 @@ impl Workspace {
         self.settings.window.show_inspector = true;
         self.settings.inspector_pane = pane;
         let _ = self.settings.save();
+        // The warnings pane marks its offenders in the text too: upstream
+        // paints every incompatible range when the scan finishes and clears
+        // them in `onDisappear`. Leaving the pane is our equivalent of that.
+        if pane == InspectorPane::Warnings {
+            let ranges: Vec<Range<usize>> = self
+                .incompatible_characters(cx)
+                .into_iter()
+                .map(|item| item.range)
+                .collect();
+            self.set_editor_marks(&ranges, cx);
+        } else {
+            self.clear_editor_marks(cx);
+        }
         cx.notify();
     }
 
