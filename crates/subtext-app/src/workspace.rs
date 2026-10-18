@@ -400,6 +400,20 @@ struct WarningRow {
     range: Range<usize>,
 }
 
+/// One step of dragging the counting capsule.
+///
+/// The capsule is pinned to the top-**right**, so dragging it right *reduces*
+/// the right inset while dragging it down *grows* the top offset. Deltas are
+/// what the pointer travelled between two positions, which is why the capsule
+/// follows the pointer no matter where in the window the editor sits.
+fn drag_capsule_offset(
+    (right, down): (f32, f32),
+    (last_x, last_y): (f32, f32),
+    (x, y): (f32, f32),
+) -> (f32, f32) {
+    (right - (x - last_x), down + (y - last_y))
+}
+
 /// Sort `rows` the way a click on `column` does upstream.
 ///
 /// A stable sort by the chosen key, then reversed for descending — which is
@@ -663,6 +677,19 @@ pub struct Workspace {
     /// thrown away when either moves. A memo rather than state: nothing outside
     /// the pane reads it, and recomputing it does not change what is drawn.
     incompatible_cache: std::cell::RefCell<Option<(u64, TextEncoding, Vec<subtext_core::IncompatibleCharacter>)>>,
+    /// How far the counting capsule has been dragged from its corner, in
+    /// pixels: `(right, down)` — the two edges it is anchored to.
+    ///
+    /// Upstream's `DraggableHostingView` lets the reader put the capsule
+    /// anywhere over the text; this is that position, measured from the corner
+    /// it starts in rather than from the window, so a resize does not move it.
+    count_capsule_offset: (f32, f32),
+    /// The pointer's last position while the capsule is being dragged.
+    ///
+    /// Drag deltas come from comparing successive window positions, which keeps
+    /// the arithmetic in one frame: the capsule's own coordinates are relative
+    /// to the editor area.
+    count_capsule_drag: Option<(f32, f32)>,
     /// Watches for the find panel closing.
     ///
     /// The panel is a window of its own and reports nothing on the way out, but
@@ -805,6 +832,8 @@ impl Workspace {
             find_indicator: 0,
             incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
+            count_capsule_offset: (0., 0.),
+            count_capsule_drag: None,
             _find_panel_closed: None,
         };
         // The incremental search's grey marks belong to the panel's lifetime,
@@ -4276,6 +4305,10 @@ impl Workspace {
         self.count_running = false;
         self.count_options = None;
         self.count_options_open = false;
+        // The next count starts in the corner again, as a freshly created
+        // capsule does upstream.
+        self.count_capsule_offset = (0., 0.);
+        self.count_capsule_drag = None;
         cx.notify();
     }
 
@@ -4587,7 +4620,7 @@ impl Workspace {
     /// `None` while the counter is stopped. Upstream floats it over the text at
     /// the top-right and lets the user drag it anywhere; SubText pins it there
     /// and does not drag — see the gap table.
-    fn render_count_capsule(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_count_capsule(&self, rem: gpui_kit::Pixels, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.count_running {
             return None;
         }
@@ -4674,6 +4707,39 @@ impl Workspace {
             .border_color(cx.theme().border)
             .shadow_md()
             .child(row)
+            // Dragging is the capsule's own business: a press records where the
+            // pointer was, each move shifts the offset by the distance it
+            // travelled, and releasing ends the drag. Deltas come from
+            // successive window positions, so no frame conversion is needed.
+            //
+            // Nothing is clamped: the capsule is clipped by the editor area it
+            // floats over, which is what happens upstream at the edge too.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &gpui_kit::MouseDownEvent, _, cx| {
+                    this.count_capsule_drag =
+                        Some((f32::from(event.position.x), f32::from(event.position.y)));
+                    cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &gpui_kit::MouseMoveEvent, _, cx| {
+                let Some((last_x, last_y)) = this.count_capsule_drag else {
+                    return;
+                };
+                let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
+                this.count_capsule_offset =
+                    drag_capsule_offset(this.count_capsule_offset, (last_x, last_y), (x, y));
+                this.count_capsule_drag = Some((x, y));
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.count_capsule_drag.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
             // Upstream's context menu: the number, then the way out. The copy
             // is the bare count, not the sentence around it.
             .context_menu({
@@ -4708,11 +4774,12 @@ impl Workspace {
             })
             .into_any_element();
 
+        let (right, down) = self.count_capsule_offset;
         Some(
             div()
                 .absolute()
-                .top(rems(0.5))
-                .right(rems(0.5))
+                .top(rem * 0.5 + px(down))
+                .right(rem * 0.5 + px(right))
                 .child(capsule)
                 .into_any_element(),
         )
@@ -7159,7 +7226,7 @@ impl Render for Workspace {
         // of the editor, over the text rather than beside it. `relative()` is
         // what makes the `absolute()` capsule inside it measure against this
         // column rather than against the window.
-        let count_capsule = self.render_count_capsule(cx);
+        let count_capsule = self.render_count_capsule(window.rem_size(), cx);
         panels.push(
             resizable_panel().child(
                 v_flex()
@@ -7458,6 +7525,21 @@ fn cycled_pane(current: usize, count: usize, forward: bool) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dragging_the_capsule_moves_it_with_the_pointer() {
+        // The capsule hugs the top-right corner, so the two deltas work in
+        // opposite senses: right is an inset, down is an offset.
+        let start = (0., 0.);
+        let after = drag_capsule_offset(start, (100., 100.), (140., 70.));
+        assert_eq!(after, (-40., -30.));
+        // Each step accumulates, so two steps equal one longer drag.
+        let step = drag_capsule_offset(after, (140., 70.), (150., 90.));
+        assert_eq!(step, (-50., -10.));
+        assert_eq!(drag_capsule_offset(start, (100., 100.), (150., 90.)), step);
+        // Dragging back to where it started leaves it where it started.
+        assert_eq!(drag_capsule_offset(step, (150., 90.), (100., 100.)), start);
+    }
 
     fn warning_row(line: usize, first: &str, second: &str) -> WarningRow {
         WarningRow {
