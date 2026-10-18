@@ -10,6 +10,10 @@
 
 ### 新增
 
+- **两个 HFS+ 规范化形态**（Text ▸ Unicode Normalizations ▸ *Modified NFD* / *Modified NFC*）：
+  与 macOS 文件系统同名的那两种形态，此前只列在菜单里、触发时说明「没有表」。
+  现在按 Apple 的实测行为实现：`Ω` `K` `Å` 与 CJK 兼容汉字不分解，组合符号仍规范排序，
+  组合形态会跳过 Unicode 拒绝组合的那些字符。只有 *NFKC Case-Fold* 仍未做。
 - **文档检查器的 `Tags` 行**：读文件的 `com.apple.metadata:_kMDItemUserTags`
   扩展属性（binary plist），在 *File* 段里逐条列出标签名与它的 Finder 颜色；
   没有标签时显示 `–`。文件没有被 Finder 打过标签、或系统不是 macOS，行照样在。

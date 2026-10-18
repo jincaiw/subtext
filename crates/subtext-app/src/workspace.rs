@@ -1517,10 +1517,16 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if !form.is_supported() {
-            self.set_status(
-                format!("{} needs Apple's own Unicode tables, which SubText does not carry", form.name()),
-                cx,
-            );
+            // Only NFKC Case-Fold is left, and its reason is specific: full
+            // case folding is a table (`CaseFolding.txt`), not an algorithm —
+            // lower-casing `ß` gives `ß`, folding it gives `ss`.
+            let reason = match form {
+                textops::Normalization::NfkcCaseFold => {
+                    "case folding needs Unicode's CaseFolding.txt, which SubText does not carry"
+                }
+                _ => "that form needs a Unicode table SubText does not carry",
+            };
+            self.set_status(format!("{}: {reason}", form.name()), cx);
             return;
         }
         self.text_op(window, cx, move |text, selection, _| {

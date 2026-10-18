@@ -1315,19 +1315,138 @@ impl Normalization {
 
     /// Whether this build can actually apply the form.
     ///
-    /// False for the three Apple forms — see the type. The menu still lists
-    /// them, because a form that exists upstream and is missing here is worth
-    /// naming rather than hiding; what a caller must not do is apply one and
-    /// report success.
+    /// False for NFKC Case-Fold alone: full case folding is a table
+    /// (`CaseFolding.txt`) SubText does not carry, and `char::to_lowercase` is a
+    /// *different* mapping — it leaves `ß` as `ß` where folding turns it into
+    /// `ss`. Reporting a form we cannot apply is better than applying a
+    /// near-miss the user cannot tell from the real thing.
     pub fn is_supported(self) -> bool {
-        match self {
-            Normalization::Nfd
-            | Normalization::Nfc
-            | Normalization::Nfkd
-            | Normalization::Nfkc => true,
-            Normalization::NfkcCaseFold
-            | Normalization::ModifiedNfd
-            | Normalization::ModifiedNfc => false,
+        !matches!(self, Normalization::NfkcCaseFold)
+    }
+}
+
+/// The HFS+ decomposition — Apple's "modified NFD".
+///
+/// Canonical decomposition of every character **except** the three ranges the
+/// file system leaves composed — U+2000–2FFF, U+F900–FAFF and U+2F800–2FA1F —
+/// with the result canonically ordered.
+///
+/// Both halves are measured against `CFStringGetFileSystemRepresentation`,
+/// which is the function upstream calls. `é` and `가` decompose; `Ω` (U+2126),
+/// `K` (U+212A), `Å` (U+212B) and the CJK compatibility ideographs keep their
+/// code points, because they sit inside those ranges; and an excluded character
+/// is a barrier that does not decompose its neighbours either —
+/// `U+2126 U+0301` stays `U+2126 U+0301`.
+fn modified_nfd(text: &str) -> String {
+    let mut decomposed: Vec<char> = Vec::with_capacity(text.len());
+    for character in text.chars() {
+        if hfs_keeps_composed(character) {
+            decomposed.push(character);
+        } else {
+            unicode_normalization::char::decompose_canonical(character, |part| {
+                decomposed.push(part);
+            });
+        }
+    }
+    canonical_order(&mut decomposed);
+    decomposed.into_iter().collect()
+}
+
+/// Whether HFS+ leaves this character as it is.
+///
+/// The three ranges from Apple's TN1150: these are the code points the file
+/// system stores composed even though Unicode would decompose some of them.
+fn hfs_keeps_composed(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x2000..=0x2FFF | 0xF900..=0xFAFF | 0x2F_800..=0x2F_A1F
+    )
+}
+
+/// Put a decomposed sequence into canonical order.
+///
+/// Canonical ordering is the second half of a decomposition, and it is not
+/// implied by decomposing each character on its own: `a U+0301 U+0316` has to
+/// become `a U+0316 U+0301`, because the mark below (ccc 220) sorts before the
+/// acute (ccc 230). Insertion sort, because combining sequences are short and
+/// this only moves characters with a non-zero combining class.
+fn canonical_order(characters: &mut [char]) {
+    for index in 1..characters.len() {
+        let class = unicode_normalization::char::canonical_combining_class(characters[index]);
+        if class == 0 {
+            continue;
+        }
+        let mut position = index;
+        while position > 0 {
+            let previous = unicode_normalization::char::canonical_combining_class(
+                characters[position - 1],
+            );
+            if previous == 0 || previous <= class {
+                break;
+            }
+            characters.swap(position - 1, position);
+            position -= 1;
+        }
+    }
+}
+
+/// The composition HFS+ uses — Apple's "modified NFC".
+///
+/// Upstream's rule, transcribed: **every maximal run of characters that are
+/// not Full_Composition_Exclusion is composed with NFC**, with the excluded
+/// characters passed through untouched. Those characters are the ones Unicode
+/// will not compose: singletons (`Ω` U+2126), non-starters (`U+0344`), and the
+/// script-specific exclusions (`क़` U+0958, which decomposes but does not come
+/// back together).
+fn modified_nfc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut run = String::new();
+    for character in text.chars() {
+        if is_full_composition_exclusion(character) {
+            if !run.is_empty() {
+                out.extend(run.nfc());
+                run.clear();
+            }
+            out.push(character);
+        } else {
+            run.push(character);
+        }
+    }
+    if !run.is_empty() {
+        out.extend(run.nfc());
+    }
+    out
+}
+
+/// Whether `character` is in Unicode's Full_Composition_Exclusion.
+///
+/// Derived rather than tabulated, so it stays right as the Unicode version of
+/// the normalizer moves: a character is excluded when its canonical
+/// decomposition is a singleton, begins with a non-starter, or does not
+/// compose back into the character. Those three cases are exactly the three
+/// parts of the property's definition.
+fn is_full_composition_exclusion(character: char) -> bool {
+    let mut parts = Vec::new();
+    unicode_normalization::char::decompose_canonical(character, |part| parts.push(part));
+    match parts.split_first() {
+        // A character with no decomposition at all is not excluded — it is
+        // just a code point, and a combining mark has to stay in the run it
+        // belongs to or nothing would ever compose.
+        None => false,
+        // A singleton decomposition is excluded.
+        Some((first, [])) => *first != character,
+        Some((first, rest)) => {
+            if unicode_normalization::char::canonical_combining_class(*first) != 0 {
+                return true;
+            }
+            let mut composed = *first;
+            for part in rest {
+                match unicode_normalization::char::compose(composed, *part) {
+                    Some(next) => composed = next,
+                    None => return true,
+                }
+            }
+            composed != character
         }
     }
 }
@@ -1352,10 +1471,10 @@ pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> E
         Normalization::Nfc => selected.nfc().collect(),
         Normalization::Nfkd => selected.nfkd().collect(),
         Normalization::Nfkc => selected.nfkc().collect(),
+        Normalization::ModifiedNfd => modified_nfd(selected),
+        Normalization::ModifiedNfc => modified_nfc(selected),
         // See the note above: not a fallback, a refusal.
-        Normalization::NfkcCaseFold
-        | Normalization::ModifiedNfd
-        | Normalization::ModifiedNfc => selected.to_string(),
+        Normalization::NfkcCaseFold => selected.to_string(),
     };
     let mut out = String::with_capacity(text.len() + replaced.len());
     out.push_str(&text[..start]);
@@ -2173,11 +2292,11 @@ mod tests {
         assert_eq!(Normalization::from_identifier("nfkccf"), None);
     }
 
-    /// The four Unicode forms are the ones this build can apply. The three
-    /// Apple ones need tables it does not carry, and a form it cannot apply must
-    /// leave the text alone rather than approximate it.
+    /// Every form but NFKC Case-Fold is applied; that one is refused rather
+    /// than approximated, because full case folding is a table this build does
+    /// not carry and a near-miss would be invisible in the result.
     #[test]
-    fn the_apple_forms_are_refused_rather_than_approximated() {
+    fn only_the_case_fold_form_is_refused() {
         let supported: Vec<Normalization> = Normalization::ALL
             .into_iter()
             .filter(|form| form.is_supported())
@@ -2189,15 +2308,75 @@ mod tests {
                 Normalization::Nfc,
                 Normalization::Nfkd,
                 Normalization::Nfkc,
+                Normalization::ModifiedNfd,
+                Normalization::ModifiedNfc,
             ]
         );
 
-        // "ﬁ" is the ligature that NFKC decomposes to "fi" and NFD leaves be —
-        // so an approximation of NFKC Case-Fold would show up here.
-        let text = "ﬁ";
-        for form in Normalization::MODIFIED.into_iter().chain([Normalization::NfkcCaseFold]) {
-            assert_eq!(normalize(text, &(0..text.len()), form).text, text);
+        // `ß` is the case this hangs on: folding turns it into `ss`, while
+        // lower-casing leaves it alone — so an approximation would show up
+        // here as text that changed when it should not have.
+        let text = "ß";
+        let edit = normalize(text, &(0..text.len()), Normalization::NfkcCaseFold);
+        assert_eq!(edit.text, text);
+    }
+
+    /// The HFS+ decomposition, measured against
+    /// `CFStringGetFileSystemRepresentation` — the call upstream makes.
+    #[test]
+    fn the_hfs_decomposition_keeps_the_ranges_apple_keeps() {
+        let decompose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
+
+        // Outside the excluded ranges, the canonical decomposition happens.
+        assert_eq!(decompose("é"), "e\u{301}");
+        assert_eq!(decompose("가"), "\u{1100}\u{1161}");
+        assert_eq!(decompose("\u{1D15E}"), "\u{1D157}\u{1D165}");
+        // Inside them, macOS keeps the character as it is. These four are the
+        // ones that separate this form from NFD: each has a canonical
+        // decomposition Unicode would apply.
+        for kept in ['\u{2126}', '\u{212A}', '\u{212B}', '\u{FA10}', '\u{2F800}'] {
+            let text = kept.to_string();
+            assert_eq!(
+                normalize(&text, &(0..text.len()), Normalization::ModifiedNfd).text,
+                text,
+                "{kept:?} should survive the HFS+ form"
+            );
+            // …and NFD is what would have decomposed it.
+            assert_ne!(
+                normalize(&text, &(0..text.len()), Normalization::Nfd).text,
+                text,
+                "{kept:?} was meant to be a character NFD changes"
+            );
         }
+    }
+
+    /// Canonical ordering is part of the decomposition, and it has to run
+    /// across the assembled output rather than inside each character.
+    #[test]
+    fn the_hfs_decomposition_orders_its_combining_marks() {
+        let decompose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
+        // The mark below (ccc 220) sorts before the acute (ccc 230).
+        assert_eq!(decompose("a\u{301}\u{316}"), "a\u{316}\u{301}");
+        // An excluded character is a barrier, so the acute stays after it.
+        assert_eq!(decompose("\u{2126}\u{301}"), "\u{2126}\u{301}");
+    }
+
+    /// The HFS+ composition, measured against upstream's own
+    /// `precomposedStringWithHFSPlusMapping` run on this machine.
+    #[test]
+    fn the_hfs_composition_composes_around_the_excluded_characters() {
+        let compose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfc).text;
+        assert_eq!(compose("e\u{301}"), "é");
+        assert_eq!(compose("\u{1100}\u{1161}"), "가");
+        // U+2126 is a composition exclusion, so the run on either side of it
+        // composes without it and it passes through untouched.
+        assert_eq!(compose("e\u{301}\u{2126}"), "é\u{2126}");
+        assert_eq!(compose("\u{2126}e\u{301}"), "\u{2126}é");
+        // Devanagari ka + nukta decomposes but does not recompose: the pair is
+        // left as it was.
+        assert_eq!(compose("\u{0915}\u{093C}"), "\u{0915}\u{093C}");
+        // Composition reorders first, then composes.
+        assert_eq!(compose("a\u{316}\u{301}"), "á\u{316}");
     }
 
     #[test]

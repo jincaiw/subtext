@@ -488,14 +488,15 @@ mod tests {
 
     #[test]
     fn the_normalization_menu_offers_only_the_forms_this_build_can_apply() {
-        // Three of upstream's seven are Unicode data SubText does not carry,
-        // and `normalize` refuses them rather than approximating — offering
-        // them would make the count quietly wrong.
+        // One of upstream's seven is Unicode data SubText does not carry —
+        // case folding — and `normalize` refuses it rather than approximating:
+        // offering it would make the count quietly wrong.
         let labels = normalization_labels();
-        assert_eq!(labels.len(), 4);
+        assert_eq!(labels.len(), 6);
         assert!(labels.contains(&"NFC"));
+        assert!(labels.contains(&"Modified NFD"));
+        assert!(labels.contains(&"Modified NFC"));
         assert!(!labels.contains(&"NFKC Case-Fold"));
-        assert!(!labels.contains(&"Modified NFD"));
     }
 
     #[test]
