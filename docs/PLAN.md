@@ -2460,6 +2460,8 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ## 阶段 11 — v0.3 待排（重估清单，按价值排序）
 
+**阶段收束（2026-10-18）**：11.1–11.8 全部落地（11.6 的置灰半与 11.8 的 NFKC Case-Fold 按各自理由记账），11.9 的两项经实测判为不做。清单已清空，下一步由缺口表驱动。
+
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 11.1 | 自动补全 *Suggest completions while typing*：`on_pane_changed` 在缓冲区**变长**时重启 250ms 定时器（`Task` 丢弃即取消 = 上游 `Debouncer`），到点后重跑同一组守卫再开列表；守卫是 core 的 `should_complete_automatically`，按上游 `performCompletion` 的四条（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字），且长度改为量**词**而不是整段前缀（此前把 `a bc` 判成可补全）。接受补全后取消待触发的定时器（上游 `insertCompletion` 不重新装弹），Esc 同样取消。Mode 面板的 *Suggest completions while typing* 开关解除禁用，*Standard words* 补上禁用 + 理由 | ✅ |
