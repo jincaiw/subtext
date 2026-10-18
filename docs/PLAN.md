@@ -2161,6 +2161,7 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 | 增量搜索不把全部匹配涂灰 | 上游增量搜索会把所有匹配涂成 `.unemphasizedSelectedTextBackgroundColor`，并在窗口失焦或面板关闭时取消；SubText 只移动光标 + 闪当前匹配，全部匹配只在 *Find All* 表里体现。 |
 | 括号配对闪烁未做 | 上游 `highlightMatchingSymbol` 在光标紧贴括号时闪出配对的那一个（`showFindIndicator` 的第四处调用）；SubText 没有「贴着括号高亮配对」这个特性本身，所以没有可闪的对象。 |
 | 菜单项不能按状态置灰 | 上游用 `NSMenuItem` 的 `validateUserInterfaceItem` 让 *Straighten Quotes*（选区为空时）与大纲导航（无条目时）变灰；GPUI 的 `MenuItem` 是**构造时**决定 `disabled`，且 `Action` 变体的字段私有、没有 action 访问器 —— 构造完就再也认不出哪一条是哪个命令。所以 SubText 只能让命令**照常可点**、由 dispatch 在状态栏说明为什么不动（与「未实现的命令在状态栏说明原因」同一条规则）。真要置灰得改 `tools/generate_menu.py`，让生成表接收运行期状态 |
+| 警告检查器不高亮编辑器里的全部问题字符 | 上游扫描完会把所有不兼容范围涂成 `.unemphasizedSelectedTextBackgroundColor`；SubText 只在表里列出来，编辑器里没有任何标记（`TextDecorationCollection` 已具备这个能力，尚未接） |
 | 粘贴也可能弹出自动补全 | 上游从 `insertText` 触发，粘贴走的是另一条路；SubText 只看缓冲区是否**变长**（编辑器的 `Change` 事件不带编辑来源），所以粘贴到词尾时列表也会在 250ms 后弹出。撤销与删除不会（缓冲区变短）。 |
 
 验收：**12 条新测试**（614 = 602 + 12）——core 的 `completion` 10 条
@@ -2463,7 +2464,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 11.1 | 自动补全 *Suggest completions while typing*：`on_pane_changed` 在缓冲区**变长**时重启 250ms 定时器（`Task` 丢弃即取消 = 上游 `Debouncer`），到点后重跑同一组守卫再开列表；守卫是 core 的 `should_complete_automatically`，按上游 `performCompletion` 的四条（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字），且长度改为量**词**而不是整段前缀（此前把 `a bc` 判成可补全）。接受补全后取消待触发的定时器（上游 `insertCompletion` 不重新装弹），Esc 同样取消。Mode 面板的 *Suggest completions while typing* 开关解除禁用，*Standard words* 补上禁用 + 理由 | ✅ |
 | 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（编辑器无多选，禁用） | ✅ |
 | 11.3 | 查找面板记住窗口位置与大小：`Settings.find_panel_frame`（x/y/w/h），`show_find` 新建路径以 `WindowBounds::Windowed` 恢复、激活与 `resize_find_panel` 时记录（上游由 macOS 自动存，SubText 在 workspace 触碰面板的时刻存）。探针实测：存储帧 [700,422,520,222] 重启后 origin/size 逐一恢复 | ✅ |
-| 11.4 | 警告检查器按列排序与窄窗布局（上游 SwiftUI `Table` 行为） | 待办 |
+| 11.4 | 警告检查器按列排序与窄窗布局：两张表各自记 `sort`（上游两个 `@State sortOrder`，互不影响），点表头同列反向、换列从升序开始；活动列带 ▲/▼；排序是**稳定排序 + 反转**（等于上游的 `KeyPathComparator` 降序，平局也一致），Line 按**数字**比较（`2` 在 `10` 前，字符串比会反）；*Character* 列对不可见类别（控制/空白/行段分隔）显示 `U+XXXX`（上游按 Unicode general category，Rust 侧用 `is_control/is_whitespace` 覆盖同样四类）；点行高亮并选中编辑器（上游 `Table(selection:)`）。**窄窗**：表格改为在面板剩余高度内双向滚动，行不再溢出到下一节 | ✅ |
 | 11.5 | 查找指示器（上游 `showFindIndicator`）：每处编辑器一个 `TextDecorationCollection`，闪一下就是把匹配范围设成 `theme().yellow` α0.55 的**文字背景**（在字形之后，文字保持本色），700 ms 后清掉；每次闪带一个编号，旧计时器不会抹掉新标记。接在上游的四条路径上：查找下一个/上一个、点 *Find All* 结果行（都经 `select_match`）、文件夹查找跳转（`open_and_select`）、Inspect Character（先闪再弹 popover）。**顺带补上增量搜索漏掉的一半**：上游 `find(forward:isIncremental:)` 会选中匹配并闪，SubText 之前只更新计数；现在停止输入 200 ms 后跑一遍（上游 `Task.sleep(0.2)` 去抖）、把光标移到光标处或之后的匹配（`includingSelection`）并在无匹配时按 wrap 设置回到第一个，`find.current` 仍不设（上游增量传 `matchedRange = nil`） | ✅ |
 | 11.6 | **命令覆盖门禁**（`menu_contract.rs`，随 `cargo test` 常设）：把三段链条读成文本并两两比对 —— 生成表点名的 action ⊆ bridge 的绑定表 ⊆ dispatch 的分支名。四条断言：① 解析器读到的东西有下限（解析器改形态时**响亮失败**而不是空差分）② 每个菜单 action 都有绑定 ③ 每个绑定名都有分支 ④ 只作例外的清单**不得变成化石**（第一次运行它就判定我为引擎命令写的例外表是多余的 —— 那些名字在 dispatch 里确有分支）。注入验证两向：改掉一个分支名 ⇒ ③ 红；删一条绑定 ⇒ ② 红。**置灰这半未做**：GPUI 的 `MenuItem::Action` 字段私有、也没有 action 访问器，构造后的条目无法按命令定位，`disabled(bool)` 只能在构造时给 —— 要按选区状态置灰，只能让生成表接收状态（改生成器），属设计决定，见缺口表 | ✅ |
 | 11.7 | 文档检查器 `Tags` 行（binary plist 读取） | 待办 |

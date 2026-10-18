@@ -359,6 +359,84 @@ struct Status {
     at: std::time::Instant,
 }
 
+/// A column of the inspector's warnings tables.
+///
+/// Upstream names them by `KeyPathComparator`: `\.lowerBound` (the line),
+/// `\.value.character`, `\.value.converted`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WarningColumn {
+    Line,
+    /// *Character* in the incompatible table, *Line Ending* in the other one.
+    First,
+    /// *Converted* in the incompatible table; the other table has no third
+    /// column, so it is never sorted by this one.
+    Second,
+}
+
+/// Which of the two warnings tables a click belongs to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WarningTable {
+    Incompatible,
+    LineEndings,
+}
+
+/// One row of an inspector warnings table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WarningRow {
+    /// 1-based line number, as upstream's `lineNumber(at:)` reports it.
+    line: usize,
+    /// The *Character* or *Line Ending* cell.
+    first: String,
+    /// The *Converted* cell; empty in the line-ending table.
+    second: String,
+    /// What the row selects in the editor.
+    range: Range<usize>,
+}
+
+/// Sort `rows` the way a click on `column` does upstream.
+///
+/// A stable sort by the chosen key, then reversed for descending — which is
+/// what comparing with a descending `KeyPathComparator` amounts to, ties
+/// included. The line is compared **as a number**: `2` before `10`, which a
+/// string comparison would get backwards.
+fn sort_warning_rows(rows: &mut [WarningRow], column: WarningColumn, descending: bool) {
+    match column {
+        WarningColumn::Line => rows.sort_by_key(|row| row.line),
+        WarningColumn::First => rows.sort_by(|left, right| left.first.cmp(&right.first)),
+        WarningColumn::Second => rows.sort_by(|left, right| left.second.cmp(&right.second)),
+    }
+    if descending {
+        rows.reverse();
+    }
+}
+
+/// What a click on a header does: same column toggles the direction, a
+/// different one starts ascending — SwiftUI's `sortOrder` behaviour.
+fn next_sort(
+    current: Option<(WarningColumn, bool)>,
+    clicked: WarningColumn,
+) -> Option<(WarningColumn, bool)> {
+    match current {
+        Some((column, descending)) if column == clicked => Some((clicked, !descending)),
+        _ => Some((clicked, false)),
+    }
+}
+
+/// The *Character* cell's text.
+///
+/// Upstream prints the code point instead of the character when it belongs to
+/// an invisible general category (control, space, line and paragraph
+/// separators) — a tab drawn as a tab is a blank cell, and a blank cell is not
+/// a warning. `is_control`/`is_whitespace` are Rust's closest equivalents: they
+/// cover those four categories, and the ones they cover extra are separators
+/// upstream also hides.
+fn character_cell(character: &str) -> String {
+    match character.chars().next() {
+        Some(c) if c.is_control() || c.is_whitespace() => format!("U+{:04X}", c as u32),
+        _ => character.to_string(),
+    }
+}
+
 /// The completion popup, while it is up.
 ///
 /// Only the *anchor* is kept: the partial word's start, and which row is
@@ -374,8 +452,7 @@ struct Completion {
     selected: usize,
 }
 
-/// What the Outline inspector's tree was last built from.
-///
+/// What the Outline inspector's tree was last built from.///
 /// The inspector is a virtualized list, so its items have to be *pushed* into
 /// it rather than computed while rendering — and pushing them is a mutation,
 /// which a render cannot do. It therefore refreshes from a deferred callback,
@@ -511,6 +588,19 @@ pub struct Workspace {
     /// Held together so the surface cannot outlive its subject — the popover is
     /// only drawn while the selection is still the one it describes.
     inspect_character: Option<(Range<usize>, charinfo::CharacterReport)>,
+    /// Which column the *Incompatible Characters* table is sorted by.
+    ///
+    /// `None` is upstream's initial `sortOrder = []`: the list arrives in
+    /// document order and stays there until a header is clicked.
+    warnings_sort: Option<(WarningColumn, bool)>,
+    /// The same for the *Inconsistent Line Endings* table.
+    ///
+    /// Separate because upstream's two tables own separate `@State`
+    /// `sortOrder`s — sorting one must not reorder the other.
+    line_endings_sort: Option<(WarningColumn, bool)>,
+    /// The row of the warnings tables that was last clicked, so it can stay
+    /// highlighted the way a selected table row does upstream.
+    warnings_selected: Option<Range<usize>>,
     /// Whether each Block row of that popover is showing the name the interface
     /// uses rather than the one `Blocks.txt` gives.
     ///
@@ -686,6 +776,9 @@ impl Workspace {
             scripts: Vec::new(),
             inspector_sections: [true; INSPECTOR_SECTION_COUNT],
             inspect_character: None,
+            warnings_sort: None,
+            line_endings_sort: None,
+            warnings_selected: None,
             inspect_block_localized: Vec::new(),
             inspect_scalar_open: Vec::new(),
             count_options: None,
@@ -5752,7 +5845,12 @@ impl Workspace {
             format!("Found {} incompatible characters.", items.len())
         };
 
-        let mut pane = v_flex().gap_2().child(section_title("Incompatible Characters", cx)).child(
+        let mut pane = v_flex()
+            .gap_2()
+            .h_full()
+            .min_h_0()
+            .child(section_title("Incompatible Characters", cx))
+            .child(
             div()
                 .text_sm()
                 .when(items.is_empty(), |this| this.text_color(cx.theme().muted_foreground))
@@ -5766,17 +5864,26 @@ impl Workspace {
                 item.converted.clone().unwrap_or_else(|| "\u{FFFD}".to_string())
             };
             let _ = encoding;
-            let rows: Vec<(String, String, String, Range<usize>)> = items
+            let rows: Vec<WarningRow> = items
                 .iter()
                 .map(|item| {
                     let line = textops::status_position(&text, item.range.start).0;
-                    (line.to_string(), item.character.clone(), converted(item), item.range.clone())
+                    WarningRow {
+                        line,
+                        // A tab drawn as a tab is a blank cell, so the invisible
+                        // ones are spelled as code points, as upstream does.
+                        first: character_cell(&item.character),
+                        second: converted(item),
+                        range: item.range.clone(),
+                    }
                 })
                 .collect();
             pane = pane.child(self.render_warning_table(
                 "incompatible",
+                WarningTable::Incompatible,
                 ["Line", "Character", "Converted"],
                 rows,
+                self.warnings_sort,
                 cx,
             ));
         }
@@ -5801,6 +5908,8 @@ impl Workspace {
 
         let mut pane = v_flex()
             .gap_2()
+            .h_full()
+            .min_h_0()
             .child(section_title("Inconsistent Line Endings", cx))
             .child(
                 div()
@@ -5810,17 +5919,24 @@ impl Workspace {
             );
 
         if !items.is_empty() {
-            let rows: Vec<(String, String, String, Range<usize>)> = items
+            let rows: Vec<WarningRow> = items
                 .iter()
                 .map(|(range, ending)| {
                     let line = textops::status_position(&text, range.start).0;
-                    (line.to_string(), ending.abbreviation().to_string(), String::new(), range.clone())
+                    WarningRow {
+                        line,
+                        first: ending.abbreviation().to_string(),
+                        second: String::new(),
+                        range: range.clone(),
+                    }
                 })
                 .collect();
             pane = pane.child(self.render_warning_table(
                 "line-endings",
+                WarningTable::LineEndings,
                 ["Line", "Line Ending", ""],
                 rows,
+                self.line_endings_sort,
                 cx,
             ));
         }
@@ -5842,44 +5958,94 @@ impl Workspace {
     fn render_warning_table(
         &self,
         id: &'static str,
+        table: WarningTable,
         headers: [&'static str; 3],
-        rows: Vec<(String, String, String, Range<usize>)>,
+        mut rows: Vec<WarningRow>,
+        sort: Option<(WarningColumn, bool)>,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        if let Some((column, descending)) = sort {
+            sort_warning_rows(&mut rows, column, descending);
+        }
         let columns = if headers[2].is_empty() { 2 } else { 3 };
         let mut header = TableRow::new();
         for (index, label) in headers.iter().take(columns).enumerate() {
-            header = header.child(
-                TableHead::new()
-                    .when(index == 0, |this| this.text_right())
-                    .child(*label),
+            let column = match index {
+                0 => WarningColumn::Line,
+                1 => WarningColumn::First,
+                _ => WarningColumn::Second,
+            };
+            // The active column carries its direction: an arrow is the whole
+            // difference between "sorted this way" and "not sorted".
+            let indicator = match sort {
+                Some((active, descending)) if active == column => Some(if descending {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronUp
+                }),
+                _ => None,
+            };
+            let mut head = TableHead::new().when(index == 0, |this| this.text_right());
+            head = head.child(
+                div()
+                    .id((id, 1000 + index))
+                    .w_full()
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            this.toggle_warning_sort(table, column, cx);
+                        }),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .when(index == 0, |this| this.justify_end())
+                            .child(*label)
+                            .when_some(indicator, |this, icon| {
+                                this.child(
+                                    Icon::new(icon)
+                                        .xsmall()
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                            }),
+                    ),
             );
+            header = header.child(head);
         }
 
         // A `TableRow` is not an interactive element, so the click lives on the
         // cell contents — one handler per cell, which makes the whole row
         // clickable rather than just its first column.
         let mut body = TableBody::new();
-        for (index, (line, first, second, range)) in rows.into_iter().enumerate() {
-            let cells = [line, first, second];
-            let mut row = TableRow::new();
+        for (index, row) in rows.into_iter().enumerate() {
+            let selected = self.warnings_selected.as_ref() == Some(&row.range);
+            let cells = [row.line.to_string(), row.first, row.second];
+            let mut table_row = TableRow::new();
             for (column, text) in cells.into_iter().take(columns).enumerate() {
-                let range = range.clone();
-                row = row.child(TableCell::new().child(
+                let range = row.range.clone();
+                table_row = table_row.child(TableCell::new().child(
                     div()
                         .id((id, index * 3 + column))
+                        .w_full()
                         .cursor_pointer()
                         .when(column == 0, |this| this.text_right())
+                        .when(selected, |this| {
+                            this.bg(cx.theme().tokens.table_active).rounded_sm()
+                        })
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
+                                this.warnings_selected = Some(range.clone());
                                 this.select_range_in_editor(range.clone(), window, cx);
+                                cx.notify();
                             }),
                         )
                         .child(text),
                 ));
             }
-            body = body.child(row);
+            body = body.child(table_row);
         }
 
         // The table's cells each have a minimum width, so three of them do not
@@ -5890,7 +6056,10 @@ impl Workspace {
             .id(id)
             .w_full()
             .min_w_0()
+            .flex_1()
+            .min_h_0()
             .overflow_x_scroll()
+            .overflow_y_scroll()
             .child(
                 Table::new()
                     .small()
@@ -5898,6 +6067,27 @@ impl Workspace {
                     .child(body),
             )
             .into_any_element()
+    }
+
+    /// A click on a warnings-table header.
+    ///
+    /// Same column reverses the direction, another column starts ascending —
+    /// SwiftUI's `Table` behaves this way, which is what upstream is.
+    fn toggle_warning_sort(
+        &mut self,
+        table: WarningTable,
+        column: WarningColumn,
+        cx: &mut Context<Self>,
+    ) {
+        match table {
+            WarningTable::Incompatible => {
+                self.warnings_sort = next_sort(self.warnings_sort, column);
+            }
+            WarningTable::LineEndings => {
+                self.line_endings_sort = next_sort(self.line_endings_sort, column);
+            }
+        }
+        cx.notify();
     }
 
     /// Put the editor's selection on `range` and bring it into view.
@@ -7062,6 +7252,90 @@ fn cycled_pane(current: usize, count: usize, forward: bool) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn warning_row(line: usize, first: &str, second: &str) -> WarningRow {
+        WarningRow {
+            line,
+            first: first.to_string(),
+            second: second.to_string(),
+            range: 0..0,
+        }
+    }
+
+    #[test]
+    fn the_line_column_sorts_as_a_number_not_a_string() {
+        // The trap this guards: "10" < "2" as text, so a string sort would put
+        // the tenth line before the second.
+        let mut rows =
+            vec![warning_row(10, "b", ""), warning_row(2, "a", ""), warning_row(1, "c", "")];
+        sort_warning_rows(&mut rows, WarningColumn::Line, false);
+        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![1, 2, 10]);
+
+        sort_warning_rows(&mut rows, WarningColumn::Line, true);
+        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![10, 2, 1]);
+    }
+
+    #[test]
+    fn the_character_and_converted_columns_sort_by_their_own_text() {
+        let mut rows = vec![
+            warning_row(1, "~", "—"),
+            warning_row(2, "a", "\u{FFFD}"),
+            warning_row(3, "Z", "z"),
+        ];
+        sort_warning_rows(&mut rows, WarningColumn::First, false);
+        // Upper case sorts before lower case, as `Character`'s `<` does.
+        assert_eq!(
+            rows.iter().map(|row| row.first.as_str()).collect::<Vec<_>>(),
+            vec!["Z", "a", "~"]
+        );
+
+        sort_warning_rows(&mut rows, WarningColumn::Second, false);
+        assert_eq!(
+            rows.iter().map(|row| row.second.as_str()).collect::<Vec<_>>(),
+            vec!["z", "—", "\u{FFFD}"]
+        );
+    }
+
+    #[test]
+    fn sorting_is_stable_so_equal_keys_keep_document_order() {
+        let mut rows = vec![
+            warning_row(5, "same", ""),
+            warning_row(9, "same", ""),
+            warning_row(1, "same", ""),
+        ];
+        sort_warning_rows(&mut rows, WarningColumn::First, false);
+        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![5, 9, 1]);
+    }
+
+    #[test]
+    fn a_header_click_starts_ascending_and_then_reverses() {
+        // Nothing sorted yet: the first click sorts the column, ascending.
+        let first = next_sort(None, WarningColumn::Line);
+        assert_eq!(first, Some((WarningColumn::Line, false)));
+        // Clicking the same header again reverses it, and again restores it.
+        let second = next_sort(first, WarningColumn::Line);
+        assert_eq!(second, Some((WarningColumn::Line, true)));
+        assert_eq!(next_sort(second, WarningColumn::Line), first);
+        // A different header starts over at ascending rather than inheriting
+        // the previous column's direction.
+        assert_eq!(
+            next_sort(second, WarningColumn::First),
+            Some((WarningColumn::First, false))
+        );
+    }
+
+    #[test]
+    fn invisible_characters_are_cells_of_code_points() {
+        // A tab and a space drawn as themselves are empty cells; upstream
+        // prints the code point instead so the row says what it is.
+        assert_eq!(character_cell("\t"), "U+0009");
+        assert_eq!(character_cell(" "), "U+0020");
+        assert_eq!(character_cell("\u{A0}"), "U+00A0");
+        assert_eq!(character_cell("\u{2028}"), "U+2028");
+        // A visible character is its own cell.
+        assert_eq!(character_cell("~"), "~");
+        assert_eq!(character_cell("€"), "€");
+    }
 
     /// Closing the first pane is the case upstream gets wrong-looking on
     /// purpose: the focus lands on the *last* pane, not the second.
