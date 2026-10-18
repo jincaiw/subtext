@@ -41,6 +41,8 @@ pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;
 pub mod menu;
+#[cfg(test)]
+mod menu_contract;
 pub mod menus;
 pub mod multiple_replace_sheet;
 pub mod outline;

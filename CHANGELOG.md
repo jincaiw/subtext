@@ -10,6 +10,9 @@
 
 ### 新增
 
+- **菜单命令的覆盖门禁**：新增 `menu_contract.rs`，随 `cargo test` 检查
+  「生成表点名的每个命令 → bridge 里有绑定 → dispatch 里有分支」三段链条，
+  并对解析结果设下限（表结构变形态时响亮失败，而不是无声地空差分）。
 - **查找命中会闪一下**：*Find Next* / *Find Previous*、点 *Find All* 的结果行、
   文件夹查找跳转、*Inspect Character*，都会在匹配上闪一块黄色标记（上游
   `showFindIndicator`）后消失。标记画在文字背后，文字颜色不受影响。
