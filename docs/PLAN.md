@@ -2157,6 +2157,9 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 | 候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小。 |
 | 没有 IME 合成态的判断 | 上游 `performCompletion` 会先问 `hasMarkedText()`，正在拼字时不弹。GPUI 的编辑器不暴露这个状态。 |
 | `Standard words` 依旧是关的 | AppKit 的系统词表在系统文本引擎里，Rust 侧够不着 —— Mode 面板早就把它禁用并写了理由，这一轮没有改变这一点。 |
+| 查找指示器没有淡出 | 上游 `showFindIndicator` 的黄色标记会淡出；SubText 用文字装饰（`TextDecoration`）画背景，只能整块出现与消失 —— 淡出要逐帧重绘整行，装饰做不到。 |
+| 增量搜索不把全部匹配涂灰 | 上游增量搜索会把所有匹配涂成 `.unemphasizedSelectedTextBackgroundColor`，并在窗口失焦或面板关闭时取消；SubText 只移动光标 + 闪当前匹配，全部匹配只在 *Find All* 表里体现。 |
+| 括号配对闪烁未做 | 上游 `highlightMatchingSymbol` 在光标紧贴括号时闪出配对的那一个（`showFindIndicator` 的第四处调用）；SubText 没有「贴着括号高亮配对」这个特性本身，所以没有可闪的对象。 |
 | 粘贴也可能弹出自动补全 | 上游从 `insertText` 触发，粘贴走的是另一条路；SubText 只看缓冲区是否**变长**（编辑器的 `Change` 事件不带编辑来源），所以粘贴到词尾时列表也会在 250ms 后弹出。撤销与删除不会（缓冲区变短）。 |
 
 验收：**12 条新测试**（614 = 602 + 12）——core 的 `completion` 10 条
@@ -2460,7 +2463,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（编辑器无多选，禁用） | ✅ |
 | 11.3 | 查找面板记住窗口位置与大小：`Settings.find_panel_frame`（x/y/w/h），`show_find` 新建路径以 `WindowBounds::Windowed` 恢复、激活与 `resize_find_panel` 时记录（上游由 macOS 自动存，SubText 在 workspace 触碰面板的时刻存）。探针实测：存储帧 [700,422,520,222] 重启后 origin/size 逐一恢复 | ✅ |
 | 11.4 | 警告检查器按列排序与窄窗布局（上游 SwiftUI `Table` 行为） | 待办 |
-| 11.5 | Inspect Character 的 *闪一下选中范围*（上游 `showFindIndicator`） | 待办 |
+| 11.5 | 查找指示器（上游 `showFindIndicator`）：每处编辑器一个 `TextDecorationCollection`，闪一下就是把匹配范围设成 `theme().yellow` α0.55 的**文字背景**（在字形之后，文字保持本色），700 ms 后清掉；每次闪带一个编号，旧计时器不会抹掉新标记。接在上游的四条路径上：查找下一个/上一个、点 *Find All* 结果行（都经 `select_match`）、文件夹查找跳转（`open_and_select`）、Inspect Character（先闪再弹 popover）。**顺带补上增量搜索漏掉的一半**：上游 `find(forward:isIncremental:)` 会选中匹配并闪，SubText 之前只更新计数；现在停止输入 200 ms 后跑一遍（上游 `Task.sleep(0.2)` 去抖）、把光标移到光标处或之后的匹配（`includingSelection`）并在无匹配时按 wrap 设置回到第一个，`find.current` 仍不设（上游增量传 `matchedRange = nil`） | ✅ |
 | 11.6 | 菜单校验置灰：*Straighten Quotes* 随选区、大纲导航无条目时置灰；「生成表里每个命令都有人认领」做成常设门禁脚本 | 待办 |
 | 11.7 | 文档检查器 `Tags` 行（binary plist 读取） | 待办 |
 | 11.8 | Unicode 规范化的 3 个 Apple 形态（需 CaseFolding / HFS+ 表，工作量大） | 待办 |

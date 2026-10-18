@@ -200,6 +200,12 @@ impl DocumentId {
 /// others alone.
 struct Pane {
     editor: Entity<gpui_kit::base::input::EditorState>,
+    /// The decoration collection the find indicator paints into.
+    ///
+    /// A collection is a handle into the editor it was made from, so each pane
+    /// owns one for its lifetime: creating one per flash would leave a new
+    /// collection behind on every find.
+    indicator: gpui_kit::base::input::TextDecorationCollection,
     _subscription: Subscription,
 }
 
@@ -324,6 +330,28 @@ const AUTOMATIC_COMPLETION_DELAY: Duration = Duration::from_millis(250);
 /// Upstream's `minimumAutomaticCompletionLength`. Three characters is where a
 /// list stops being noise: at two, every prefix in the document matches.
 const MINIMUM_AUTOMATIC_COMPLETION_LENGTH: usize = 3;
+
+/// How long the find indicator stays up.
+///
+/// `NSTextView.showFindIndicator(for:)` draws its yellow mark for a moment and
+/// then fades it. SubText keeps the decoration for this long and clears it; the
+/// fade needs a repaint per frame of the whole line, which a text decoration
+/// cannot drive — see the gap table.
+const FIND_INDICATOR_DURATION: Duration = Duration::from_millis(700);
+
+/// How long the find field must be still before the incremental pass runs.
+///
+/// Upstream's `incrementalSearch` sleeps 0.2 s (tolerance 0.05) before each
+/// pass, so a fast typist runs one search rather than one per character — and
+/// sees one indicator, not one per keystroke.
+const INCREMENTAL_SEARCH_DELAY: Duration = Duration::from_millis(200);
+
+/// How much of the theme's yellow the indicator paints.
+///
+/// The decoration sits *behind* the glyphs, so the text keeps its own colour
+/// and stays readable; 0.55 is enough to read as a highlight without washing
+/// the line out.
+const FIND_INDICATOR_OPACITY: f32 = 0.55;
 
 /// A transient message shown in the status bar.
 struct Status {
@@ -520,6 +548,17 @@ pub struct Workspace {
     /// cancelled when the list is accepted or dismissed. A `Task` dropped is a
     /// task cancelled, so replacing this is the same gesture.
     completion_auto: Option<gpui_kit::Task<()>>,
+    /// Which find indicator is up.
+    ///
+    /// Each flash bumps this, and the timer that clears the decoration only
+    /// acts if it still owns the current number — so a second find inside the
+    /// first one's lifetime does not have its mark wiped by the older timer.
+    find_indicator: u64,
+    /// The pending incremental-search timer, while one is running.
+    ///
+    /// Upstream cancels and restarts its `findTask` on every keystroke in the
+    /// find field; a `Task` dropped is a task cancelled.
+    incremental_auto: Option<gpui_kit::Task<()>>,
     /// The incompatible-character scan, memoised.
     ///
     /// The scan is a codec round trip per chunk, so it cannot run on every
@@ -656,6 +695,8 @@ impl Workspace {
             find_window_owner: None,
             completion: None,
             completion_auto: None,
+            find_indicator: 0,
+            incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
         };
         cx.spawn(async move |this, cx| {
@@ -705,7 +746,7 @@ impl Workspace {
     ) {
         let text = document.text().to_string();
         let editor = self.new_editor(text, &syntax_name, window, cx);
-        let subscription = self.subscribe_pane(&editor, window, cx);
+        let pane = self.new_pane(editor, window, cx);
 
         let id = DocumentId(self.next_document_id);
         self.next_document_id += 1;
@@ -713,7 +754,7 @@ impl Workspace {
         self.documents.push(OpenDocument {
             id,
             document,
-            panes: vec![Pane { editor, _subscription: subscription }],
+            panes: vec![pane],
             active_pane: 0,
             syntax: SharedString::from(syntax_name),
             modified_on_disk: false,
@@ -756,6 +797,21 @@ impl Workspace {
             state.set_readonly(!options.editable, cx);
             state
         })
+    }
+
+    /// One pane: its editor, the subscription that mirrors it into the
+    /// document, and the collection its find indicator paints into.
+    fn new_pane(
+        &mut self,
+        editor: Entity<gpui_kit::base::input::EditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Pane {
+        let indicator = editor.update(cx, |state, cx| {
+            state.create_decorations_collection(Vec::new(), cx)
+        });
+        let subscription = self.subscribe_pane(&editor, window, cx);
+        Pane { editor, indicator, _subscription: subscription }
     }
 
     /// Follow one pane's buffer back into the document model.
@@ -2371,20 +2427,68 @@ impl Workspace {
     /// setting is on, the search is not scoped to the selection, and the query
     /// is neither empty nor (for a regex) invalid.
     pub fn incremental_search(&mut self, cx: &mut Context<Self>) {
+        // Every keystroke restarts the timer, and a query that cannot be
+        // searched cancels it outright — upstream's `findTask?.cancel()`.
+        self.incremental_auto = None;
+        if !self.incremental_search_applies(cx) {
+            return;
+        }
+        self.incremental_auto = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(INCREMENTAL_SEARCH_DELAY).await;
+            this.update(cx, |workspace, cx| {
+                if workspace.incremental_search_applies(cx) {
+                    workspace.run_incremental_search(cx);
+                }
+            })
+            .ok();
+        }));
+    }
+
+    /// The guards upstream applies before an incremental pass.
+    fn incremental_search_applies(&self, cx: &App) -> bool {
         if !self.settings.find_searches_incrementally || self.settings.find_in_selection {
-            return;
+            return false;
         }
-        if self.query(cx).is_empty() {
-            return;
+        let query = self.query(cx);
+        if query.is_empty() {
+            return false;
         }
-        if self.settings.find_regex {
-            // An invalid regex would only clear the state on every keystroke;
-            // upstream's guard skips the search instead.
-            if finder::Searcher::new(&self.query(cx), &self.find_options()).is_err() {
-                return;
-            }
+        // An invalid regex would only clear the state on every keystroke;
+        // upstream's guard skips the search instead.
+        if self.settings.find_regex
+            && finder::Searcher::new(&query, &self.find_options()).is_err()
+        {
+            return false;
         }
+        true
+    }
+
+    /// One incremental pass — upstream's `find(forward: true, isIncremental: true)`.
+    ///
+    /// It searches, moves the caret to the match at or after it, and flashes
+    /// that match. The *current match* index stays unset: upstream passes
+    /// `matchedRange = nil` for an incremental pass, so the panel keeps
+    /// reporting the count while the caret moves.
+    fn run_incremental_search(&mut self, cx: &mut Context<Self>) {
         self.run_search(cx);
+        let selection = self.active_selection(cx);
+        // A match starting at the caret counts as the one to show — upstream's
+        // `includingSelection`, which is what keeps typing on the same match
+        // instead of skipping past it.
+        let mut next = self
+            .find
+            .matches
+            .iter()
+            .find(|range| range.start >= selection.start)
+            .cloned();
+        if next.is_none() && self.settings.find_wrap_around {
+            next = self.find.matches.first().cloned();
+        }
+        let Some(range) = next else {
+            return;
+        };
+        self.set_selection(range.clone(), cx);
+        self.flash_find_indicator(range, cx);
     }
 
     /// The search itself, shared by the full refresh and the incremental one.
@@ -2438,7 +2542,50 @@ impl Workspace {
             return;
         };
         self.find.current = Some(index);
-        self.set_selection(range, cx);
+        self.set_selection(range.clone(), cx);
+        self.flash_find_indicator(range, cx);
+    }
+
+    /// Flash a range the way `NSTextView.showFindIndicator(for:)` does.
+    ///
+    /// Upstream calls this from four places: after a successful find step,
+    /// after a click in the *Find All* list, after a folder-find hit, and for
+    /// each matched bracket when the caret jumps to its pair. The mark is a
+    /// background behind the glyphs, so the text keeps its own colour.
+    fn flash_find_indicator(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let style = gpui_kit::HighlightStyle {
+            background_color: Some(cx.theme().yellow.opacity(FIND_INDICATOR_OPACITY)),
+            ..Default::default()
+        };
+        // The collection belongs to the pane, so the mark is painted by the
+        // editor that holds the range — and a split pane only marks its own.
+        let Some(indicator) = self
+            .documents
+            .get(self.active)
+            .map(|document| document.panes[document.active_pane].indicator.clone())
+        else {
+            return;
+        };
+        indicator.set(vec![gpui_kit::base::input::TextDecoration::new(range, style)], cx);
+
+        // A second find inside the first one's lifetime must not have its mark
+        // cleared by the older timer, so each flash takes a number and only
+        // the holder of the current one clears.
+        self.find_indicator = self.find_indicator.wrapping_add(1);
+        let generation = self.find_indicator;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FIND_INDICATOR_DURATION).await;
+            this.update(cx, |workspace, cx| {
+                if workspace.find_indicator != generation {
+                    return;
+                }
+                if let Some(document) = workspace.documents.get(workspace.active) {
+                    document.panes[document.active_pane].indicator.clear(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Step through the matches, wrapping at either end when the settings say
@@ -3059,13 +3206,13 @@ impl Workspace {
         let caret = document.editor().read(cx).selected_range();
 
         let editor = self.new_editor(text, &syntax, window, cx);
-        let subscription = self.subscribe_pane(&editor, window, cx);
+        let split = self.new_pane(editor, window, cx);
         // CotEditor copies the current selection into the new pane and scrolls
         // both to it, so the split starts where the user was looking.
-        editor.update(cx, |state, cx| state.set_selected_range(caret, cx));
+        split.editor.update(cx, |state, cx| state.set_selected_range(caret, cx));
 
         let document = &mut self.documents[index];
-        document.panes.insert(pane + 1, Pane { editor, _subscription: subscription });
+        document.panes.insert(pane + 1, split);
         document.active_pane = pane + 1;
         cx.notify();
     }
@@ -3563,7 +3710,10 @@ impl Workspace {
         // no `isExpanded` binding does.
         self.inspect_block_localized = vec![true; report.scalars.len()];
         self.inspect_scalar_open = vec![false; report.scalars.len()];
-        self.inspect_character = Some((selection, report));
+        self.inspect_character = Some((selection.clone(), report));
+        // Upstream scrolls the character into view and flashes it before the
+        // popover appears, so the reader can see which character is described.
+        self.flash_find_indicator(selection, cx);
         cx.notify();
     }
 
@@ -6798,7 +6948,10 @@ impl Workspace {
             .active_document()
             .is_some_and(|document| document.document.path() == Some(path.as_path()));
         if arrived {
-            self.set_selection(range, cx);
+            self.set_selection(range.clone(), cx);
+            // Upstream's folder find flashes the hit it jumped to, the same
+            // mark a find step leaves.
+            self.flash_find_indicator(range, cx);
         }
     }
 }

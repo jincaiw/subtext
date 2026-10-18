@@ -10,6 +10,11 @@
 
 ### 新增
 
+- **查找命中会闪一下**：*Find Next* / *Find Previous*、点 *Find All* 的结果行、
+  文件夹查找跳转、*Inspect Character*，都会在匹配上闪一块黄色标记（上游
+  `showFindIndicator`）后消失。标记画在文字背后，文字颜色不受影响。
+- **增量搜索会移动光标**：停止输入 200 ms 后，光标移到当前匹配并在那里闪一下
+  —— 此前只更新匹配计数，光标不动。`Find All` 表仍不受增量搜索影响。
 - **自动补全（*Suggest completions while typing*）**：打字停顿 250 ms 后弹出候选
   列表，按上游 `performCompletion` 的四条守卫——选区为空、词长 ≥ 3、光标前不是
   空白、光标后不是字母数字。接受或 Esc 后不会再弹（上游 `insertCompletion`
