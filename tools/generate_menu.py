@@ -180,6 +180,19 @@ def load_action_namespaces() -> dict[str, str]:
     return namespaces
 
 
+# The commands whose enabled state depends on the editor, and what the
+# generated table should test for each.
+#
+# CotEditor answers this in `validateUserInterfaceItem`, which runs every time a
+# menu opens; a GPUI menu is a tree that is set once, so the condition is baked
+# in and the bar is rebuilt when it flips. Only conditions that are cheap to
+# evaluate belong here — the selection is one `read`, while the outline needs a
+# parse of the buffer.
+GATED_ACTIONS = {
+    "StraightenQuotesInSelection": "state.selection_empty",
+}
+
+
 def action_for_selector(selector: str) -> str:
     """`showAboutPanel:` -> `ShowAboutPanel`, `encodeURL:` -> `EncodeUrl`."""
     name = selector.rstrip(":")
@@ -346,7 +359,12 @@ class Renderer:
         namespace = self.namespaces.get(name)
         if namespace is None:
             fail(f"no action named {name} for {title!r}")
-        return [f"{pad}MenuItem::action({rust_string(title)}, actions::{namespace}::{name}),"]
+        gate = GATED_ACTIONS.get(name)
+        suffix = f".disabled({gate})" if gate else ""
+        return [
+            f"{pad}MenuItem::action({rust_string(title)}, "
+            f"actions::{namespace}::{name}){suffix},"
+        ]
 
     def app_menus(self) -> str:
         top_level = [entry for entry in self.entries if entry["path"] == ""]
@@ -399,7 +417,7 @@ class Renderer:
             "use crate::actions;",
             "",
             "/// Every top-level menu, in CotEditor's order.",
-            "pub fn app_menus() -> Vec<Menu> {",
+            "pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {",
             "    vec![",
         ]
 
@@ -420,8 +438,8 @@ class Renderer:
         lines.append("    /// menu renamed. Nothing else may drift.")
         lines.append("    #[test]")
         lines.append("    fn the_bar_has_every_top_level_menu() {")
-        lines.append(f"        assert_eq!(app_menus().len(), {len(top_level)});")
-        lines.append("        let names: Vec<_> = app_menus()")
+        lines.append(f"        assert_eq!(app_menus(&crate::menus::MenuGates::default()).len(), {len(top_level)});")
+        lines.append("        let names: Vec<_> = app_menus(&crate::menus::MenuGates::default())")
         lines.append("            .iter()")
         lines.append("            .map(|menu| menu.name.to_string())")
         lines.append("            .collect();")
@@ -454,7 +472,7 @@ class Renderer:
         lines.append("                })")
         lines.append("                .sum()")
         lines.append("        }")
-        lines.append("        let total: usize = app_menus().iter().map(count).sum();")
+        lines.append("        let total: usize = app_menus(&crate::menus::MenuGates::default()).iter().map(count).sum();")
         lines.append(f"        assert_eq!(total, {self.rendered_actions});")
         lines.append("    }")
         lines.append("")

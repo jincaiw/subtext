@@ -177,6 +177,22 @@ pub struct DocumentState {
 }
 
 /// Everything the menu bar is built from.
+/// The editor conditions the generated menu table is built against.
+///
+/// CotEditor asks `validateUserInterfaceItem` each time a menu opens, so its
+/// items can grey themselves out for the moment. A GPUI menu is a tree that is
+/// set once, so the condition is *baked in* at build time and the bar is rebuilt
+/// when it flips — see `Workspace::sync_menu_gates`.
+///
+/// Only conditions that are cheap to read belong here: the selection is one
+/// `read` of the editor, while "does the outline have entries" needs a parse of
+/// the buffer, so that one is still open (PLAN §13.5).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct MenuGates {
+    /// No selection: *Straighten Quotes* has nothing to work on.
+    pub selection_empty: bool,
+}
+
 pub struct MenuState {
     /// The document in front, or `None` when there is none.
     pub document: Option<DocumentState>,
@@ -202,6 +218,8 @@ pub struct MenuState {
     /// sidebar's file browser scrolls through all of it, and the two are built
     /// from the same state.
     pub recent_documents: Vec<PathBuf>,
+    /// The editor conditions the generated table tests against.
+    pub gates: MenuGates,
 }
 
 /// The part of a [`MenuState`] that changes without the settings changing.
@@ -226,6 +244,10 @@ pub struct MenuSignature {
     theme: String,
     scripts: Vec<ScriptItem>,
     recent_documents: Vec<PathBuf>,
+    /// Whether the bar was built with an empty selection — the one gate that
+    /// changes often enough to matter, and the reason a caret move can rebuild
+    /// the bar.
+    selection_empty: bool,
 }
 
 impl MenuSignature {
@@ -236,12 +258,14 @@ impl MenuSignature {
         theme: impl Into<String>,
         scripts: Vec<ScriptItem>,
         recent_documents: Vec<PathBuf>,
+        selection_empty: bool,
     ) -> Self {
         Self {
             document,
             theme: theme.into(),
             scripts,
             recent_documents,
+            selection_empty,
         }
     }
 }
@@ -254,6 +278,7 @@ impl MenuState {
             self.theme.clone(),
             self.scripts.clone(),
             self.recent_documents.clone(),
+            self.gates.selection_empty,
         )
     }
 }
@@ -296,7 +321,7 @@ fn scope(state: &MenuState) -> Option<&str> {
 
 /// The whole menu bar, with every runtime submenu filled in.
 pub fn build(state: &MenuState) -> Vec<Menu> {
-    let mut menus = menu::app_menus();
+    let mut menus = menu::app_menus(&state.gates);
 
     replace(
         &mut menus,
@@ -826,6 +851,7 @@ mod tests {
 
     fn state() -> MenuState {
         MenuState {
+            gates: MenuGates::default(),
             document: Some(document()),
             theme: "Solarized Dark".into(),
             syntaxes: vec!["HTML".into(), "Markdown".into(), "Ruby".into()],

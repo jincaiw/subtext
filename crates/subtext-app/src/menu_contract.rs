@@ -181,3 +181,32 @@ fn every_bound_name_is_answered() {
         unhandled.join("\n  ")
     );
 }
+
+#[test]
+fn the_generated_table_gates_exactly_the_commands_that_say_so() {
+    // The menu bar is a tree that is set once, so a state-dependent item is
+    // greyed by the *generator* rather than by the item. That makes the
+    // generated line the contract: one gate, on the one command that has it,
+    // and it tests the field the workspace actually maintains.
+    let gated: Vec<&str> = MENU
+        .lines()
+        .filter(|line| line.contains(".disabled(state."))
+        .collect();
+    assert_eq!(
+        gated.len(),
+        1,
+        "expected exactly one state-dependent item, found {}:\n  {}",
+        gated.len(),
+        gated.join("\n  ")
+    );
+    assert!(
+        gated[0].contains("StraightenQuotesInSelection"),
+        "the gate is on the wrong command: {}",
+        gated[0].trim()
+    );
+    assert!(
+        gated[0].contains("state.selection_empty"),
+        "the gate tests a field the workspace does not maintain: {}",
+        gated[0].trim()
+    );
+}

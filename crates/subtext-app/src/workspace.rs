@@ -214,6 +214,9 @@ struct Pane {
     /// them.
     marks: gpui_kit::base::input::TextDecorationCollection,
     _subscription: Subscription,
+    /// The editor's repaint observer, which is how caret and selection moves
+    /// reach the menu bar.
+    _observed: Subscription,
 }
 
 /// One open document and its editors.
@@ -695,6 +698,13 @@ pub struct Workspace {
     /// the arithmetic in one frame: the capsule's own coordinates are relative
     /// to the editor area.
     count_capsule_drag: Option<(f32, f32)>,
+    /// Whether the menu bar was last built with an empty selection.
+    ///
+    /// The bar is a tree that is set once, so the `Straighten Quotes` item is
+    /// built already greyed or already live. This is what notices the flip —
+    /// and it is compared on every edit, which is a boolean, rather than
+    /// rebuilding the bar (and re-reading the script folder) on every keystroke.
+    menu_selection_empty: bool,
     /// Watches for the find panel closing.
     ///
     /// The panel is a window of its own and reports nothing on the way out, but
@@ -837,6 +847,7 @@ impl Workspace {
             find_indicator: 0,
             incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
+            menu_selection_empty: true,
             count_capsule_offset: (0., 0.),
             count_capsule_drag: None,
             _find_panel_closed: None,
@@ -967,8 +978,8 @@ impl Workspace {
         let marks = editor.update(cx, |state, cx| {
             state.create_decorations_collection(Vec::new(), cx)
         });
-        let subscription = self.subscribe_pane(&editor, window, cx);
-        Pane { editor, indicator, marks, _subscription: subscription }
+        let (subscription, observed) = self.subscribe_pane(&editor, window, cx);
+        Pane { editor, indicator, marks, _subscription: subscription, _observed: observed }
     }
 
     /// Follow one pane's buffer back into the document model.
@@ -977,8 +988,30 @@ impl Workspace {
         editor: &Entity<gpui_kit::base::input::EditorState>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Subscription {
-        cx.subscribe_in(
+    ) -> (Subscription, Subscription) {
+        // The editor notifies whenever it repaints, which includes every caret
+        // move and every selection change — the two things the menu bar has to
+        // follow and the two it never reports as an `InputEvent`. The handler
+        // is a boolean compare, so a cursor blink costs one `is_empty`.
+        // The editor notifies *during* our own update of it, so touching the
+        // workspace from here would hit GPUI's re-entrancy guard. The check is
+        // therefore queued, and queued once: a burst of repaints (a blink, a
+        // scroll) collapses into a single comparison.
+        let weak = cx.entity().downgrade();
+        let queued = std::rc::Rc::new(std::cell::Cell::new(false));
+        let observed = cx.observe(editor, move |_, _, cx| {
+            if queued.replace(true) {
+                return;
+            }
+            let weak = weak.clone();
+            let queued = queued.clone();
+            cx.defer(move |cx| {
+                queued.set(false);
+                weak.update(cx, |workspace, cx| workspace.sync_menu_gates(cx))
+                    .ok();
+            });
+        });
+        let changed = cx.subscribe_in(
             editor,
             window,
             |this: &mut Self, editor, event: &gpui_kit::base::input::InputEvent, window, cx| {
@@ -986,7 +1019,8 @@ impl Workspace {
                     this.on_pane_changed(editor, window, cx);
                 }
             },
-        )
+        );
+        (changed, observed)
     }
 
     /// Mirror one pane's buffer into the document model and its siblings.
@@ -2201,6 +2235,7 @@ impl Workspace {
             self.theme.name.clone(),
             scripts.clone(),
             self.settings.recent_documents.clone(),
+            self.menu_selection_empty,
         );
         if self.menus_built_for.as_ref() == Some(&signature) {
             return;
@@ -2208,6 +2243,21 @@ impl Workspace {
         self.scripts = scripts;
         self.menus_built_for = Some(signature);
         crate::menus::install(cx, &self.menu_state());
+    }
+
+    /// Keep the menu bar's selection-dependent items in step with the caret.
+    ///
+    /// The bar is a tree that is set once, so `Straighten Quotes` is built
+    /// either greyed or live. Rebuilding re-reads the script folder, so this
+    /// compares first: one boolean per editor repaint, and a rebuild only when
+    /// the answer flips.
+    fn sync_menu_gates(&mut self, cx: &mut Context<Self>) {
+        let empty = self.active_selection(cx).is_empty();
+        if empty == self.menu_selection_empty {
+            return;
+        }
+        self.menu_selection_empty = empty;
+        self.refresh_menus(cx);
     }
 
     /// Rebuild the menu bar and the key bindings unconditionally.
@@ -2232,6 +2282,7 @@ impl Workspace {
             snippets: self.settings.snippets.clone(),
             scripts: self.scripts.clone(),
             recent_documents: self.settings.recent_documents.clone(),
+            gates: menus::MenuGates { selection_empty: self.menu_selection_empty },
         }
     }
 

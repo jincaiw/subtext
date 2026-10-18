@@ -2512,7 +2512,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 13.4 | 括号配对闪烁：core 新增 `matching_symbol_pair`（给定括号的字节偏移，返回配对括号的**一字符范围**；按对计数嵌套，`()` `{}` `[]` 三对，与上游 `indexOfSymbolPair` 在本题上的分支一致），3 条测试（嵌套、不配对、多字节）。应用侧在 `on_pane_changed` 里、光标为空且紧跟在括号后面时，用 §11.5 的指示器闪出配对那个。**与上游的一处差别**：上游在每次选区变化时都跑（`didChangeSelection`），编辑器只报**编辑**不报光标移动，所以只在改动后闪 —— 打字 `(` 后 `)` 会亮，用箭头键移到括号旁不会 | ✅ |
-| 13.5 | 菜单项按状态置灰：让 `tools/generate_menu.py` 产出**接收运行期状态**的菜单（现在的生成表是静态树，构造后认不出哪条是哪个命令） | 待办 |
+| 13.5 | 菜单项按状态置灰（*Straighten Quotes*）：`MenuItem` 没有名称访问器，构造后认不出条目，所以由**生成器**把条件烘进去 —— `tools/generate_menu.py` 的 `GATED_ACTIONS` 表把 action 名映射到条件表达式，生成 `app_menus(state: &MenuGates)` 与 `.disabled(state.selection_empty)`。工作区用 `menu_selection_empty` 这一个布尔跟踪，`sync_menu_gates` 每帧只比较、**翻转时才重建菜单栏**（重建会重读脚本目录）。**关键发现**：编辑器只在 `InputEvent` 里报 Change/PressEnter/Focus/Blur，不报选区移动，但它在重绘时会 notify —— 于是 `cx.observe(editor, …)` 能看到光标与选区变化。**踩坑**：observe 是在我们**正在更新**编辑器时同步触发的，直接 `weak.update` 会撞 GPUI 的重入保护（探针一跑就 panic）；改成「排队 + 合并」（`cx.defer` + `Rc<Cell<bool>>`），一串重绘只比较一次。静态契约测试锁住「生成表里恰好一处按状态置灰、且是这条命令、且测的是工作区维护的字段」，注入验证过会红。**未做**：大纲导航两项的置灰 —— 它要判断「大纲有没有条目」，而每次 refresh 都解析一遍缓冲区不划算 | ✅（一条） |
 | 13.6 | 查找指示器淡出：文字装饰不能逐帧动画（编辑器按状态重绘、不按时钟），所以做成**分步**淡出 —— `paint_find_indicator(range, factor)` 在 1 / 0.75 / 0.5 / 0.25 / 0 五档上重设同一个装饰，每档 175 ms，总时长仍是 700 ms（与原来「亮 700ms 后消失」一致）；每次闪仍带编号，旧计时器不会把新标记淡掉。探针把每档 factor 打到 stderr，实测序列 `1 → 0.75 → 0.5 → 0.25 → 0` | ✅ |
 | 13.7 | 高级计数的胶囊可拖动：上游 `DraggableHostingView` 让读者把它拖到正文任何位置。胶囊锚在**右上角**，所以拖动的两个轴方向相反（右移减小右内边距、下移增大上偏移），算术抽成纯函数 `drag_capsule_offset` 并测试；位移按**指针在窗口里的前后位置差**累加，不做坐标系换算。停止计数后回到默认角落（上游也是新建一颗）。未做：拖出窗口边缘（上游可拖到窗口边），现由编辑区裁剪 | ✅ |
 
@@ -2544,7 +2544,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
-| 菜单项不能按状态置灰 | 上游用 `NSMenuItem` 的 `validateUserInterfaceItem` 让 *Straighten Quotes*（空选区）与大纲导航（无条目）变灰；GPUI 的 `MenuItem` 在构造时定死 `disabled`，`Action` 变体字段私有且无访问器 —— 构造后认不出哪条是哪个命令。要置灰得让 `tools/generate_menu.py` 接收运行期状态 |
+| 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
 | 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
 | 检查器的 code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle(cornerRadius: 3.5).strokeBorder` 的方框里；SubText 用空格连成一串。 |

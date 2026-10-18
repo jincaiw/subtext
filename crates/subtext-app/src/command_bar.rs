@@ -604,6 +604,7 @@ mod tests {
     /// supply, which is what the commands are read off.
     fn state() -> menus::MenuState {
         menus::MenuState {
+            gates: menus::MenuGates::default(),
             document: Some(menus::DocumentState {
                 syntax: "Markdown".into(),
                 line_ending: LineEnding::LF,

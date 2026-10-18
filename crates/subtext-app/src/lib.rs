@@ -121,6 +121,7 @@ pub fn run() {
             // CotEditor with every document closed.
             let menu_state = menus::MenuState {
                 document: None,
+                gates: menus::MenuGates::default(),
                 theme: settings
                     .theme
                     .clone()

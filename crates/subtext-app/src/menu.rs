@@ -26,7 +26,7 @@ use gpui_kit::{Menu, MenuItem, SystemMenuType};
 use crate::actions;
 
 /// Every top-level menu, in CotEditor's order.
-pub fn app_menus() -> Vec<Menu> {
+pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
     vec![
         Menu {
             name: "SubText".into(),
@@ -127,7 +127,7 @@ pub fn app_menus() -> Vec<Menu> {
                     name: "Substitutions".into(),
                     items: vec![
                         MenuItem::action("Replace Quotes", actions::spelling::ReplaceQuotesInSelection),
-                        MenuItem::action("Straighten Quotes", actions::spelling::StraightenQuotesInSelection),
+                        MenuItem::action("Straighten Quotes", actions::spelling::StraightenQuotesInSelection).disabled(state.selection_empty),
                         MenuItem::action("Replace Dashes", actions::spelling::ReplaceDashesInSelection),
                         MenuItem::action("Replace Text", actions::spelling::ReplaceTextInSelection),
                         MenuItem::separator(),
@@ -743,8 +743,8 @@ mod tests {
     /// menu renamed. Nothing else may drift.
     #[test]
     fn the_bar_has_every_top_level_menu() {
-        assert_eq!(app_menus().len(), 10);
-        let names: Vec<_> = app_menus()
+        assert_eq!(app_menus(&crate::menus::MenuGates::default()).len(), 10);
+        let names: Vec<_> = app_menus(&crate::menus::MenuGates::default())
             .iter()
             .map(|menu| menu.name.to_string())
             .collect();
@@ -784,7 +784,7 @@ mod tests {
                 })
                 .sum()
         }
-        let total: usize = app_menus().iter().map(count).sum();
+        let total: usize = app_menus(&crate::menus::MenuGates::default()).iter().map(count).sum();
         assert_eq!(total, 172);
     }
 
