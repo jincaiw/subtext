@@ -178,13 +178,15 @@ pub fn selection_after_insert(word: &str, partial: &Range<usize>) -> Range<usize
 /// The guards are all about *not* interrupting: the caret must be at the end of
 /// a word that is long enough to be worth completing, the character before it
 /// must not be whitespace, and the character after it must not be a letter —
-/// completing in the middle of a word would replace its tail.
+/// completing in the middle of a word would replace its tail. `partial` is the
+/// word being completed, as [`partial_word_range`] finds it, and its length is
+/// the one upstream compares against `minimumAutomaticCompletionLength`.
 ///
 /// Upstream also checks `hasMarkedText()`, which is an input method part-way
 /// through composing. GPUI's editor does not expose that state, so SubText
 /// cannot ask; see the gap table.
-pub fn should_complete_automatically(text: &str, caret: usize, minimum: usize) -> bool {
-    let caret = floor_char_boundary(text, caret);
+pub fn should_complete_automatically(text: &str, partial: &Range<usize>, minimum: usize) -> bool {
+    let caret = floor_char_boundary(text, partial.end);
     let before = text[..caret].chars().next_back();
     let after = text[caret..].chars().next();
     if before.is_some_and(char::is_whitespace) {
@@ -193,9 +195,15 @@ pub fn should_complete_automatically(text: &str, caret: usize, minimum: usize) -
     if after.is_some_and(char::is_alphanumeric) {
         return false;
     }
-    // The word is counted in grapheme clusters, as upstream's `length` is not:
-    // `NSRange.length` is UTF-16 units, so `é` counts two there and one here.
-    text[..caret].graphemes(true).count() >= minimum
+    // The *word* is what upstream measures — `rangeForUserCompletion.length`,
+    // not how much text precedes the caret. Counting the whole prefix would
+    // suggest a completion for `bc` in `a bc`, which upstream never does.
+    //
+    // The length is counted in grapheme clusters, as upstream's `length` is
+    // not: `NSRange.length` is UTF-16 units, so `é` counts two there and one
+    // here.
+    let start = floor_char_boundary(text, partial.start.min(caret));
+    text[start..caret].graphemes(true).count() >= minimum
 }
 
 /// Round `index` down to a character boundary.
@@ -347,15 +355,22 @@ mod tests {
     #[test]
     fn the_automatic_popup_waits_for_a_word_worth_completing() {
         // Three characters, a letter before and a space after.
-        assert!(should_complete_automatically("foo ", 3, 3));
-        assert!(should_complete_automatically("let foo", 7, 3));
+        assert!(should_complete_automatically("foo ", &(0..3), 3));
+        assert!(should_complete_automatically("let foo", &(4..7), 3));
         // Too short.
-        assert!(!should_complete_automatically("fo ", 2, 3));
+        assert!(!should_complete_automatically("fo ", &(0..2), 3));
         // Nothing typed yet.
-        assert!(!should_complete_automatically("", 0, 3));
+        assert!(!should_complete_automatically("", &(0..0), 3));
         // The caret follows whitespace, so there is no word to continue.
-        assert!(!should_complete_automatically("foo bar", 4, 3));
+        assert!(!should_complete_automatically("foo bar", &(4..4), 3));
         // …or sits in the middle of a word, where completing would eat its tail.
-        assert!(!should_complete_automatically("foobar", 3, 3));
+        assert!(!should_complete_automatically("foobar", &(0..3), 3));
+        // The word is what counts, not the text before it: `bc` is two
+        // characters even though four precede the caret.
+        assert!(!should_complete_automatically("a bc", &(2..4), 3));
+        assert!(should_complete_automatically("a bcd", &(2..5), 3));
+        // A combining mark is one character, as upstream's UTF-16 length makes
+        // it two — the one place the two counts disagree.
+        assert!(!should_complete_automatically("e\u{300}e", &(0..3), 3));
     }
 }

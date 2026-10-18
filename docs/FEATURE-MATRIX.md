@@ -70,7 +70,7 @@
 | 选择包围符号 | `select_enclosing_symbols` | ✅ |
 | 向上/下扩展列选择 | — | ⏳ 需要编辑器的视觉行模型 |
 | 按行拆分选区 | `split_selection_by_lines` | ✅ |
-| 补全 | `complete` | ✅ 上游的候选规则（文档里的词 + 语法 `Completion.json` 的词），⌥⎋ 弹出、↑↓ 选、Enter/Tab 插入、Esc/左右取消、继续打字重新过滤；带括号的词插完光标停在括号中间。列表未虚拟化、不判断 IME 合成态、自动补全未做，见缺口表 |
+| 补全 | `complete` | ✅ 上游的候选规则（文档里的词 + 语法 `Completion.json` 的词），⌥⎋ 弹出、↑↓ 选、Enter/Tab 插入、Esc/左右取消、继续打字重新过滤；带括号的词插完光标停在括号中间。**自动补全**也做了：打字停顿 250ms 后按上游 `performCompletion` 的四条守卫（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字）弹列表，Mode 面板的 *Suggest completions while typing* 生效。列表未虚拟化、不判断 IME 合成态、*Standard words* 仍禁用，见缺口表 |
 | 输入反斜杠 / 日元符号 | `insert_text` | ✅ |
 | 显示 Unicode 输入面板 | — | ⏳ |
 

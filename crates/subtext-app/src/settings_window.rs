@@ -966,11 +966,11 @@ impl SettingsWindow {
                         v_flex()
                             .gap_1()
                             .pl_4()
-                            .child(mode_switch("completion-standard", "Standard words", mode.completion_standard_words, false, cx, |settings, checked| settings.mode.completion_standard_words = checked))
+                            .child(mode_switch("completion-standard", "Standard words", mode.completion_standard_words, true, cx, |settings, checked| settings.mode.completion_standard_words = checked))
                             .child(mode_switch("completion-document", "Words in document", mode.completion_document_words, false, cx, |settings, checked| settings.mode.completion_document_words = checked))
                             .child(mode_switch("completion-syntax", "Words defined in syntax", mode.completion_syntax_words, false, cx, |settings, checked| settings.mode.completion_syntax_words = checked)),
                     )
-                    .child(mode_switch("automatic-completion", "Suggest completions while typing", mode.automatic_completion, true, cx, |settings, checked| settings.mode.automatic_completion = checked)),
+                    .child(mode_switch("automatic-completion", "Suggest completions while typing", mode.automatic_completion, false, cx, |settings, checked| settings.mode.automatic_completion = checked)),
             ));
 
         let modes = v_flex()

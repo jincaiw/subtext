@@ -2157,7 +2157,7 @@ Storyboard 里凡是**控制字符**做键位的地方，Interface Builder 不�
 | 候选列表没有虚拟化 | 上游是 AppKit 的弹出列表；SubText 用一列普通行放进 `max_h` + 滚动。行的数量由共享前缀的词数决定，通常很小。 |
 | 没有 IME 合成态的判断 | 上游 `performCompletion` 会先问 `hasMarkedText()`，正在拼字时不弹。GPUI 的编辑器不暴露这个状态。 |
 | `Standard words` 依旧是关的 | AppKit 的系统词表在系统文本引擎里，Rust 侧够不着 —— Mode 面板早就把它禁用并写了理由，这一轮没有改变这一点。 |
-| 自动补全（*Suggest completions while typing*）未做 | 上游在 `insertText` 后 250ms 防抖、且要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半；那个开关仍是禁用的（面板里写明了）。 |
+| 粘贴也可能弹出自动补全 | 上游从 `insertText` 触发，粘贴走的是另一条路；SubText 只看缓冲区是否**变长**（编辑器的 `Change` 事件不带编辑来源），所以粘贴到词尾时列表也会在 250ms 后弹出。撤销与删除不会（缓冲区变短）。 |
 
 验收：**12 条新测试**（614 = 602 + 12）——core 的 `completion` 10 条
 （词范围的两段与四个实测向量、语法首字符决定停在哪里、文档词与语法词、一字符符号
@@ -2432,7 +2432,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 9.1 | 全量测试 + clippy 零警告 | ✅（654 项 / 零警告） |
+| 9.1 | 全量测试 + clippy 零警告 | ✅（655 项 / 零警告） |
 | 9.2 | 冒烟运行 + 打包 | ✅ 调试与 release 二进制各存活 7 秒、stdout/stderr 各 0 字节；`tools/package-macos.sh` 产出 `dist/SubText.app`（70 语法 / 14 主题 / plist ok / ad-hoc 签名）与 `dist/SubText-0.2.0-arm64.zip`，打包后的 bundle 再冒烟一次也存活。**§8.15 / §8.16 / §8.17 之后各重跑一遍**，同形（调试二进制存活 8–9 秒、输出为空）。**Windows / Linux 交叉检查未完成**，停在依赖的构建脚本上（缺 `llvm-rc` / `x86_64-linux-gnu-gcc`），见缺口表 |
 | 9.3 | 更新 CHANGELOG、README、FEATURE-MATRIX | ✅ CHANGELOG 新增 `[0.2.0]`；README 的保真度表与测试数同步；FEATURE-MATRIX 的行数、编码三行、导航栏 / 状态栏 / 文稿检查器三行、统计同步 |
 | 9.4 | 提交、打 `v0.2.0` 标签、重新打包 | ✅ 提交 `3795da1` 打标签后，§8.12–§8.22 依次落在其后。因为标签只在本地、尚未推送，每次都把它移到最新提交并按新源码重新打包，使标签、CHANGELOG 与 `dist/` 三者一致。**§8.15 落在 `26ac4df`、§8.16 落在 `b452c12`、§8.17 落在 `0466b04`、§8.18 落在 `dd2e2ba`、§8.19 落在 `e5b4a89`、§8.20 落在 `6c12abf`、§8.21 落在 `1ecca7e`、§8.22 落在 `a9bc177`、§8.23 落在 `73071fb`**，标签已移过去，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 都按它重建过。**§8.24 落在 `f3ef4e3`（实现）与 `2150f38`（发布文档同步：CHANGELOG 扩写 Find All 条目、测试数 651、缺口表清理三条已解决项），标签移到 `2150f38`**，release 二进制与 `dist/SubText.app` + `dist/SubText-0.2.0-arm64.zip` 按它重建，打包后的 bundle 再冒烟一次（存活 6 秒、stderr 0 字节）。**推送前不要移动已发布的标签** —— 这里只是因为还没有远端 |
@@ -2456,7 +2456,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
-| 11.1 | 自动补全 *Suggest completions while typing*（上游插入后 250ms 防抖 + 词前缀/长度/后邻条件；面板开关当前禁用） | 待办 |
+| 11.1 | 自动补全 *Suggest completions while typing*：`on_pane_changed` 在缓冲区**变长**时重启 250ms 定时器（`Task` 丢弃即取消 = 上游 `Debouncer`），到点后重跑同一组守卫再开列表；守卫是 core 的 `should_complete_automatically`，按上游 `performCompletion` 的四条（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字），且长度改为量**词**而不是整段前缀（此前把 `a bc` 判成可补全）。接受补全后取消待触发的定时器（上游 `insertCompletion` 不重新装弹），Esc 同样取消。Mode 面板的 *Suggest completions while typing* 开关解除禁用，*Standard words* 补上禁用 + 理由 | ✅ |
 | 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（编辑器无多选，禁用） | ✅ |
 | 11.3 | 查找面板记住窗口位置与大小：`Settings.find_panel_frame`（x/y/w/h），`show_find` 新建路径以 `WindowBounds::Windowed` 恢复、激活与 `resize_find_panel` 时记录（上游由 macOS 自动存，SubText 在 workspace 触碰面板的时刻存）。探针实测：存储帧 [700,422,520,222] 重启后 origin/size 逐一恢复 | ✅ |
 | 11.4 | 警告检查器按列排序与窄窗布局（上游 SwiftUI `Table` 行为） | 待办 |

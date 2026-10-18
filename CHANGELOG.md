@@ -6,6 +6,33 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **自动补全（*Suggest completions while typing*）**：打字停顿 250 ms 后弹出候选
+  列表，按上游 `performCompletion` 的四条守卫——选区为空、词长 ≥ 3、光标前不是
+  空白、光标后不是字母数字。接受或 Esc 后不会再弹（上游 `insertCompletion`
+  不重新装弹）。Mode 面板的 *Suggest completions while typing* 开关由此生效；
+  *Standard words* 改为禁用并写明理由（AppKit 的系统词表 Rust 侧够不着）。
+
+## [0.3.0] — 2026-10-17
+
+### 新增
+
+- **Find All 的分体下拉**：主体点击查找，caret 菜单给 *Highlight All* 与
+  *Select All*（后者在编辑器支持多选前禁用）——上游 `Menu(primaryAction:)` 的形态。
+- **查找面板记住窗口位置与大小**：关掉再 ⌘F，面板回到上次所在的帧
+  （上游 `windowFrameAutosaveName`）。
+- **关闭有未保存改动的文档会先询问**：上游 `DocumentClosingAlert` 的
+  *Save* / *Don't Save* / *Cancel*（Don't Save 为破坏性样式），文案逐句对齐；
+  有损时 *Save* 变 *Save Available Text* 并在正文写明不兼容字符将被替换或删除。
+  空文档与干净文档不打扰。
+- **有损保存的三选**：按 Shift JIS 等编码保存遇到不兼容字符时，弹
+  *Save Available Text* / *Review Incompatible Characters* / *Cancel* ——
+  第一项为本会话允许有损写盘（上游 `allowsLossySaving`），第二项打开
+  Warnings 检查器。此前只有「取消」一条路。
+
 ## [0.2.0] — 2026-10-15
 
 把 v0.1.0 里「菜单项保留、触发时在状态栏说明原因」的功能大部分真正做出来，
@@ -276,35 +303,18 @@ Snippets / Shortcuts / Integration），标签、顺序与分组逐项对齐。
 
 ### 测试
 
-**654** 项测试全部通过（v0.1.0 是 124 项）：
+**655** 项测试全部通过（v0.1.0 是 124 项）：
 
 | Crate | 数量 |
 | --- | --- |
-| `subtext-core` | 381 |
+| `subtext-core` | 382 |
 | `subtext-app` | 236 |
 | `subtext-syntax` | 29 |
 | `subtext-theme` | 7 |
 | doctest | 1 |
-| **合计** | **654** |
+| **合计** | **655** |
 
 `cargo clippy --workspace --all-targets` 零自有警告。
-
-## [0.3.0] — 2026-10-17
-
-### 新增
-
-- **Find All 的分体下拉**：主体点击查找，caret 菜单给 *Highlight All* 与
-  *Select All*（后者在编辑器支持多选前禁用）——上游 `Menu(primaryAction:)` 的形态。
-- **查找面板记住窗口位置与大小**：关掉再 ⌘F，面板回到上次所在的帧
-  （上游 `windowFrameAutosaveName`）。
-- **关闭有未保存改动的文档会先询问**：上游 `DocumentClosingAlert` 的
-  *Save* / *Don't Save* / *Cancel*（Don't Save 为破坏性样式），文案逐句对齐；
-  有损时 *Save* 变 *Save Available Text* 并在正文写明不兼容字符将被替换或删除。
-  空文档与干净文档不打扰。
-- **有损保存的三选**：按 Shift JIS 等编码保存遇到不兼容字符时，弹
-  *Save Available Text* / *Review Incompatible Characters* / *Cancel* ——
-  第一项为本会话允许有损写盘（上游 `allowsLossySaving`），第二项打开
-  Warnings 检查器。此前只有「取消」一条路。
 
 ## [0.1.0] — 2026-10-14
 

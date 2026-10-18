@@ -29,6 +29,7 @@ use std::hash::{Hash as _, Hasher as _};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
@@ -311,6 +312,19 @@ const FIND_PANEL_HEIGHT: f32 = 190.;
 /// result split item opens at 200 points, which is what makes the panel grow.
 const FIND_PANEL_RESULT_HEIGHT: f32 = 200.;
 
+/// How long the buffer must be still before the automatic completion list
+/// opens.
+///
+/// Upstream's `automaticCompletionDelay` is 0.25 s, and every keystroke
+/// restarts it — the list appears when typing pauses, not on every character.
+const AUTOMATIC_COMPLETION_DELAY: Duration = Duration::from_millis(250);
+
+/// The shortest word the automatic list opens for.
+///
+/// Upstream's `minimumAutomaticCompletionLength`. Three characters is where a
+/// list stops being noise: at two, every prefix in the document matches.
+const MINIMUM_AUTOMATIC_COMPLETION_LENGTH: usize = 3;
+
 /// A transient message shown in the status bar.
 struct Status {
     message: String,
@@ -500,6 +514,12 @@ pub struct Workspace {
     find_window_owner: Option<AnyWindowHandle>,
     /// The word completion popup, while it is up.
     completion: Option<Completion>,
+    /// The pending automatic-completion timer, while one is running.
+    ///
+    /// Upstream holds a `Debouncer` that is rescheduled by every keystroke and
+    /// cancelled when the list is accepted or dismissed. A `Task` dropped is a
+    /// task cancelled, so replacing this is the same gesture.
+    completion_auto: Option<gpui_kit::Task<()>>,
     /// The incompatible-character scan, memoised.
     ///
     /// The scan is a codec round trip per chunk, so it cannot run on every
@@ -635,6 +655,7 @@ impl Workspace {
             find_window: None,
             find_window_owner: None,
             completion: None,
+            completion_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
         };
         cx.spawn(async move |this, cx| {
@@ -785,6 +806,17 @@ impl Workspace {
         }
 
         let current_line_ending = self.documents[index].document.line_ending();
+        // Upstream opens the automatic list from `insertText`, so only a
+        // buffer that *grew* counts as typing: an undo or a deletion is not,
+        // and offering a completion over one would be the interruption the
+        // guards exist to avoid.
+        //
+        // Growth is the closest this seam gets: the editor reports one `Change`
+        // per edit and does not say whether the text arrived from a keystroke,
+        // an input method commit, or a paste. The first two are upstream's
+        // trigger; a paste that happens to land at the end of a word is not,
+        // and is recorded in the gap table.
+        let grew = text.len() > self.documents[index].document.text().len();
         self.documents[index].document.set_text(text.clone(), true);
         // A document whose buffer no longer uses its declared ending has been
         // retyped; keep the model honest rather than lying in the status bar.
@@ -795,6 +827,9 @@ impl Workspace {
         self.find.matches.clear();
         self.find.current = None;
         self.sync_panes(index, pane, text, window, cx);
+        if grew {
+            self.schedule_automatic_completion(cx);
+        }
         cx.notify();
     }
 
@@ -3921,18 +3956,103 @@ impl Workspace {
     /// SubText draws its own, anchored to the caret, and offers the same
     /// candidates.
     pub fn complete(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.completion = None;
-        match self.completions_at_caret(cx) {
-            Some((partial, _)) => {
-                self.completion = Some(Completion { start: partial.start, selected: 0 });
-                cx.notify();
-            }
-            // Upstream's `completions(forPartialWordRange:)` returns nil or an
-            // empty list and AppKit then shows nothing at all. SubText says
-            // why, which is the same rule the rest of the unimplemented
-            // commands follow.
-            None => self.set_status("No completions for this word", cx),
+        // A command replaces whatever the typing timer was about to do.
+        self.completion_auto = None;
+        if self.open_completion(cx) {
+            return;
         }
+        // Upstream's `completions(forPartialWordRange:)` returns nil or an
+        // empty list and AppKit then shows nothing at all. SubText says why,
+        // which is the same rule the rest of the unimplemented commands follow.
+        self.set_status("No completions for this word", cx);
+    }
+
+    /// Open the list for the word at the caret.
+    ///
+    /// Returns whether there is anything to show. A list already open on the
+    /// same word keeps its highlight: the automatic timer fires again as the
+    /// user pauses, and moving the selection back to the first row each time
+    /// would undo a choice they had already made.
+    fn open_completion(&mut self, cx: &mut Context<Self>) -> bool {
+        let previous = self.completion.take();
+        let Some((partial, _)) = self.completions_at_caret(cx) else {
+            return false;
+        };
+        let selected = previous
+            .filter(|state| state.start == partial.start)
+            .map_or(0, |state| state.selected);
+        self.completion = Some(Completion { start: partial.start, selected });
+        cx.notify();
+        true
+    }
+
+    /// Which sources the Mode pane has switched on.
+    fn completion_sources(&self) -> completion::CompletionSources {
+        completion::CompletionSources {
+            standard: self.settings.mode.completion_standard_words,
+            document: self.settings.mode.completion_document_words,
+            syntax: self.settings.mode.completion_syntax_words,
+        }
+    }
+
+    /// The words the active document's syntax defines.
+    fn syntax_completion_words(&self) -> Vec<String> {
+        self.active_document()
+            .and_then(|document| self.syntaxes.by_name(&document.syntax))
+            .map(|syntax| syntax.completions.iter().map(|item| item.text.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether the automatic list should be up — upstream's `performCompletion`.
+    ///
+    /// Everything it asks for is asked of the live buffer, so the same check
+    /// gates the timer and validates it once it fires.
+    fn automatic_completion_ready(&self, cx: &App) -> bool {
+        if !self.settings.mode.automatic_completion || !self.completion_sources().any() {
+            return false;
+        }
+        // Upstream refuses while a selection is up: completing would replace
+        // the selection rather than continue a word.
+        let selection = self.active_selection(cx);
+        if !selection.is_empty() {
+            return false;
+        }
+        let Some(text) = self.active_text(cx) else {
+            return false;
+        };
+        let syntax_words = self.syntax_completion_words();
+        let first_letters: Vec<char> =
+            syntax_words.iter().filter_map(|word| word.chars().next()).collect();
+        let partial = completion::partial_word_range(&text, selection.start, &first_letters);
+        completion::should_complete_automatically(
+            &text,
+            &partial,
+            MINIMUM_AUTOMATIC_COMPLETION_LENGTH,
+        )
+    }
+
+    /// Restart the automatic-completion timer.
+    ///
+    /// Called on every insertion. Dropping the previous task cancels it, which
+    /// is upstream's `Debouncer.schedule`: the list appears when typing pauses
+    /// for [`AUTOMATIC_COMPLETION_DELAY`], not on every character.
+    fn schedule_automatic_completion(&mut self, cx: &mut Context<Self>) {
+        self.completion_auto = None;
+        if !self.automatic_completion_ready(cx) {
+            return;
+        }
+        self.completion_auto = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(AUTOMATIC_COMPLETION_DELAY).await;
+            // The caret may have moved, the word may be gone, the setting may
+            // have been switched off, or the window may have closed. Upstream
+            // re-checks the same guards after the delay; so does this.
+            this.update(cx, |workspace, cx| {
+                if workspace.automatic_completion_ready(cx) {
+                    workspace.open_completion(cx);
+                }
+            })
+            .ok();
+        }));
     }
 
     /// The candidates for the word at the caret.
@@ -3945,22 +4065,12 @@ impl Workspace {
     ) -> Option<(Range<usize>, Vec<String>)> {
         let text = self.active_text(cx)?;
         let caret = self.active_selection(cx).start.min(text.len());
-        let document = self.active_document()?;
-        let syntax_words: Vec<String> = self
-            .syntaxes
-            .by_name(&document.syntax)
-            .map(|syntax| syntax.completions.iter().map(|item| item.text.clone()).collect())
-            .unwrap_or_default();
+        let syntax_words = self.syntax_completion_words();
         let first_letters: Vec<char> =
             syntax_words.iter().filter_map(|word| word.chars().next()).collect();
         let partial = completion::partial_word_range(&text, caret, &first_letters);
 
-        // The three Mode-pane switches, which until this round nothing read.
-        let sources = completion::CompletionSources {
-            standard: self.settings.mode.completion_standard_words,
-            document: self.settings.mode.completion_document_words,
-            syntax: self.settings.mode.completion_syntax_words,
-        };
+        let sources = self.completion_sources();
         let candidates = completion::candidates(&text, &partial, sources, &syntax_words);
         (!candidates.is_empty()).then_some((partial, candidates))
     }
@@ -4020,10 +4130,16 @@ impl Workspace {
             out.push_str(&text[partial.end..]);
             textops::Edit { text: out, selection }
         });
+        // The insertion above grew the buffer, which scheduled the next
+        // automatic list. Upstream's `insertCompletion` cancels the debouncer
+        // instead of re-arming it, so the list does not reopen over the word
+        // the user just chose.
+        self.completion_auto = None;
     }
 
     /// Dismiss the popup without inserting anything.
     fn cancel_completion(&mut self, cx: &mut Context<Self>) {
+        self.completion_auto = None;
         if self.completion.take().is_some() {
             cx.notify();
         }
