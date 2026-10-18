@@ -338,13 +338,18 @@ const AUTOMATIC_COMPLETION_DELAY: Duration = Duration::from_millis(250);
 /// list stops being noise: at two, every prefix in the document matches.
 const MINIMUM_AUTOMATIC_COMPLETION_LENGTH: usize = 3;
 
-/// How long the find indicator stays up.
+/// How the find indicator fades out: one opacity factor per step.
 ///
-/// `NSTextView.showFindIndicator(for:)` draws its yellow mark for a moment and
-/// then fades it. SubText keeps the decoration for this long and clears it; the
-/// fade needs a repaint per frame of the whole line, which a text decoration
-/// cannot drive — see the gap table.
-const FIND_INDICATOR_DURATION: Duration = Duration::from_millis(700);
+/// `NSTextView.showFindIndicator(for:)` draws its yellow mark and then fades it
+/// over roughly half a second. A text decoration cannot be animated per frame —
+/// the editor repaints when its state changes, not on a clock — so the fade is
+/// **stepped**: the mark is re-set at each factor and cleared at zero. Four
+/// steps at [`FIND_INDICATOR_STEP`] each is 700 ms, the same lifetime the mark
+/// had when it simply vanished.
+const FIND_INDICATOR_FADE: [f32; 4] = [0.75, 0.5, 0.25, 0.0];
+
+/// The pause between two fade steps.
+const FIND_INDICATOR_STEP: Duration = Duration::from_millis(175);
 
 /// How long the find field must be still before the incremental pass runs.
 ///
@@ -2719,12 +2724,38 @@ impl Workspace {
     /// each matched bracket when the caret jumps to its pair. The mark is a
     /// background behind the glyphs, so the text keeps its own colour.
     fn flash_find_indicator(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
-        let style = gpui_kit::HighlightStyle {
-            background_color: Some(cx.theme().yellow.opacity(FIND_INDICATOR_OPACITY)),
-            ..Default::default()
-        };
-        // The collection belongs to the pane, so the mark is painted by the
-        // editor that holds the range — and a split pane only marks its own.
+        // A second find inside the first one's lifetime must not have its mark
+        // faded out by the older timer, so each flash takes a number and only
+        // the holder of the current one touches the decoration.
+        self.find_indicator = self.find_indicator.wrapping_add(1);
+        let generation = self.find_indicator;
+        self.paint_find_indicator(&range, 1.0, cx);
+
+        cx.spawn(async move |this, cx| {
+            for factor in FIND_INDICATOR_FADE {
+                cx.background_executor().timer(FIND_INDICATOR_STEP).await;
+                let alive = this
+                    .update(cx, |workspace, cx| {
+                        if workspace.find_indicator != generation {
+                            return;
+                        }
+                        workspace.paint_find_indicator(&range, factor, cx);
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Paint the indicator at `factor` of its full strength.
+    ///
+    /// `0.0` clears it, which is the last fade step. The decoration lives on the
+    /// pane — so a split pane only marks its own — and every step replaces the
+    /// range's style rather than adding to it.
+    fn paint_find_indicator(&mut self, range: &Range<usize>, factor: f32, cx: &mut Context<Self>) {
         let Some(indicator) = self
             .documents
             .get(self.active)
@@ -2732,26 +2763,22 @@ impl Workspace {
         else {
             return;
         };
-        indicator.set(vec![gpui_kit::base::input::TextDecoration::new(range, style)], cx);
-
-        // A second find inside the first one's lifetime must not have its mark
-        // cleared by the older timer, so each flash takes a number and only
-        // the holder of the current one clears.
-        self.find_indicator = self.find_indicator.wrapping_add(1);
-        let generation = self.find_indicator;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(FIND_INDICATOR_DURATION).await;
-            this.update(cx, |workspace, cx| {
-                if workspace.find_indicator != generation {
-                    return;
-                }
-                if let Some(document) = workspace.documents.get(workspace.active) {
-                    document.panes[document.active_pane].indicator.clear(cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+        if factor <= 0. {
+            indicator.clear(cx);
+            return;
+        }
+        let style = gpui_kit::HighlightStyle {
+            background_color: Some(
+                cx.theme()
+                    .yellow
+                    .opacity(FIND_INDICATOR_OPACITY * factor),
+            ),
+            ..Default::default()
+        };
+        indicator.set(
+            vec![gpui_kit::base::input::TextDecoration::new(range.clone(), style)],
+            cx,
+        );
     }
 
     /// Flash the bracket that pairs with the one just typed.
