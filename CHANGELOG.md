@@ -6,13 +6,18 @@
 
 ---
 
-## [Unreleased]
+## [0.3.5] — 2026-10-19
+
+### 新增
+
+- **编码菜单补上 *Unicode (UTF-16)* 与 *Unicode (UTF-32)***：这两条按「让 BOM 决定
+  字节序」工作，写出时带本机字节序的标记，读入时由标记决定字节序。
 
 ### 修复
 
-- **编码菜单补上 *Unicode (UTF-16)* 与 *Unicode (UTF-32)***：这两条按「让 BOM 决定
-  字节序」工作，写出时带本机字节序的标记。顺带修正了另外四条：*UTF-16LE/BE*、
-  *UTF-32LE/BE* 现在**不写**字节序标记，与 CotEditor 写出的字节一致（此前多两个字节）。
+- **宽 Unicode 编码不再多写字节序标记**：*UTF-16LE/BE*、*UTF-32LE/BE* 这四条此前都
+  带着标记写，比 CotEditor 多两个字节；现在按 Foundation 的行为不写（只有「未指定
+  字节序」的两条带标记）。
 - **NFKC Case-Fold 现在真的会折叠**。此前这一项在菜单里，点了只在状态栏说「需要
   CaseFolding.txt」——现在那张表和 `Default_Ignorable_Code_Point` 都由 Foundation 生成，
   `Straße` 变成 `strasse`、`ﬁ` 变成 `fi`，与 CotEditor 逐字符一致（400 条随机语料
