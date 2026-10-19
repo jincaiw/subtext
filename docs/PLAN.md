@@ -2549,7 +2549,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 2. **四行假缺口**：自动补全（§11.1 已做，开关也已接上）、*Straighten Quotes* 置灰
    （§13.5 已做）、大纲 `title` 层级（上游那段 `normalize` 生产代码根本不调用）、
    「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁（`menu_contract.rs`
-   早就是那道门禁：men​u → bridge → dispatch 三段按名字比，还带解析器地板值）。
+   早就是那道门禁：menu → bridge → dispatch 三段按名字比，还带解析器地板值）。
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
