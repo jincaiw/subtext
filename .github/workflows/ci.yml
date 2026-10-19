@@ -8,7 +8,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # Documentation-only pushes do not rebuild the app: the gates are about code,
+    # and a green tick per typo fix trains people to ignore the badge.
+    paths-ignore: ["docs/**", "*.md", "LICENSE"]
   pull_request:
+    paths-ignore: ["docs/**", "*.md", "LICENSE"]
 
 jobs:
   test:
