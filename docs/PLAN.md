@@ -2546,14 +2546,16 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
    处理器调的是 `write_to(None)`，而 `Document::save(None)` 对没有路径的文档返回
    `Write { path: "Untitled", "no path" }`，只在状态栏留一句错误。对**有名**文档它会写，
    但写的是 `self.active` 那一个，而被关闭的标签不一定是前台那个。
-2. **三行假缺口**：自动补全（§11.1 已做，开关也已接上）、*Straighten Quotes* 置灰
-   （§13.5 已做）、大纲 `title` 层级（上游那段 `normalize` 生产代码根本不调用）。
+2. **四行假缺口**：自动补全（§11.1 已做，开关也已接上）、*Straighten Quotes* 置灰
+   （§13.5 已做）、大纲 `title` 层级（上游那段 `normalize` 生产代码根本不调用）、
+   「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁（`menu_contract.rs`
+   早就是那道门禁：men​u → bridge → dispatch 三段按名字比，还带解析器地板值）。
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 15.1 | 保存与关闭按**文档身份**走：`save_document(id, as_new_path, close_after)` / `write_document(id, target, close_after)`，`save()` 只是「对前台那个调用它」。关闭弹窗的 *Save* 现在调 `save_document(id, false, true)`：有名文档同步写完即关，未命名文档把 `close_after` 一路带进保存面板的回调，面板给出路径后才写、才关；面板被取消就什么都不发生（意图不落盘、不留状态，所以之后的 ⌘S 不会被「顺手关掉」） | ✅ |
 | 15.2 | lossy 弹窗同样接 `id` 与 `close_after`：*Save Available Text* 写的是那个文档而不是前台那个，写完仍会完成关闭 | ✅ |
-| 15.3 | 缺口表三行假账改真：删两条已做的，`title` 那条改成带证据的「不是缺口」 | ✅ |
+| 15.3 | 缺口表假账改真：删四条已过时的，`title` 那条改成带证据的「不是缺口」 | ✅ |
 
 **验证**：探针开了两个文件、把前台切到第一个、弄脏第二个，再走 `save_document(id, false, true)`。
 日志 `docs=4 → 3`、`disk="two changed\n"`、`still_open=false` —— 写的是**被关闭的那个**（按位置保存会写错文档），
@@ -2596,7 +2598,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | ~~大纲里 `title` 类条目在 `heading` 之后的层级~~ | **不是缺口（证据已核）**：`OutlinePolicy.normalizedLevels` 那条 `title` 特例只出现在 `Packages/Syntax/Tests/SyntaxParsersTests/OutlinePolicyTests.swift` 与它自己的定义里，**生产代码没有任何调用点** —— `OutlineInspectorView.rebuildOutline()` 走的是 `OutlineBuildNode.build(from: self.items)`，直接吃提取结果，`title` 就是 `.level(0)`，与 SubText 的 `indent_for` 完全一致。此前把「库里有这段代码」当成了「应用会跑这段代码」。 |
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
-| 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **三个纯 Rust crate 已由 CI 跨目标检查**（§14.4）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
