@@ -2519,6 +2519,24 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ---
 
+## 阶段 14 — 持续集成 ✅
+
+仓库公开之后，两个门禁（`cargo test --workspace` 与 clippy 零警告）只在本机跑过。
+这一阶段把它们搬上 GitHub Actions。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 14.1 | `.github/workflows/ci.yml`：push 到 `main` 与 PR 时，在 **macos-14** 上跑 `cargo test --workspace --locked` 与 `cargo clippy --workspace --all-targets --locked -- -D warnings`，带 `Swatinem/rust-cache` | ✅ |
+| 14.2 | 只挂 macOS：那是唯一验证过的平台。Linux / Windows 的 GPUI 后端没跑过，挂一个必然红的 job 只会教人忽略红叉。这一条要等真做过交叉验证再改 | ✅（有意为之） |
+| 14.3 | README 顶部加 CI 徽章；`Cargo.toml` 里占位的 `repository` 地址改成真实仓库 | ✅ |
+
+**第一次跑就抓到一个本地看不见的问题**：runner 的 `stable` 比本机的 1.96.1 新，clippy 报了
+`chunks_exact` 的常量块宽（`subtext-core` 三处：UTF-16 两处、UTF-32 一处）。改用
+`as_chunks::<N>()` —— 常量宽度时它同时给出余数，正好替掉调用方自己算的 `is_multiple_of`；
+编码测试全过，行为未变。**这正是 CI 的价值**：本地工具链的 lint 集合不是全部。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
