@@ -1133,10 +1133,10 @@ ISO 8859-1、也没有 ISO 8859-9，编码标准把这两个 label 解析到 Win
 | 中欧 Windows | Central European (Windows Latin 2) | 🔤 改名 + 合并 | 原「Western (Windows Latin 2)」与「Central European (Windows)」两条同 codec，合并成这一条 |
 | 中欧 Windows | Western (NextStep) | ❌ 缺席 | NextStep Latin 无 codec |
 | 中欧 Windows | Western (ASCII) | ❌ 缺席 | 无 ASCII codec；`encoding_rs` 的 `ascii` label 解析到 windows-1252，那会接受 ASCII 该拒绝的字节 |
-| Unicode | Unicode (UTF-16) | ❌ 缺席 | 见下方「缺的两条宽 Unicode」 |
+| Unicode | Unicode (UTF-16) | ✅ 照搬（§17） | 「BOM 决定字节序」：写出带本机字节序的标记 |
 | Unicode | Unicode (UTF-16BE) | 🔤 改名 | 原「Unicode (UTF-16 Big-Endian)」 |
 | Unicode | Unicode (UTF-16LE) | 🔤 改名 | 原「Unicode (UTF-16 Little-Endian)」 |
-| Unicode | Unicode (UTF-32) | ❌ 缺席 | 同 UTF-16 |
+| Unicode | Unicode (UTF-32) | ✅ 照搬（§17） | 同 UTF-16 |
 | Unicode | Unicode (UTF-32BE) | 🔤 改名 | 原「Unicode (UTF-32 Big-Endian)」 |
 | Unicode | Unicode (UTF-32LE) | 🔤 改名 | 原「Unicode (UTF-32 Little-Endian)」 |
 
@@ -1674,9 +1674,10 @@ set: { self.encoding = …; self.saveUTF8BOM = $0.withUTF8BOM }
 | `default_encoding: "utf-16le"` | `encoding=utf-16le bom=Utf16Le` ✅ **之前是 None** |
 | `shift_jis` + `save_utf8_bom: true` | `encoding=shift_jis bom=None` ✅ 闸门生效 |
 
-#### 仍然记账的一条
+#### 仍然记账的一条（§17 已关掉）
 
-**缺 `Unicode (UTF-16)` / `Unicode (UTF-32)` 两条菜单项**没在这一轮做，而且理由更清楚了：
+**缺 `Unicode (UTF-16)` / `Unicode (UTF-32)` 两条菜单项**没在这一轮做，而且理由更清楚了
+（§17 把这两条补上了：`FileEncoding` 拿到了「未指定字节序」态，写出规则按 Foundation 实测）：
 上游这两条的意思是「让 BOM 决定字节序」，而 SubText 的 `FileEncoding` 把字节序做成显式的
 （`utf-16le` / `utf-16be`）—— 要补这两条，先得给 `FileEncoding` 一个「未指定字节序」态
 并定义写出规则，是一个独立改动。这一轮做的是**另一半**：让默认编码记住它的 mark。
@@ -2598,13 +2599,49 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ---
 
+## 阶段 17 — 两条宽 Unicode 编码，与它们真正带不带标记
+
+上游的编码列表有六条宽 Unicode：`UTF-16`、`UTF-16BE`、`UTF-16LE`、`UTF-32`、`UTF-32BE`、
+`UTF-32LE`。SubText 只有后四条，前两条一直记在缺口表里，理由是「未指定字节序」需要一个新的
+状态。这一阶段补上，顺带查出一个更实际的问题。
+
+**实测（Swift，本机 LE）**：
+
+| 写出 | 字节 |
+| --- | --- |
+| `"aé".data(using: .utf16)` | `FF FE 61 00 E9 00` — 标记 + **本机**字节序 |
+| `"aé".data(using: .utf16LittleEndian)` | `61 00 E9 00` — **没有标记** |
+| `"aé".data(using: .utf32)` | `FF FE 00 00 …` |
+| 读 `61 00` 用 `.utf16` | `愀`（**大**端假设），不是 `a` |
+| 读 `61 00` 用 `.utf32` | `nil`（失败） |
+
+于是上游的三条事实：**只有「未指定字节序」的两条带标记**（它的 `FileEncoding.hasBOM` 也只对
+`.utf16`/`.utf32` 为真）；标记存在时读它，不存在时 UTF-16 按大端猜、UTF-32 直接失败；
+一个带 BE 标记的文件重新保存会变成 LE——因为文档的编码是 `.utf16`，而它按本机字节序写。
+
+**SubText 此前把四条都当「带标记」写**，也就是说一份「Unicode (UTF-16LE)」文件比上游多两个字节。
+这是这一轮真正修掉的东西；两条菜单项只是它的表面。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 17.1 | `Kind` 增 `Utf16` / `Utf32`：写出本机字节序 + 自己的标记；读入时标记决定字节序，没有标记时按 Foundation 的实测规则（UTF-16 大端、UTF-32 失败） | ✅ |
+| 17.2 | 四条端序明确的形态改成**不带标记**（`TextEncoding::bom()` 返回 `Bom::None`），与 Foundation 写出的字节一致 | ✅ |
+| 17.3 | `Bom::encoding()` 把两种端序都映射到「未指定」形态 —— 上游 `Unicode.BOM.encoding` 与它的检测测试（`unicodeBOMWithEndianSpecificCandidate` 期望 `.utf16`）就是这么定的 | ✅ |
+| 17.4 | 两个写出器（`encode` / `encode_checked`）原本各写了一遍「用哪个标记」，现在收成 `written_mark()` 一处 —— 它们已经因此产生过一次 BE 标记配 LE 正文的坏文件 | ✅ |
+| 17.5 | 注册表补两条，菜单 40 条；`DecodedFile` 与 `Document::set_encoding` 对「未指定字节序」的形态整段交付，不先剥标记 | ✅ |
+
+**验证**：新增 4 条测试 —— 六种形态的磁盘字节（`FF FE 61 00` / `61 00` / `00 61`）、
+BE 文件重存成本机字节序（并注明这是上游行为）、无标记正文的两种 Foundation 规则、
+端序明确形态不带标记。全量 **686** 项测试全绿。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
-| 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **38 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；以及 Unicode (UTF-16)/(UTF-32)）。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
-| 缺 `Unicode (UTF-16)` 与 `Unicode (UTF-32)` 两条菜单项 | 上游这两条的意思是「让 BOM 决定字节序」，写出时用哪个字节序由 Foundation 决定（跟平台原生字节序，不跨平台可复现）。SubText 的 `FileEncoding` 把字节序做成显式的（`utf-16le` / `utf-16be`），`Bom` 是文件的属性。要补这两条，先得给 `FileEncoding` 一个「未指定字节序」态并定义写出规则，是一个独立改动，不在 §8.9f 里猜。 |
+| 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
 | UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
 | 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |

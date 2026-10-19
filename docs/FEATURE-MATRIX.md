@@ -110,7 +110,7 @@
 | 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：列表来自用户的优先级列表（默认 38 条 + 9 个分隔符），按组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…`。上游 60 条里 22 条无 codec 如实缺席、8 条为超集近似，逐条见 PLAN §8.9f |
 | 编码（重新解释） | `reinterpret_encoding` | 🔁 能力在，但没有入口 —— 上游的菜单里也没有这一项 |
 | 编码自动探测 | `Document::open` / `revert` 的 `DetectionOptions` | ✅ 与上游同序：BOM → 声明（`refer_to_encoding_tag`）→ **按用户的优先级列表逐个试** → 默认编码。没有统计猜测（§8.11 删掉了 `chardetng`） |
-| 默认编码（新建文档） | `Settings::default_file_encoding` → `Document::untitled` | ✅ 选的是**文件编码**（codec + 字节序标记），选择器列用户列表并在 UTF-8 之后紧跟 *Unicode (UTF-8) with BOM*、分隔符画成横线；新建文档带上所选编码的标记（UTF-16/32 的标记本来就属于编码本身）。上游是 `EncodingManager.defaultEncoding`（§8.14） |
+| 默认编码（新建文档） | `Settings::default_file_encoding` → `Document::untitled` | ✅ 选的是**文件编码**（codec + 字节序标记），选择器列用户列表并在 UTF-8 之后紧跟 *Unicode (UTF-8) with BOM*、分隔符画成横线；新建文档带上所选编码的标记（只有「未指定字节序」的 UTF-16/32 自带标记，带 LE/BE 的两种不带 —— 与 Foundation 写出的字节一致）。上游是 `EncodingManager.defaultEncoding`（§8.14） |
 | 编码列表编辑 | `encoding_list_sheet`（*Edit List…* / `Customize Encodings List…`） | ✅ 增删改序：Add 菜单（分隔符 + 尚未列入的可用编码，按名排序）、Delete（UTF-8 与默认编码拒绝并给出原因）、上移/下移、Restore Defaults；OK 才写回设置，Cancel 丢弃。那份列表同时驱动编码菜单与探测优先级。手势与上游不同（箭头代替拖拽、按钮代替 Delete 键），见 PLAN §8.11 |
 | 语法（设置） | `set_syntax` | ✅ 经 Format ▸ Syntax 菜单（None 在前 + 分隔符 + 全部语法，当前项打勾） |
 | 标准字体 | `set_font(None)` | ✅ |
@@ -183,7 +183,7 @@
 | URL 编码 / 解码 | `url_encode` / `url_decode` | ✅ |
 | Unicode 规范化 | `normalize_unicode` | ✅ 经 Text ▸ Unicode Normalizations 菜单（5 项 + 分隔符 + 2 项），**七种全部可用**：四种 Unicode 形态、**NFKC Case-Fold**（case fold 表与 Default_Ignorable 由 Foundation 生成，§16）、两个 HFS+ 形态（按 Apple 的实测行为实现） |
 | 显示选区信息 | `inspect_selection` | ✅ 上游的 **popover**（锚在选中字符上方、点外面或 Escape 关、选区不是一个字符就不弹），内容按 `CharacterInspectorView` 重排：大字形 · 名字 · Code Point（含代理对与 deprecated 徽标）· Block（可切换 `Blocks.txt` 的名字）· Category · Version；多标量改成每个标量一个可折叠行。大字形不是衬线体，见缺口表 |
-| 高级计数 | `advanced_counter` | ✅ 上游的三件：**Start sheet**（三个空白复选框 + *Unit* / *Encoding* / *Normalization* 选项）→ **正文里的胶囊**（默认右上角，可用指针拖到任意位置——§13.7；有选区数选区，否则数整篇；随打字更新）→ 齿轮 **popover** 里的同一份选项面板；右键 *Copy* / *Stop Count*。算法照上游 `String.count(options:)`：忽略换行去 `\R`、忽略空白去 `[\t\p{Zs}]`、连续空白折成一个、规范化、再按字形簇 / 标量 / UTF-16 / 字节数。规范化菜单只有 4 项、胶囊不能拖动，见缺口表 |
+| 高级计数 | `advanced_counter` | ✅ 上游的三件：**Start sheet**（三个空白复选框 + *Unit* / *Encoding* / *Normalization* 选项）→ **正文里的胶囊**（默认右上角，可用指针拖到任意位置——§13.7；有选区数选区，否则数整篇；随打字更新）→ 齿轮 **popover** 里的同一份选项面板；右键 *Copy* / *Stop Count*。算法照上游 `String.count(options:)`：忽略换行去 `\R`、忽略空白去 `[\t\p{Zs}]`、连续空白折成一个、规范化、再按字形簇 / 标量 / UTF-16 / 字节数。规范化菜单七项齐全（§16），胶囊可拖动（§13.7） |
 | 编辑颜色代码 | `color_code_dialog` | ✅ 11 种记法 |
 | 插入片段（子菜单） | `menus::install` 按语法动态重建 | ✅ 无范围片段在前 + 按语法分节 |
 | 代码片段编辑器 | `show_settings_pane(Snippets)` | ✅ 两个页签 + 令牌插入菜单 |

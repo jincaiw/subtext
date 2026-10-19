@@ -63,10 +63,12 @@ impl Bom {
         match self {
             Bom::None => None,
             Bom::Utf8 => Some(TextEncoding::UTF8),
-            Bom::Utf16Le => Some(TextEncoding::UTF16_LE),
-            Bom::Utf16Be => Some(TextEncoding::UTF16_BE),
-            Bom::Utf32Le => Some(TextEncoding::UTF32_LE),
-            Bom::Utf32Be => Some(TextEncoding::UTF32_BE),
+            // Both byte orders map to the **unspecified-order** form, which is
+            // what upstream's `Unicode.BOM.encoding` does (`.utf16` / `.utf32`)
+            // and what its detection tests assert: a BOM-bearing file is
+            // reported as "Unicode (UTF-16)", never as "…LE"/"…BE".
+            Bom::Utf16Le | Bom::Utf16Be => Some(TextEncoding::UTF16),
+            Bom::Utf32Le | Bom::Utf32Be => Some(TextEncoding::UTF32),
         }
     }
 }
@@ -124,11 +126,25 @@ pub struct TextEncoding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Kind {
     Rs(&'static Encoding),
+    /// "Unicode (UTF-16)": the byte order is written as the platform's own and
+    /// the file carries a mark; reading follows the mark. Foundation's `.utf16`,
+    /// which is what upstream uses.
+    Utf16,
+    /// "Unicode (UTF-16LE)": this order, **no** mark — `data(using:
+    /// .utf16LittleEndian)` does not write one.
     Utf16Le,
     Utf16Be,
+    /// "Unicode (UTF-32)", by the same rules as [`Kind::Utf16`].
+    Utf32,
     Utf32Le,
     Utf32Be,
 }
+
+/// Whether this build's native byte order is little-endian.
+///
+/// The "unspecified order" forms write in it — Foundation does the same, which
+/// is why upstream's saved file is not reproducible across architectures.
+const NATIVE_IS_LITTLE: bool = cfg!(target_endian = "little");
 
 impl TextEncoding {
     const fn rs(name: &'static str, id: &'static str, encoding: &'static Encoding) -> Self {
@@ -139,6 +155,10 @@ impl TextEncoding {
     // The four wide forms are named the way Foundation names them — "Unicode
     // (UTF-16BE)", not "Unicode (UTF-16 Big-Endian)" — because that is the string
     // upstream's menu shows, and the whole registry is spelled that way.
+    pub const UTF16: Self =
+        Self { name: "Unicode (UTF-16)", id: "utf-16", kind: Kind::Utf16 };
+    pub const UTF32: Self =
+        Self { name: "Unicode (UTF-32)", id: "utf-32", kind: Kind::Utf32 };
     pub const UTF16_LE: Self =
         Self { name: "Unicode (UTF-16LE)", id: "utf-16le", kind: Kind::Utf16Le };
     pub const UTF16_BE: Self =
@@ -147,6 +167,15 @@ impl TextEncoding {
         Self { name: "Unicode (UTF-32LE)", id: "utf-32le", kind: Kind::Utf32Le };
     pub const UTF32_BE: Self =
         Self { name: "Unicode (UTF-32BE)", id: "utf-32be", kind: Kind::Utf32Be };
+
+    /// Whether this encoding leaves the byte order to the mark.
+    ///
+    /// True for "Unicode (UTF-16)" and "Unicode (UTF-32)" — the two forms that
+    /// write a mark and read it back — and false for the endian-specific ones,
+    /// which are written without a mark and never guess.
+    pub fn is_unspecified_order(self) -> bool {
+        matches!(self.kind, Kind::Utf16 | Kind::Utf32)
+    }
 
     /// Whether a byte-order mark is meaningful for this encoding.
     ///
@@ -158,7 +187,8 @@ impl TextEncoding {
 
     pub fn is_unicode(self) -> bool {
         match self.kind {
-            Kind::Utf16Le | Kind::Utf16Be | Kind::Utf32Le | Kind::Utf32Be => true,
+            Kind::Utf16 | Kind::Utf16Le | Kind::Utf16Be => true,
+            Kind::Utf32 | Kind::Utf32Le | Kind::Utf32Be => true,
             Kind::Rs(e) => e == UTF_8 || e == UTF_16LE || e == UTF_16BE,
         }
     }
@@ -167,15 +197,21 @@ impl TextEncoding {
     ///
     /// Not the inverse of [`Bom::encoding`]: UTF-8 is written without one by
     /// default, and CotEditor keeps the mark as a property of the *file* rather
-    /// than of the encoding — see [`FileEncoding`]. This is only what the
-    /// encoding itself implies, and for the four wide Unicode forms that
-    /// implication is a mark, because the bytes are ambiguous without one.
+    /// than of the encoding — see [`FileEncoding`]. Only the two forms whose
+    /// byte order is unspecified imply a mark; the endian-specific ones are
+    /// unambiguous and Foundation writes none for them.
     pub fn bom(self) -> Bom {
         match self.kind {
-            Kind::Utf16Le => Bom::Utf16Le,
-            Kind::Utf16Be => Bom::Utf16Be,
-            Kind::Utf32Le => Bom::Utf32Le,
-            Kind::Utf32Be => Bom::Utf32Be,
+            Kind::Utf16 => {
+                if NATIVE_IS_LITTLE { Bom::Utf16Le } else { Bom::Utf16Be }
+            }
+            Kind::Utf32 => {
+                if NATIVE_IS_LITTLE { Bom::Utf32Le } else { Bom::Utf32Be }
+            }
+            // The endian-specific forms are written **without** a mark:
+            // Foundation's `data(using: .utf16LittleEndian)` produces none, and
+            // upstream writes whatever Foundation produces.
+            Kind::Utf16Le | Kind::Utf16Be | Kind::Utf32Le | Kind::Utf32Be => Bom::None,
             Kind::Rs(_) => Bom::None,
         }
     }
@@ -203,6 +239,8 @@ impl TextEncoding {
     pub fn from_identifier(name: &str) -> Option<Self> {
         let lowered = name.trim().to_ascii_lowercase();
         match lowered.as_str() {
+            "utf-16" => return Some(Self::UTF16),
+            "utf-32" => return Some(Self::UTF32),
             "utf-16le" | "utf-16-le" => return Some(Self::UTF16_LE),
             "utf-16be" | "utf-16-be" => return Some(Self::UTF16_BE),
             "utf-32le" | "utf-32-le" => return Some(Self::UTF32_LE),
@@ -226,6 +264,20 @@ impl TextEncoding {
                 let (text, _, had_errors) = encoding.decode(bytes);
                 (text.into_owned(), had_errors)
             }
+            // The unspecified-order forms read the mark themselves, because
+            // the body cannot be interpreted without it. Without one, Foundation
+            // assumes **big**-endian for UTF-16 and refuses UTF-32 outright —
+            // both measured, not guessed.
+            Kind::Utf16 => match detect_bom(bytes) {
+                Bom::Utf16Le => decode_utf16(&bytes[2..], true),
+                Bom::Utf16Be => decode_utf16(&bytes[2..], false),
+                _ => decode_utf16(bytes, false),
+            },
+            Kind::Utf32 => match detect_bom(bytes) {
+                Bom::Utf32Le => decode_utf32(&bytes[4..], true),
+                Bom::Utf32Be => decode_utf32(&bytes[4..], false),
+                _ => (String::new(), true),
+            },
             Kind::Utf16Le => decode_utf16(bytes, true),
             Kind::Utf16Be => decode_utf16(bytes, false),
             Kind::Utf32Le => decode_utf32(bytes, true),
@@ -240,8 +292,12 @@ impl TextEncoding {
                 let (bytes, _, had_errors) = encoding.encode(text);
                 (bytes.into_owned(), had_errors)
             }
+            // The mark is the caller's business (`DecodedFile::encode_checked`
+            // writes it), so the body is bare in every case.
+            Kind::Utf16 => (encode_utf16(text, NATIVE_IS_LITTLE), false),
             Kind::Utf16Le => (encode_utf16(text, true), false),
             Kind::Utf16Be => (encode_utf16(text, false), false),
+            Kind::Utf32 => (encode_utf32(text, NATIVE_IS_LITTLE), false),
             Kind::Utf32Le => (encode_utf32(text, true), false),
             Kind::Utf32Be => (encode_utf32(text, false), false),
         }
@@ -498,14 +554,15 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
         encoding_rs::WINDOWS_1250,
     )],
     // Unicode, wide. Upstream's group is six: UTF-16, then its two byte orders,
-    // then UTF-32 and its two. The two unspecified ones are absent — they mean
-    // "let the byte-order mark decide", and `FileEncoding` names the order
-    // instead; see the gaps table of `docs/PLAN.md`.
+    // then UTF-32 and its two — in that order, which is why the unspecified ones
+    // come first in each pair.
     &[
-        TextEncoding::UTF16_LE,
+        TextEncoding::UTF16,
         TextEncoding::UTF16_BE,
-        TextEncoding::UTF32_LE,
+        TextEncoding::UTF16_LE,
+        TextEncoding::UTF32,
         TextEncoding::UTF32_BE,
+        TextEncoding::UTF32_LE,
     ],
 ];
 
@@ -1037,7 +1094,14 @@ impl DecodedFile {
         if let Some(encoding) = bom.encoding()
             && options.candidates.contains(&encoding)
         {
-            let body = &bytes[bom.len()..];
+            // The unspecified-order forms read the mark themselves — stripping
+            // it first would leave them guessing the order — so they get the
+            // whole slice and the others get the body.
+            let body = if encoding.is_unspecified_order() {
+                bytes
+            } else {
+                &bytes[bom.len()..]
+            };
             let (text, _) = encoding.decode(body);
             return Self { text, encoding, bom, detection: Detection::Bom };
         }
@@ -1070,7 +1134,7 @@ impl DecodedFile {
     /// caller decides here.
     pub fn encode_checked(&self) -> (Vec<u8>, bool) {
         let (body, lossy) = self.encoding.encode(&self.text);
-        let mark = self.bom.bytes();
+        let mark = self.written_mark();
         if mark.is_empty() {
             return (body, lossy);
         }
@@ -1082,7 +1146,7 @@ impl DecodedFile {
 
     pub fn encode(&self) -> Vec<u8> {
         let (body, _) = self.encoding.encode(&self.text);
-        let mark = self.bom.bytes();
+        let mark = self.written_mark();
         if mark.is_empty() {
             return body;
         }
@@ -1090,6 +1154,24 @@ impl DecodedFile {
         out.extend_from_slice(mark);
         out.extend_from_slice(&body);
         out
+    }
+
+    /// The byte-order mark this file is written with.
+    ///
+    /// One rule, used by both writers — they disagreed once, and a file written
+    /// with a big-endian mark over a little-endian body is unreadable.
+    ///
+    /// An unspecified-order encoding always writes its **own** mark: upstream's
+    /// `FileEncoding.hasBOM` is true for `.utf16`/`.utf32` whatever mark the
+    /// file it was read from carried, and the body goes out in the order that
+    /// mark names. Every other encoding keeps the mark the *file* has, because
+    /// UTF-8's mark is a property of the document rather than of the encoding.
+    fn written_mark(&self) -> &'static [u8] {
+        if self.encoding.is_unspecified_order() {
+            self.encoding.bom().bytes()
+        } else {
+            self.bom.bytes()
+        }
     }
 }
 
@@ -1220,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn utf16_le_round_trips() {
+    fn a_utf16_file_with_a_mark_round_trips() {
         let original = "日本語テキスト";
         // Without a BOM, UTF-16 is not reliably distinguishable from other
         // encodings; the BOM is what makes it unambiguous, so test that path.
@@ -1229,20 +1311,85 @@ mod tests {
 
         let file = DecodedFile::decode(&bytes, TextEncoding::UTF8, &defaults());
         assert_eq!(file.text, original);
-        assert_eq!(file.encoding, TextEncoding::UTF16_LE);
+        // A mark maps to the unspecified-order form, so the document says
+        // "Unicode (UTF-16)" and not "…LE" — upstream's detection does the same.
+        assert_eq!(file.encoding, TextEncoding::UTF16);
         assert_eq!(file.detection, Detection::Bom);
         assert_eq!(file.encode(), bytes);
     }
 
+    /// A big-endian file comes back **little**-endian on a little-endian
+    /// machine, because the encoding it is detected as is the unspecified-order
+    /// one and Foundation writes that in the platform's order.
+    ///
+    /// This is upstream's behaviour, verified against its own detection test
+    /// (`unicodeBOMWithEndianSpecificCandidate` expects `.utf16` for both byte
+    /// orders). It is a quirk worth pinning down rather than a property worth
+    /// admiring.
     #[test]
-    fn utf32_le_round_trips() {
+    fn a_big_endian_file_is_rewritten_in_the_platform_order() {
+        let original = "ab";
+        let mut bytes = Bom::Utf16Be.bytes().to_vec();
+        bytes.extend_from_slice(&encode_utf16(original, false));
+
+        let file = DecodedFile::decode(&bytes, TextEncoding::UTF8, &defaults());
+        assert_eq!(file.text, original);
+        assert_eq!(file.encoding, TextEncoding::UTF16);
+
+        let rewritten = file.encode();
+        assert_eq!(&rewritten[..2], Bom::Utf16Le.bytes(), "the mark follows the order written");
+        if cfg!(target_endian = "little") {
+            assert_ne!(rewritten, bytes, "the byte order changed, as upstream's does");
+            assert_eq!(DecodedFile::decode(&rewritten, TextEncoding::UTF8, &defaults()).text, original);
+        }
+    }
+
+    #[test]
+    fn a_utf32_file_with_a_mark_round_trips() {
         let original = "abc😀";
         let mut bytes = Bom::Utf32Le.bytes().to_vec();
         bytes.extend_from_slice(&encode_utf32(original, true));
 
         let file = DecodedFile::decode(&bytes, TextEncoding::UTF8, &defaults());
         assert_eq!(file.text, original);
-        assert_eq!(file.encoding, TextEncoding::UTF32_LE);
+        assert_eq!(file.encoding, TextEncoding::UTF32);
+    }
+
+    /// The two forms Foundation refuses or guesses, measured rather than assumed:
+    /// a mark-less UTF-16 body is read **big**-endian, and a mark-less UTF-32 one
+    /// does not decode at all.
+    #[test]
+    fn a_body_without_a_mark_follows_foundation() {
+        let be = encode_utf16("a", false);
+        assert_eq!(TextEncoding::UTF16.decode(&be), ("a".to_string(), false));
+        let le = encode_utf16("a", true);
+        assert_eq!(TextEncoding::UTF16.decode(&le).0, "\u{6100}", "little-endian is not assumed");
+
+        let (text, lossy) = TextEncoding::UTF32.decode(&encode_utf32("a", true));
+        assert!(text.is_empty());
+        assert!(lossy, "Foundation returns nil here, which is a failed decode");
+    }
+
+    /// The endian-specific forms are written **without** a mark: Foundation's
+    /// `data(using: .utf16LittleEndian)` produces none, and upstream writes what
+    /// Foundation produces.
+    #[test]
+    fn an_endian_specific_form_is_written_bare() {
+        for encoding in [
+            TextEncoding::UTF16_LE,
+            TextEncoding::UTF16_BE,
+            TextEncoding::UTF32_LE,
+            TextEncoding::UTF32_BE,
+        ] {
+            assert_eq!(encoding.bom(), Bom::None, "{encoding} should not imply a mark");
+        }
+        let file = DecodedFile {
+            text: "a".to_string(),
+            encoding: TextEncoding::UTF16_BE,
+            bom: Bom::None,
+            detection: Detection::Default,
+        };
+        assert_eq!(file.encode(), encode_utf16("a", false));
     }
 
     /// A Shift JIS file comes back as Shift JIS because the list is worked
@@ -1466,10 +1613,12 @@ mod tests {
         "Western (ISO Latin 9)",
         "Romanian (ISO Latin 10)",
         "Central European (Windows Latin 2)",
-        "Unicode (UTF-16LE)",
+        "Unicode (UTF-16)",
         "Unicode (UTF-16BE)",
-        "Unicode (UTF-32LE)",
+        "Unicode (UTF-16LE)",
+        "Unicode (UTF-32)",
         "Unicode (UTF-32BE)",
+        "Unicode (UTF-32LE)",
     ];
 
     /// The reconciliation, machine-checked. Two lists that have to keep adding
@@ -1479,7 +1628,7 @@ mod tests {
     #[test]
     fn the_menu_is_upstream_s_default_list_less_the_entries_no_codec_covers() {
         assert_eq!(UPSTREAM_DEFAULT_LIST.len(), 60, "upstream's default list is sixty entries");
-        assert_eq!(UPSTREAM_LISTED.len(), 38, "thirty-eight of them have a codec here");
+        assert_eq!(UPSTREAM_LISTED.len(), 40, "forty of them have a codec here");
 
         for name in UPSTREAM_LISTED {
             assert!(
@@ -1496,7 +1645,7 @@ mod tests {
             .copied()
             .filter(|name| !UPSTREAM_LISTED.contains(name))
             .collect();
-        assert_eq!(omitted.len(), 22, "sixty less thirty-eight");
+        assert_eq!(omitted.len(), 20, "sixty less forty");
         for name in omitted {
             assert!(
                 !AVAILABLE.iter().any(|e| e.name == name),
@@ -1549,22 +1698,24 @@ mod tests {
     /// neither.
     #[test]
     fn the_available_tier_is_the_menu_plus_the_unlisted_one() {
-        assert_eq!(MENU.len(), 38);
+        assert_eq!(MENU.len(), 40);
         assert_eq!(UNLISTED.len(), 7);
         assert_eq!(AVAILABLE.len(), MENU.len() + UNLISTED.len());
         assert_eq!(&AVAILABLE[..MENU.len()], MENU.as_slice());
         assert_eq!(&AVAILABLE[MENU.len()..], UNLISTED);
     }
 
-    /// The five encodings the rest of the crate names directly have to be the
-    /// ones in the table — a const that fell out of it would be an encoding the
-    /// menu could not offer and the detector could not find.
+    /// The encodings the rest of the crate names directly have to be the ones in
+    /// the table — a const that fell out of it would be an encoding the menu
+    /// could not offer and the detector could not find.
     #[test]
     fn the_named_encodings_are_in_the_registry() {
         for encoding in [
             TextEncoding::UTF8,
+            TextEncoding::UTF16,
             TextEncoding::UTF16_LE,
             TextEncoding::UTF16_BE,
+            TextEncoding::UTF32,
             TextEncoding::UTF32_LE,
             TextEncoding::UTF32_BE,
         ] {
@@ -1645,14 +1796,21 @@ mod tests {
         );
     }
 
-    /// Picking a wide Unicode encoding has to leave a mark, or the file it
-    /// writes is ambiguous.
+    /// Only the forms whose byte order is unspecified leave a mark — those are
+    /// the ones whose bytes would be ambiguous without it. Upstream's
+    /// `FileEncoding.hasBOM` says the same: true for `.utf16`/`.utf32`, false for
+    /// the four endian-specific ones.
     #[test]
-    fn the_wide_unicode_encodings_are_written_with_a_mark() {
-        assert_eq!(FileEncoding::of(TextEncoding::UTF16_LE).bom(), Bom::Utf16Le);
-        assert_eq!(FileEncoding::of(TextEncoding::UTF16_BE).bom(), Bom::Utf16Be);
-        assert_eq!(FileEncoding::of(TextEncoding::UTF32_LE).bom(), Bom::Utf32Le);
-        assert_eq!(FileEncoding::of(TextEncoding::UTF32_BE).bom(), Bom::Utf32Be);
+    fn the_unspecified_order_forms_are_written_with_a_mark() {
+        let native = if cfg!(target_endian = "little") { Bom::Utf16Le } else { Bom::Utf16Be };
+        assert_eq!(FileEncoding::of(TextEncoding::UTF16).bom(), native);
+        let native = if cfg!(target_endian = "little") { Bom::Utf32Le } else { Bom::Utf32Be };
+        assert_eq!(FileEncoding::of(TextEncoding::UTF32).bom(), native);
+
+        assert_eq!(FileEncoding::of(TextEncoding::UTF16_LE).bom(), Bom::None);
+        assert_eq!(FileEncoding::of(TextEncoding::UTF16_BE).bom(), Bom::None);
+        assert_eq!(FileEncoding::of(TextEncoding::UTF32_LE).bom(), Bom::None);
+        assert_eq!(FileEncoding::of(TextEncoding::UTF32_BE).bom(), Bom::None);
         assert_eq!(FileEncoding::of(TextEncoding::UTF8).bom(), Bom::None);
         assert_eq!(FileEncoding::utf8_with_bom().bom(), Bom::Utf8);
     }
@@ -2056,14 +2214,17 @@ mod tests {
             respects_declaration: false,
         });
         assert_ne!(read.detection, Detection::Bom);
-        assert_ne!(read.encoding, TextEncoding::UTF16_LE);
+        assert_ne!(read.encoding, TextEncoding::UTF16);
 
-        let with = [TextEncoding::UTF8, TextEncoding::UTF16_LE];
+        // A mark maps to the *unspecified-order* form, as upstream's
+        // `Unicode.BOM.encoding` does — so a file that says "UTF-16 LE" comes
+        // back as "Unicode (UTF-16)".
+        let with = [TextEncoding::UTF8, TextEncoding::UTF16];
         let read = DecodedFile::decode(&bytes, TextEncoding::UTF8, &DetectionOptions {
             candidates: &with,
             respects_declaration: false,
         });
-        assert_eq!(read.encoding, TextEncoding::UTF16_LE);
+        assert_eq!(read.encoding, TextEncoding::UTF16);
         assert_eq!(read.detection, Detection::Bom);
     }
 

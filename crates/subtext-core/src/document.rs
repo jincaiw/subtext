@@ -257,7 +257,8 @@ impl Document {
         let bytes = std::fs::read(&path)
             .map_err(|source| DocumentError::Read { path: path.clone(), source })?;
         let bom = crate::encoding::detect_bom(&bytes);
-        let body = &bytes[bom.len()..];
+        // An unspecified-order encoding reads the mark itself.
+        let body = if encoding.is_unspecified_order() { &bytes[..] } else { &bytes[bom.len()..] };
         let (text, _) = encoding.decode(body);
         self.text = text;
         self.encoding = encoding;
@@ -377,10 +378,60 @@ mod tests {
         let with_bom = Document::untitled(FileEncoding::utf8_with_bom(), LineEnding::LF);
         assert_eq!(with_bom.bom(), Bom::Utf8, "the mark the user asked for was dropped");
 
-        // A UTF-16 default carries its mark without anyone asking for one, which
-        // is what upstream's `FileEncoding.hasBOM` does.
-        let utf16 = Document::untitled(FileEncoding::of(TextEncoding::UTF16_LE), LineEnding::LF);
+        // Only the *unspecified-order* forms carry a mark of their own, which is
+        // what upstream's `FileEncoding.hasBOM` says: true for `.utf16`/`.utf32`,
+        // false for `.utf16LittleEndian` — Foundation writes those bare.
+        let utf16 = Document::untitled(FileEncoding::of(TextEncoding::UTF16), LineEnding::LF);
         assert_eq!(utf16.bom(), Bom::Utf16Le);
+        let utf16_le = Document::untitled(FileEncoding::of(TextEncoding::UTF16_LE), LineEnding::LF);
+        assert_eq!(utf16_le.bom(), Bom::None, "an endian-specific form is written bare");
+    }
+
+    /// The two forms that leave the byte order to the mark, and the four that do
+    /// not — measured against what Foundation writes.
+    ///
+    /// `"a".data(using: .utf16)` is `FF FE 61 00` on this machine (a mark, then
+    /// the platform's order); `"a".data(using: .utf16LittleEndian)` is `61 00`
+    /// with no mark at all. Upstream writes whichever Foundation produces, so
+    /// the bytes on disk have to match that, not a nicer-looking convention.
+    #[test]
+    fn the_wide_encodings_write_the_mark_foundation_writes() {
+        let cases: [(TextEncoding, &[u8]); 3] = [
+            (
+                TextEncoding::UTF16,
+                if cfg!(target_endian = "little") {
+                    &[0xFF, 0xFE, 0x61, 0x00]
+                } else {
+                    &[0xFE, 0xFF, 0x00, 0x61]
+                },
+            ),
+            (TextEncoding::UTF16_LE, &[0x61, 0x00]),
+            (TextEncoding::UTF16_BE, &[0x00, 0x61]),
+        ];
+
+        for (index, (encoding, expected)) in cases.into_iter().enumerate() {
+            let path = temp_path(&format!("wide-{index}.txt"));
+            let mut document = Document::untitled(FileEncoding::of(encoding), LineEnding::LF);
+            document.set_text("a".to_string(), true);
+            document.save(Some(path.clone())).expect("the save must succeed");
+
+            let bytes = std::fs::read(&path).expect("the file was written");
+            assert_eq!(bytes, expected, "{encoding} wrote the wrong bytes");
+
+            // Only the mark-bearing form reads back as itself: a bare UTF-16
+            // body is ambiguous, and `61 00` is valid UTF-8 too, so detection
+            // comes back as "a\0" in either editor. That ambiguity is the
+            // reason the mark-bearing form exists.
+            if encoding == TextEncoding::UTF16 {
+                let reopened =
+                    Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults())
+                        .expect("the file must open");
+                assert_eq!(reopened.text(), "a");
+                assert_eq!(reopened.encoding(), TextEncoding::UTF16);
+            }
+
+            std::fs::remove_file(&path).ok();
+        }
     }
 
     /// …and the mark reaches the file, then comes back.
