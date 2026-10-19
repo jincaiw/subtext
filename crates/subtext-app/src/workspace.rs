@@ -33,9 +33,9 @@ use std::time::Duration;
 
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
-use gpui_kit::base::input::InputEvent;
 use gpui_kit::base::AccordionTrigger;
 use gpui_kit::base::StyledExt as _;
+use gpui_kit::base::input::InputEvent;
 use gpui_kit::base::{Placement, Positioner};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
@@ -48,19 +48,18 @@ use gpui_kit::component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     popover::Popover,
     resizable_panel,
-    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tab::{Tab, TabBar},
+    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex, v_resizable,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths, Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render,
-    KeyDownEvent, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, hsla, percentage, px,
-    rems,
+    Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths,
+    Focusable as _, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
+    WindowOptions, div, hsla, percentage, px, rems,
 };
 
 use subtext_core::completion;
@@ -75,7 +74,9 @@ use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
 use crate::command_bar::{self, CommandBar};
+use crate::count_panel::{CountOptionsView, CountSheet};
 use crate::dialogs::AboutView;
+use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
 use crate::menus;
@@ -85,12 +86,10 @@ use crate::resources;
 use crate::scripts;
 use crate::settings::{
     DEFAULT_FIND_RESULT_FONT_SIZE, DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH,
-    INSPECTOR_MIN_WIDTH, InspectorPane, Settings, SettingsPane, SIDEBAR_MAX_WIDTH,
-    SIDEBAR_MIN_WIDTH, SidebarPane,
+    INSPECTOR_MIN_WIDTH, InspectorPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, Settings,
+    SettingsPane, SidebarPane,
 };
 use crate::settings_window::SettingsWindow;
-use crate::count_panel::{CountOptionsView, CountSheet};
-use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
 
@@ -684,7 +683,8 @@ pub struct Workspace {
     /// frame; the key is the buffer's hash and the encoding, and the answer is
     /// thrown away when either moves. A memo rather than state: nothing outside
     /// the pane reads it, and recomputing it does not change what is drawn.
-    incompatible_cache: std::cell::RefCell<Option<(u64, TextEncoding, Vec<subtext_core::IncompatibleCharacter>)>>,
+    incompatible_cache:
+        std::cell::RefCell<Option<(u64, TextEncoding, Vec<subtext_core::IncompatibleCharacter>)>>,
     /// How far the counting capsule has been dragged from its corner, in
     /// pixels: `(right, down)` — the two edges it is anchored to.
     ///
@@ -733,14 +733,12 @@ impl Workspace {
         // Typing in the find field searches as it goes — upstream's
         // `findSearchesIncrementally`, default on. The search leaves the
         // *Find All* table alone; it only updates the match state.
-        let find_query_changes = cx.subscribe(
-            &find_query,
-            |this: &mut Self, _, event: &InputEvent, cx| {
+        let find_query_changes =
+            cx.subscribe(&find_query, |this: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.incremental_search(cx);
                 }
-            },
-        );
+            });
         // Upstream's second placeholder is *Replace with*, not *Replace* — it is
         // a prepositional phrase there, and the panel's window title already
         // says which command this is.
@@ -857,7 +855,10 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         this._find_panel_closed = Some(cx.on_window_closed(move |cx, id| {
             weak.update(cx, |workspace, cx| {
-                if workspace.find_window.is_some_and(|handle| handle.window_id() == id) {
+                if workspace
+                    .find_window
+                    .is_some_and(|handle| handle.window_id() == id)
+                {
                     workspace.find_window = None;
                     workspace.clear_editor_marks(cx);
                 }
@@ -886,8 +887,10 @@ impl Workspace {
     // ---- document management --------------------------------------------
 
     fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let document =
-            Document::untitled(self.settings.default_file_encoding(), self.settings.default_line_ending);
+        let document = Document::untitled(
+            self.settings.default_file_encoding(),
+            self.settings.default_line_ending,
+        );
         let syntax_name = self
             .settings
             .default_syntax
@@ -979,7 +982,13 @@ impl Workspace {
             state.create_decorations_collection(Vec::new(), cx)
         });
         let (subscription, observed) = self.subscribe_pane(&editor, window, cx);
-        Pane { editor, indicator, marks, _subscription: subscription, _observed: observed }
+        Pane {
+            editor,
+            indicator,
+            marks,
+            _subscription: subscription,
+            _observed: observed,
+        }
     }
 
     /// Follow one pane's buffer back into the document model.
@@ -1193,27 +1202,25 @@ impl Workspace {
             prompt: Some("Open".into()),
         });
         let handle = window.window_handle();
-        cx.spawn(async move |this, cx| {
-            match receiver.await {
-                Ok(Ok(Some(paths))) if !paths.is_empty() => {
-                    let _ = handle.update(cx, move |_, window, cx| {
-                        this.update(cx, |workspace, cx| {
-                            workspace.open_paths(paths, window, cx);
-                        })
-                        .ok();
-                    });
-                }
-                Ok(Ok(_)) => {}
-                Ok(Err(error)) => {
-                    let _ = handle.update(cx, move |_, _, cx| {
-                        this.update(cx, |workspace, cx| {
-                            workspace.notice(format!("Open failed: {error}"), cx);
-                        })
-                        .ok();
-                    });
-                }
-                Err(_) => {}
+        cx.spawn(async move |this, cx| match receiver.await {
+            Ok(Ok(Some(paths))) if !paths.is_empty() => {
+                let _ = handle.update(cx, move |_, window, cx| {
+                    this.update(cx, |workspace, cx| {
+                        workspace.open_paths(paths, window, cx);
+                    })
+                    .ok();
+                });
             }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                let _ = handle.update(cx, move |_, _, cx| {
+                    this.update(cx, |workspace, cx| {
+                        workspace.notice(format!("Open failed: {error}"), cx);
+                    })
+                    .ok();
+                });
+            }
+            Err(_) => {}
         })
         .detach();
     }
@@ -1357,8 +1364,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let message =
-            format!("The document contains characters incompatible with “{name}”.");
+        let message = format!("The document contains characters incompatible with “{name}”.");
         let body = "Incompatible characters are either substituted or removed in saving. \
                     Do you want to save anyway?";
         let workspace = cx.entity().downgrade();
@@ -1383,10 +1389,7 @@ impl Workspace {
                                 .on_click(move |_, window, cx| {
                                     review
                                         .update(cx, |workspace, cx| {
-                                            workspace.show_inspector(
-                                                InspectorPane::Warnings,
-                                                cx,
-                                            )
+                                            workspace.show_inspector(InspectorPane::Warnings, cx)
                                         })
                                         .ok();
                                     window.close_dialog(cx);
@@ -1467,12 +1470,7 @@ impl Workspace {
     /// A document with unsaved changes asks first — upstream's `canClose` —
     /// and a clean one closes without a word (upstream also suppresses the
     /// question for an empty draft).
-    pub fn close_document(
-        &mut self,
-        id: DocumentId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn close_document(&mut self, id: DocumentId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.documents.iter().position(|document| document.id == id) else {
             return;
         };
@@ -1497,12 +1495,7 @@ impl Workspace {
     /// untitled one opens the save panel, whose outcome arrives
     /// asynchronously, so the tab stays open either way and a second close on
     /// the now-clean document succeeds without asking.
-    fn ask_close_document(
-        &mut self,
-        id: DocumentId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn ask_close_document(&mut self, id: DocumentId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.documents.iter().position(|document| document.id == id) else {
             return;
         };
@@ -1510,8 +1503,11 @@ impl Workspace {
         let name = open.document.display_name();
         let encoding_name = open.document.encoding().name;
         let lossy = !open.document.allows_lossy_saving()
-            && !subtext_core::incompatible_characters(open.document.text(), open.document.encoding())
-                .is_empty();
+            && !subtext_core::incompatible_characters(
+                open.document.text(),
+                open.document.encoding(),
+            )
+            .is_empty();
 
         let message = if lossy {
             format!(
@@ -1532,31 +1528,31 @@ impl Workspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let save = workspace.clone();
             let discard = workspace.clone();
-            let save_label =
-                if lossy { "Save Available Text" } else { "Save" };
-            let save_button = Button::new("close-save").label(save_label).on_click(
-                move |_, window, cx| {
-                    save.update(cx, |workspace, cx| {
-                        let Some(index) = workspace.find_document(id) else {
-                            return;
-                        };
-                        // The alert's button *is* "save the available text":
-                        // upstream permits lossy saving from here rather than
-                        // asking a second question.
-                        workspace.documents[index]
-                            .document
-                            .set_allows_lossy_saving(true);
-                        // Save this very document and close it once the write
-                        // returns. An untitled one has no path yet, so the
-                        // panel opens and the close waits for its answer —
-                        // which is the whole reason this is one call rather
-                        // than a save followed by an unrelated close.
-                        workspace.save_document(id, false, true, window, cx);
-                    })
-                    .ok();
-                    window.close_dialog(cx);
-                },
-            );
+            let save_label = if lossy { "Save Available Text" } else { "Save" };
+            let save_button =
+                Button::new("close-save")
+                    .label(save_label)
+                    .on_click(move |_, window, cx| {
+                        save.update(cx, |workspace, cx| {
+                            let Some(index) = workspace.find_document(id) else {
+                                return;
+                            };
+                            // The alert's button *is* "save the available text":
+                            // upstream permits lossy saving from here rather than
+                            // asking a second question.
+                            workspace.documents[index]
+                                .document
+                                .set_allows_lossy_saving(true);
+                            // Save this very document and close it once the write
+                            // returns. An untitled one has no path yet, so the
+                            // panel opens and the close waits for its answer —
+                            // which is the whole reason this is one call rather
+                            // than a save followed by an unrelated close.
+                            workspace.save_document(id, false, true, window, cx);
+                        })
+                        .ok();
+                        window.close_dialog(cx);
+                    });
             dialog
                 .w(window.rem_size() * 26.)
                 .child(
@@ -1594,12 +1590,7 @@ impl Workspace {
     }
 
     /// The removal itself, once a close has been confirmed.
-    fn close_document_now(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn close_document_now(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.documents.len() <= 1 {
             // The confirmation may also land on the last document's tab; a
             // confirmed close there still leaves one document open.
@@ -1619,7 +1610,10 @@ impl Workspace {
     }
 
     fn set_status(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
-        self.status = Some(Status { message: message.into(), at: std::time::Instant::now() });
+        self.status = Some(Status {
+            message: message.into(),
+            at: std::time::Instant::now(),
+        });
         cx.notify();
     }
 
@@ -1801,7 +1795,9 @@ impl Workspace {
         };
         let offset = self.active_selection(cx).start.min(text.len());
         let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-        let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
+        let end = text[offset..]
+            .find('\n')
+            .map_or(text.len(), |index| offset + index);
         SharedString::from(text[start..end].to_string())
     }
 
@@ -1866,7 +1862,10 @@ impl Workspace {
             return String::new();
         };
         let selection = self.active_selection(cx);
-        let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+        let (start, end) = (
+            selection.start.min(text.len()),
+            selection.end.min(text.len()),
+        );
         if start >= end {
             return String::new();
         }
@@ -1882,8 +1881,7 @@ impl Workspace {
         let kind = colorcode::ColorCodeType::from_raw_value(self.settings.color_code_type);
         let fallback = self.last_color_code_color;
         let workspace = Workspace::weak(cx);
-        let sheet =
-            cx.new(|cx| ColorSheet::new(workspace, &selected, kind, fallback, window, cx));
+        let sheet = cx.new(|cx| ColorSheet::new(workspace, &selected, kind, fallback, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
             dialog
@@ -1988,10 +1986,15 @@ impl Workspace {
     ) -> Option<usize> {
         let text = self.active_text(cx)?;
         let selection = self.active_selection(cx);
-        let line_ending = self.active_document().map(|document| document.document.line_ending());
+        let line_ending = self
+            .active_document()
+            .map(|document| document.document.line_ending());
 
-        let multireplace::Outcome { string, selected_range, count } =
-            definition.replace(&text, selection, in_selection, line_ending);
+        let multireplace::Outcome {
+            string,
+            selected_range,
+            count,
+        } = definition.replace(&text, selection, in_selection, line_ending);
         if count == 0 {
             self.set_status("No matches", cx);
             return Some(0);
@@ -2043,7 +2046,8 @@ impl Workspace {
     }
 
     /// Select the word under the caret, as ⌘D does.
-    pub fn select_word(&mut self, cx: &mut Context<Self>) {        let Some(text) = self.active_text(cx) else {
+    pub fn select_word(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
             return;
         };
         let offset = self.active_selection(cx).start.min(text.len());
@@ -2072,7 +2076,9 @@ impl Workspace {
         };
         let offset = self.active_selection(cx).start.min(text.len());
         let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-        let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
+        let end = text[offset..]
+            .find('\n')
+            .map_or(text.len(), |index| offset + index);
         self.set_selection(start..end, cx);
     }
 
@@ -2213,12 +2219,7 @@ impl Workspace {
     /// The expansion itself is [`subtext_core::Snippet::insertion`], so the two
     /// subtleties — indent before splitting, split before substituting — are
     /// the ones the unit tests in `subtext-core` hold down.
-    pub fn insert_snippet(
-        &mut self,
-        id: u64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn insert_snippet(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(snippet) = self
             .settings
             .snippets
@@ -2329,7 +2330,9 @@ impl Workspace {
             snippets: self.settings.snippets.clone(),
             scripts: self.scripts.clone(),
             recent_documents: self.settings.recent_documents.clone(),
-            gates: menus::MenuGates { selection_empty: self.menu_selection_empty },
+            gates: menus::MenuGates {
+                selection_empty: self.menu_selection_empty,
+            },
         }
     }
 
@@ -2388,7 +2391,9 @@ impl Workspace {
 
         let mut text = String::new();
         for path in paths {
-            let extension = path.extension().map(|part| part.to_string_lossy().into_owned());
+            let extension = path
+                .extension()
+                .map(|part| part.to_string_lossy().into_owned());
             let item = self
                 .settings
                 .file_drop
@@ -2495,7 +2500,8 @@ impl Workspace {
                 .on_ok(move |_, _, cx| {
                     let raw = input_value.read(cx).value().to_string();
                     let line = raw.trim().parse::<usize>().unwrap_or(1);
-                    weak.update(cx, |workspace, cx| workspace.goto_line(line, cx)).ok();
+                    weak.update(cx, |workspace, cx| workspace.goto_line(line, cx))
+                        .ok();
                     true
                 })
         });
@@ -2551,7 +2557,10 @@ impl Workspace {
     pub fn show_find(&mut self, show_replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         let owner = window.window_handle();
         if let Some(handle) = self.find_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
                 self.find_window_owner = Some(owner);
                 self.remember_find_frame(cx);
                 // `refresh_matches` drops the previous Find All's rows, so a
@@ -2648,14 +2657,12 @@ impl Workspace {
     }
 
     /// Put the caret in one of the panel's two fields, given the panel's window.
-    fn focus_find_field_in(
-        &self,
-        window: &mut Window,
-        show_replace: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let field =
-            if show_replace { self.find_replacement.clone() } else { self.find_query.clone() };
+    fn focus_find_field_in(&self, window: &mut Window, show_replace: bool, cx: &mut Context<Self>) {
+        let field = if show_replace {
+            self.find_replacement.clone()
+        } else {
+            self.find_query.clone()
+        };
         field.update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
     }
 
@@ -2696,7 +2703,9 @@ impl Workspace {
             return;
         }
         self.incremental_auto = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(INCREMENTAL_SEARCH_DELAY).await;
+            cx.background_executor()
+                .timer(INCREMENTAL_SEARCH_DELAY)
+                .await;
             this.update(cx, |workspace, cx| {
                 if workspace.incremental_search_applies(cx) {
                     workspace.run_incremental_search(cx);
@@ -2717,8 +2726,7 @@ impl Workspace {
         }
         // An invalid regex would only clear the state on every keystroke;
         // upstream's guard skips the search instead.
-        if self.settings.find_regex
-            && finder::Searcher::new(&query, &self.find_options()).is_err()
+        if self.settings.find_regex && finder::Searcher::new(&query, &self.find_options()).is_err()
         {
             return false;
         }
@@ -2793,7 +2801,11 @@ impl Workspace {
                     .map(|captures| captures[0].clone().expect("group 0 always participates"))
                     .collect();
                 self.find.error = None;
-                if self.find.current.is_some_and(|index| index >= self.find.matches.len()) {
+                if self
+                    .find
+                    .current
+                    .is_some_and(|index| index >= self.find.matches.len())
+                {
                     self.find.current = None;
                 }
             }
@@ -2866,15 +2878,14 @@ impl Workspace {
             return;
         }
         let style = gpui_kit::HighlightStyle {
-            background_color: Some(
-                cx.theme()
-                    .yellow
-                    .opacity(FIND_INDICATOR_OPACITY * factor),
-            ),
+            background_color: Some(cx.theme().yellow.opacity(FIND_INDICATOR_OPACITY * factor)),
             ..Default::default()
         };
         indicator.set(
-            vec![gpui_kit::base::input::TextDecoration::new(range.clone(), style)],
+            vec![gpui_kit::base::input::TextDecoration::new(
+                range.clone(),
+                style,
+            )],
             cx,
         );
     }
@@ -2905,8 +2916,7 @@ impl Workspace {
         let Some((start, _)) = text[..caret].char_indices().next_back() else {
             return;
         };
-        let Some(range) =
-            textops::matching_symbol_pair(&text, start, &textops::SymbolPair::BRACES)
+        let Some(range) = textops::matching_symbol_pair(&text, start, &textops::SymbolPair::BRACES)
         else {
             return;
         };
@@ -3053,7 +3063,11 @@ impl Workspace {
             return;
         };
         let height = FIND_PANEL_HEIGHT
-            + if self.find.results_open { FIND_PANEL_RESULT_HEIGHT } else { 0.0 };
+            + if self.find.results_open {
+                FIND_PANEL_RESULT_HEIGHT
+            } else {
+                0.0
+            };
         handle
             .update(cx, |_, window, _| {
                 // Keep whatever width the user has dragged the panel to; only
@@ -3144,7 +3158,10 @@ impl Workspace {
         };
         self.select_find_result_range(
             range,
-            gpui_kit::Modifiers { shift: extend, ..Default::default() },
+            gpui_kit::Modifiers {
+                shift: extend,
+                ..Default::default()
+            },
             cx,
         );
     }
@@ -3402,13 +3419,12 @@ impl Workspace {
         let Some(text) = self.active_text(cx) else {
             return;
         };
-        let replacement = if self.settings.find_regex
-            && self.settings.find_regex_unescapes_replacement
-        {
-            finder::unescape(&self.replacement(cx))
-        } else {
-            self.replacement(cx)
-        };
+        let replacement =
+            if self.settings.find_regex && self.settings.find_regex_unescapes_replacement {
+                finder::unescape(&self.replacement(cx))
+            } else {
+                self.replacement(cx)
+            };
         let searcher = match finder::Searcher::new(&self.query(cx), &self.find_options()) {
             Ok(searcher) => searcher,
             Err(error) => {
@@ -3460,13 +3476,12 @@ impl Workspace {
         let typed_replacement = self.replacement(cx);
         // The message compares against what the user typed, so it records the
         // raw text; the unescaping happens only where the replacement runs.
-        let replacement = if self.settings.find_regex
-            && self.settings.find_regex_unescapes_replacement
-        {
-            finder::unescape(&typed_replacement)
-        } else {
-            typed_replacement.clone()
-        };
+        let replacement =
+            if self.settings.find_regex && self.settings.find_regex_unescapes_replacement {
+                finder::unescape(&typed_replacement)
+            } else {
+                typed_replacement.clone()
+            };
         // *In Selection* narrows the scope rather than the pattern: the
         // matches come back as offsets into the whole buffer either way, so
         // nothing downstream has to know the search was bounded.
@@ -3617,7 +3632,9 @@ impl Workspace {
         let split = self.new_pane(editor, window, cx);
         // CotEditor copies the current selection into the new pane and scrolls
         // both to it, so the split starts where the user was looking.
-        split.editor.update(cx, |state, cx| state.set_selected_range(caret, cx));
+        split
+            .editor
+            .update(cx, |state, cx| state.set_selected_range(caret, cx));
 
         let document = &mut self.documents[index];
         document.panes.insert(pane + 1, split);
@@ -3685,7 +3702,12 @@ impl Workspace {
     /// are its windows, though, and those keys would otherwise be dead on an
     /// unsplit document — so there they fall back to switching documents,
     /// which is what they did before the editor could be split at all.
-    pub fn focus_next_editor(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus_next_editor(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let index = self.active;
         let Some(document) = self.documents.get(index) else {
             return;
@@ -3738,7 +3760,9 @@ impl Workspace {
         let Some(document) = self.documents.get_mut(self.active) else {
             return;
         };
-        document.document.convert_encoding(encoding.encoding, encoding.bom());
+        document
+            .document
+            .convert_encoding(encoding.encoding, encoding.bom());
         let text = document.document.text().to_string();
         self.loading = true;
         for editor in document.editors() {
@@ -3772,10 +3796,7 @@ impl Workspace {
                 }
                 self.loading = false;
                 self.refresh_menus(cx);
-                self.set_status(
-                    format!("Reinterpreted as {}", encoding.name),
-                    cx,
-                );
+                self.set_status(format!("Reinterpreted as {}", encoding.name), cx);
             }
             Err(error) => self.set_status(error.to_string(), cx),
         }
@@ -3795,7 +3816,12 @@ impl Workspace {
     /// itself runs on the background executor: it is the user's own program, and
     /// there is no telling how long it will take.
     pub fn run_script(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(script) = self.scripts.iter().find_map(|item| item.find(path)).cloned() else {
+        let Some(script) = self
+            .scripts
+            .iter()
+            .find_map(|item| item.find(path))
+            .cloned()
+        else {
             self.notice(format!("There is no script at {}", path.display()), cx);
             return;
         };
@@ -3811,7 +3837,9 @@ impl Workspace {
             }
         };
 
-        let input = invocation.input.and_then(|kind| self.script_input(kind, cx));
+        let input = invocation
+            .input
+            .and_then(|kind| self.script_input(kind, cx));
         let document = self
             .documents
             .get(self.active)
@@ -3824,9 +3852,9 @@ impl Workspace {
         let handle = window.window_handle();
         cx.spawn(async move |this, cx| {
             let outcome = executor
-                .spawn(async move {
-                    scripts::execute(&script, input.as_deref(), document.as_deref())
-                })
+                .spawn(
+                    async move { scripts::execute(&script, input.as_deref(), document.as_deref()) },
+                )
                 .await;
             let _ = handle.update(cx, |_, window, cx| {
                 this.update(cx, |workspace, cx| {
@@ -3881,8 +3909,10 @@ impl Workspace {
                     self.set_status("The script produced no output", cx);
                     return;
                 }
-                let mut document =
-                    Document::untitled(self.settings.default_file_encoding(), self.settings.default_line_ending);
+                let mut document = Document::untitled(
+                    self.settings.default_file_encoding(),
+                    self.settings.default_line_ending,
+                );
                 document.set_text(output, true);
                 let syntax = self
                     .settings
@@ -3929,9 +3959,8 @@ impl Workspace {
 
         match kind {
             InputType::Selection => text.get(selection).map(str::to_string),
-            InputType::CurrentLine => {
-                subtext_core::scripts::line_range(&text, selection).map(|range| text[range].to_string())
-            }
+            InputType::CurrentLine => subtext_core::scripts::line_range(&text, selection)
+                .map(|range| text[range].to_string()),
             InputType::AllText => Some(text),
         }
     }
@@ -3946,7 +3975,10 @@ impl Workspace {
     pub fn open_scripts_folder(&mut self, cx: &mut Context<Self>) {
         let directory = resources::script_directory();
         if let Err(error) = std::fs::create_dir_all(&directory) {
-            self.notice(format!("Could not make {}: {error}", directory.display()), cx);
+            self.notice(
+                format!("Could not make {}: {error}", directory.display()),
+                cx,
+            );
             return;
         }
         cx.reveal_path(&directory);
@@ -4002,7 +4034,10 @@ impl Workspace {
     pub fn toggle_antialias(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.update_editor_options(window, cx, |options| options.antialias = !options.antialias);
         let on = self.settings.editor.antialias;
-        self.set_status(format!("Antialiasing {}", if on { "on" } else { "off" }), cx);
+        self.set_status(
+            format!("Antialiasing {}", if on { "on" } else { "off" }),
+            cx,
+        );
     }
 
     pub fn toggle_ligatures(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4030,7 +4065,11 @@ impl Workspace {
         self.settings.set_indentation(uses_spaces, width);
         let _ = self.settings.save();
         self.set_status(
-            if uses_spaces { "Tabs expand to spaces" } else { "Tabs insert tab characters" },
+            if uses_spaces {
+                "Tabs expand to spaces"
+            } else {
+                "Tabs insert tab characters"
+            },
             cx,
         );
     }
@@ -4074,12 +4113,20 @@ impl Workspace {
 
     /// The names of every theme, for the Format ▸ Theme menu.
     pub fn theme_names(&self) -> Vec<String> {
-        self.themes.all().iter().map(|theme| theme.name.clone()).collect()
+        self.themes
+            .all()
+            .iter()
+            .map(|theme| theme.name.clone())
+            .collect()
     }
 
     /// The names of every syntax, for the Format ▸ Syntax menu.
     pub fn syntax_names(&self) -> Vec<String> {
-        self.syntaxes.all().iter().map(|syntax| syntax.name.clone()).collect()
+        self.syntaxes
+            .all()
+            .iter()
+            .map(|syntax| syntax.name.clone())
+            .collect()
     }
 
     pub fn line_endings(&self) -> [LineEnding; 6] {
@@ -4215,8 +4262,11 @@ impl Workspace {
             }
             // Upstream's "Unknown": the character has no Unicode name to show.
             None => {
-                detail = detail
-                    .child(div().text_color(cx.theme().muted_foreground).child("Unknown"));
+                detail = detail.child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Unknown"),
+                );
             }
         }
 
@@ -4247,7 +4297,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let workspace = cx.entity().downgrade();
-        let open = self.inspect_scalar_open.get(index).copied().unwrap_or(false);
+        let open = self
+            .inspect_scalar_open
+            .get(index)
+            .copied()
+            .unwrap_or(false);
         let trigger = AccordionTrigger::new(("inspect-scalar", index))
             .open(open)
             .h_flex()
@@ -4278,7 +4332,11 @@ impl Workspace {
                     .min_w(rems(3.5))
                     .child(scalar.code_point.clone()),
             )
-            .child(div().font_weight(FontWeight::MEDIUM).child(scalar.display_name().to_string()));
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(scalar.display_name().to_string()),
+            );
 
         v_flex()
             .w_full()
@@ -4295,16 +4353,14 @@ impl Workspace {
                                 .min_w(rems(2.))
                                 .text_size(rems(1.75))
                                 .text_color(cx.theme().muted_foreground)
-                                .child(
-                                    scalar.picture.map_or_else(
-                                        || {
-                                            char::from_u32(scalar.value)
-                                                .map(String::from)
-                                                .unwrap_or_default()
-                                        },
-                                        String::from,
-                                    ),
-                                ),
+                                .child(scalar.picture.map_or_else(
+                                    || {
+                                        char::from_u32(scalar.value)
+                                            .map(String::from)
+                                            .unwrap_or_default()
+                                    },
+                                    String::from,
+                                )),
                         )
                         .child(self.render_scalar_detail(scalar, index, false, cx)),
                 )
@@ -4368,7 +4424,11 @@ impl Workspace {
         // The block is a button, not a value: clicking it swaps the name the
         // interface uses for the one `Blocks.txt` gives. An unassigned scalar
         // has no block to toggle, so it stays a muted word.
-        let localized = self.inspect_block_localized.get(index).copied().unwrap_or(true);
+        let localized = self
+            .inspect_block_localized
+            .get(index)
+            .copied()
+            .unwrap_or(true);
         let block = match scalar.block {
             Some(block) if localized => charinfo::display_block_name(block).to_string(),
             Some(block) => block.to_string(),
@@ -4472,10 +4532,7 @@ impl Workspace {
     ///
     /// CotEditor's guard is upstream's: a Unicode encoding has nothing to be
     /// incompatible with, and an empty buffer has nothing in it.
-    fn incompatible_characters(
-        &self,
-        cx: &App,
-    ) -> Vec<subtext_core::IncompatibleCharacter> {
+    fn incompatible_characters(&self, cx: &App) -> Vec<subtext_core::IncompatibleCharacter> {
         let Some(document) = self.active_document() else {
             return Vec::new();
         };
@@ -4491,7 +4548,8 @@ impl Workspace {
             text.hash(&mut hasher);
             hasher.finish()
         };
-        if let Some((cached_key, cached_encoding, items)) = self.incompatible_cache.borrow().as_ref()
+        if let Some((cached_key, cached_encoding, items)) =
+            self.incompatible_cache.borrow().as_ref()
             && *cached_key == key
             && *cached_encoding == encoding
         {
@@ -4509,7 +4567,9 @@ impl Workspace {
     /// of the line, because the menu's key equivalent wins over AppKit's
     /// standard binding.
     pub fn delete_backward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.text_op(window, cx, |text, selection, _| textops::delete_backward(text, selection));
+        self.text_op(window, cx, |text, selection, _| {
+            textops::delete_backward(text, selection)
+        });
     }
 
     /// `Edit ▸ Complete` (⌥⎋) — upstream's `complete:`.
@@ -4543,7 +4603,10 @@ impl Workspace {
         let selected = previous
             .filter(|state| state.start == partial.start)
             .map_or(0, |state| state.selected);
-        self.completion = Some(Completion { start: partial.start, selected });
+        self.completion = Some(Completion {
+            start: partial.start,
+            selected,
+        });
         cx.notify();
         true
     }
@@ -4561,7 +4624,13 @@ impl Workspace {
     fn syntax_completion_words(&self) -> Vec<String> {
         self.active_document()
             .and_then(|document| self.syntaxes.by_name(&document.syntax))
-            .map(|syntax| syntax.completions.iter().map(|item| item.text.clone()).collect())
+            .map(|syntax| {
+                syntax
+                    .completions
+                    .iter()
+                    .map(|item| item.text.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -4583,8 +4652,10 @@ impl Workspace {
             return false;
         };
         let syntax_words = self.syntax_completion_words();
-        let first_letters: Vec<char> =
-            syntax_words.iter().filter_map(|word| word.chars().next()).collect();
+        let first_letters: Vec<char> = syntax_words
+            .iter()
+            .filter_map(|word| word.chars().next())
+            .collect();
         let partial = completion::partial_word_range(&text, selection.start, &first_letters);
         completion::should_complete_automatically(
             &text,
@@ -4604,7 +4675,9 @@ impl Workspace {
             return;
         }
         self.completion_auto = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(AUTOMATIC_COMPLETION_DELAY).await;
+            cx.background_executor()
+                .timer(AUTOMATIC_COMPLETION_DELAY)
+                .await;
             // The caret may have moved, the word may be gone, the setting may
             // have been switched off, or the window may have closed. Upstream
             // re-checks the same guards after the delay; so does this.
@@ -4621,15 +4694,14 @@ impl Workspace {
     ///
     /// `None` when there is no word to complete, no source switched on, or
     /// nothing to offer.
-    fn completions_at_caret(
-        &self,
-        cx: &App,
-    ) -> Option<(Range<usize>, Vec<String>)> {
+    fn completions_at_caret(&self, cx: &App) -> Option<(Range<usize>, Vec<String>)> {
         let text = self.active_text(cx)?;
         let caret = self.active_selection(cx).start.min(text.len());
         let syntax_words = self.syntax_completion_words();
-        let first_letters: Vec<char> =
-            syntax_words.iter().filter_map(|word| word.chars().next()).collect();
+        let first_letters: Vec<char> = syntax_words
+            .iter()
+            .filter_map(|word| word.chars().next())
+            .collect();
         let partial = completion::partial_word_range(&text, caret, &first_letters);
 
         let sources = self.completion_sources();
@@ -4690,7 +4762,10 @@ impl Workspace {
             out.push_str(&text[..partial.start]);
             out.push_str(&word);
             out.push_str(&text[partial.end..]);
-            textops::Edit { text: out, selection }
+            textops::Edit {
+                text: out,
+                selection,
+            }
         });
         // The insertion above grew the buffer, which scheduled the next
         // automatic list. Upstream's `insertCompletion` cancels the debouncer
@@ -4712,12 +4787,21 @@ impl Workspace {
     /// The list is not virtualized. It is a transient popup whose length is
     /// bounded by the words sharing a prefix, and its rows are one line of text
     /// each — see the gap table.
-    fn render_completion(&self, rem: gpui_kit::Pixels, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_completion(
+        &self,
+        rem: gpui_kit::Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let (partial, candidates) = self.completion_popup(cx)?;
-        let selected = self.completion.map_or(0, |state| state.selected).min(candidates.len() - 1);
+        let selected = self
+            .completion
+            .map_or(0, |state| state.selected)
+            .min(candidates.len() - 1);
         let editor = self.active_document()?.editor().clone();
         // Anchored to the *end* of the partial word — the caret.
-        let anchor = editor.read(cx).range_to_bounds(&(partial.end..partial.end))?;
+        let anchor = editor
+            .read(cx)
+            .range_to_bounds(&(partial.end..partial.end))?;
 
         let mut rows = v_flex().w_full();
         for (index, candidate) in candidates.iter().enumerate() {
@@ -4776,7 +4860,11 @@ impl Workspace {
     /// `None` while the counter is stopped. Upstream floats it over the text at
     /// the top-right and lets the user drag it anywhere; SubText pins it there
     /// and does not drag — see the gap table.
-    fn render_count_capsule(&self, rem: gpui_kit::Pixels, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_count_capsule(
+        &self,
+        rem: gpui_kit::Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if !self.count_running {
             return None;
         }
@@ -4792,7 +4880,8 @@ impl Workspace {
         let count = if selection.is_empty() {
             options.count(&text)
         } else {
-            text.get(selection).and_then(|selected| options.count(selected))
+            text.get(selection)
+                .and_then(|selected| options.count(selected))
         };
         let (number, suffix) = crate::count_panel::count_parts(count, options.unit);
 
@@ -4814,11 +4903,7 @@ impl Workspace {
                         .child(number),
                 )
             })
-            .child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(suffix),
-            );
+            .child(div().text_color(cx.theme().muted_foreground).child(suffix));
 
         // The gear opens the same options panel the sheet showed, so the count
         // can be adjusted while it is watched.
@@ -4878,16 +4963,18 @@ impl Workspace {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &gpui_kit::MouseMoveEvent, _, cx| {
-                let Some((last_x, last_y)) = this.count_capsule_drag else {
-                    return;
-                };
-                let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
-                this.count_capsule_offset =
-                    drag_capsule_offset(this.count_capsule_offset, (last_x, last_y), (x, y));
-                this.count_capsule_drag = Some((x, y));
-                cx.notify();
-            }))
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui_kit::MouseMoveEvent, _, cx| {
+                    let Some((last_x, last_y)) = this.count_capsule_drag else {
+                        return;
+                    };
+                    let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
+                    this.count_capsule_offset =
+                        drag_capsule_offset(this.count_capsule_offset, (last_x, last_y), (x, y));
+                    this.count_capsule_drag = Some((x, y));
+                    cx.notify();
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -5010,10 +5097,14 @@ impl Workspace {
             // notifications, focus restoration — a view cannot install itself.
             // The view is therefore held separately, and the handle is only
             // asked whether the window is still up.
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
-                if let (Some(pane), Some(view)) =
-                    (pane, self.settings_view.as_ref().and_then(WeakEntity::upgrade))
-                {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
+                if let (Some(pane), Some(view)) = (
+                    pane,
+                    self.settings_view.as_ref().and_then(WeakEntity::upgrade),
+                ) {
                     view.update(cx, |settings, cx| settings.show(pane, cx));
                 }
                 return;
@@ -5062,7 +5153,10 @@ impl Workspace {
 
     pub fn show_about(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.about_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
                 return;
             }
             self.about_window = None;
@@ -5090,7 +5184,10 @@ impl Workspace {
     /// what makes the new view's read of the workspace legal.
     pub fn show_quick_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(handle) = self.quick_actions_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
                 return;
             }
             self.quick_actions_window = None;
@@ -5285,8 +5382,16 @@ impl Workspace {
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let panes = [
-            (SidebarPane::FileBrowser, "File Browser", gpui_kit::assets::IconName::Folder),
-            (SidebarPane::FolderFind, "Folder Find", gpui_kit::assets::IconName::Search),
+            (
+                SidebarPane::FileBrowser,
+                "File Browser",
+                gpui_kit::assets::IconName::Folder,
+            ),
+            (
+                SidebarPane::FolderFind,
+                "Folder Find",
+                gpui_kit::assets::IconName::Search,
+            ),
         ];
         // A segmented TabBar, not two Buttons with `primary()` on the selected
         // one: this is one control with a current value, so it gets one
@@ -5349,7 +5454,10 @@ impl Workspace {
         let mut list = v_flex().gap_0p5();
         if self.settings.recent_documents.is_empty() {
             list = list.child(
-                div().text_sm().text_color(cx.theme().muted_foreground).child("No recent files"),
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No recent files"),
             );
         }
         for path in self.settings.recent_documents.iter().take(30) {
@@ -5458,12 +5566,10 @@ impl Workspace {
     /// lost; the button is the part that *does* something, and it is kept. It
     /// only appears for a document that has a file, which is when upstream
     /// shows it too.
-    fn inspector_full_path(
-        &self,
-        path: Option<&Path>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let shown = path.map(|path| path.display().to_string()).unwrap_or_default();
+    fn inspector_full_path(&self, path: Option<&Path>, cx: &mut Context<Self>) -> impl IntoElement {
+        let shown = path
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
         let reveal = path.map(Path::to_path_buf).map(|path| {
             Button::new("inspector-reveal")
                 .ghost()
@@ -5531,10 +5637,15 @@ impl Workspace {
                 ),
                 None => (None, None),
             };
-            let size = attributes.as_ref().map(|attributes| format_size(attributes.size, true));
-            let permissions =
-                attributes.as_ref().map(|attributes| attributes.permissions.formatted());
-            let owner = attributes.as_ref().and_then(|attributes| attributes.owner.clone());
+            let size = attributes
+                .as_ref()
+                .map(|attributes| format_size(attributes.size, true));
+            let permissions = attributes
+                .as_ref()
+                .map(|attributes| attributes.permissions.formatted());
+            let owner = attributes
+                .as_ref()
+                .and_then(|attributes| attributes.owner.clone());
 
             v_flex()
                 .w_full()
@@ -5543,10 +5654,16 @@ impl Workspace {
                 .child(inspector_row("Modified", modified.unwrap_or_default(), cx))
                 .child(inspector_row("Size", size.unwrap_or_default(), cx))
                 .child(inspector_tags_row(
-                    attributes.as_ref().map_or(&[][..], |attributes| &attributes.tags),
+                    attributes
+                        .as_ref()
+                        .map_or(&[][..], |attributes| &attributes.tags),
                     cx,
                 ))
-                .child(inspector_row("Permissions", permissions.unwrap_or_default(), cx))
+                .child(inspector_row(
+                    "Permissions",
+                    permissions.unwrap_or_default(),
+                    cx,
+                ))
                 .child(inspector_row("Owner", owner.unwrap_or_default(), cx))
                 .child(self.inspector_full_path(model.path(), cx))
         };
@@ -5556,7 +5673,11 @@ impl Workspace {
             .w_full()
             .gap_1()
             .child(inspector_row("Encoding", encoding.name(), cx))
-            .child(inspector_row("Line Endings", model.line_ending().to_string(), cx))
+            .child(inspector_row(
+                "Line Endings",
+                model.line_ending().to_string(),
+                cx,
+            ))
             // Upstream's `Mode` is the syntax in force — its `Syntax.Kind` label
             // for a built-in kind, the syntax's own name otherwise. SubText's
             // syntaxes are the same bundles, so the name is the same name.
@@ -5598,7 +5719,11 @@ impl Workspace {
                 // One code point is labelled in the singular, several in the
                 // plural — upstream asks `scalars.count == 1` for the same two
                 // strings.
-                let label = if character.is_single_scalar() { "Code Point" } else { "Code Points" };
+                let label = if character.is_single_scalar() {
+                    "Code Point"
+                } else {
+                    "Code Points"
+                };
                 // Upstream draws each code point in a rounded box: monospaced
                 // digits, two points of horizontal padding, and a
                 // `RoundedRectangle(cornerRadius: 3.5).strokeBorder(.tertiary)`
@@ -5620,7 +5745,11 @@ impl Workspace {
                     let scalar = &character.scalars[0];
                     rows = rows
                         .child(inspector_row("Name", scalar.display_name().to_string(), cx))
-                        .child(inspector_row("Block", scalar.display_block().to_string(), cx))
+                        .child(inspector_row(
+                            "Block",
+                            scalar.display_block().to_string(),
+                            cx,
+                        ))
                         .child(inspector_row("Category", scalar.category.to_string(), cx));
                 }
             }
@@ -5966,20 +6095,20 @@ impl Workspace {
                             )
                             .separator()
                             .label("Text Size")
-                            .item(PopupMenuItem::new("Bigger").on_click(
-                                move |_, _window, cx| {
+                            .item(
+                                PopupMenuItem::new("Bigger").on_click(move |_, _window, cx| {
                                     bigger
                                         .update(cx, |this, cx| this.bump_outline_font(1.0, cx))
                                         .ok();
-                                },
-                            ))
-                            .item(PopupMenuItem::new("Smaller").on_click(
-                                move |_, _window, cx| {
+                                }),
+                            )
+                            .item(
+                                PopupMenuItem::new("Smaller").on_click(move |_, _window, cx| {
                                     smaller
                                         .update(cx, |this, cx| this.bump_outline_font(-1.0, cx))
                                         .ok();
-                                },
-                            ))
+                                }),
+                            )
                             .item(PopupMenuItem::new("Reset to Default").on_click(
                                 move |_, _window, cx| {
                                     reset
@@ -6016,120 +6145,122 @@ impl Workspace {
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
 
-        tree(&self.outline_tree, move |_ix, entry, selected, _window, _cx| {
-            let id = entry.item().id.clone();
-            let label = entry.item().label.clone();
-            let row = rows.get(id.as_ref()).cloned();
-            let base = ListItem::new(id)
-                .selected(selected)
-                .w_full()
-                .py_0p5()
-                .px_1()
-                // The outline's own type size is a user setting — Outline's
-                // *Bigger Font* / *Smaller Font* — so it is a pixel value like
-                // the editor's, not part of the interface scale. The row's
-                // *spacing* is rem, which is why an indented row keeps its
-                // proportions when the interface zooms while the text does not.
-                .text_size(px(font_size));
+        tree(
+            &self.outline_tree,
+            move |_ix, entry, selected, _window, _cx| {
+                let id = entry.item().id.clone();
+                let label = entry.item().label.clone();
+                let row = rows.get(id.as_ref()).cloned();
+                let base = ListItem::new(id)
+                    .selected(selected)
+                    .w_full()
+                    .py_0p5()
+                    .px_1()
+                    // The outline's own type size is a user setting — Outline's
+                    // *Bigger Font* / *Smaller Font* — so it is a pixel value like
+                    // the editor's, not part of the interface scale. The row's
+                    // *spacing* is rem, which is why an indented row keeps its
+                    // proportions when the interface zooms while the text does not.
+                    .text_size(px(font_size));
 
-            let Some(row) = row else {
-                return base.child(div().truncate().child(label));
-            };
+                let Some(row) = row else {
+                    return base.child(div().truncate().child(label));
+                };
 
-            // A separator is a hairline rather than a label. Upstream draws a
-            // thin `Divider`; the rows of a virtualized list are all one height,
-            // so the line sits in the middle of a full row instead. One physical
-            // pixel is the intent — a rule that scaled with the interface font
-            // would stop reading as a rule — so this is a `px` value on purpose,
-            // like the settings window's `divider`.
-            if row.kind == Some(OutlineKind::Separator) {
-                return base.child(div().w_full().h(px(1.)).bg(border));
-            }
-
-            let mut line = h_flex()
-                .w_full()
-                .min_w_0()
-                .items_center()
-                .gap_1()
-                // One level of nesting is three quarters of the base font, so
-                // the indent keeps its proportion to the row's own text when
-                // the interface scale changes.
-                .pl(rems(entry.depth() as f32 * OUTLINE_INDENT))
-                // The disclosure control. The tree opens and closes a row on a
-                // click anywhere along it, so this shows the state rather than
-                // being the only way to change it — the one place SubText's
-                // outline behaves differently from upstream's.
-                .child(
-                    div()
-                        // A fixed lane, so a label does not shift sideways as it
-                        // gains or loses a disclosure triangle. Same width as one
-                        // indent step, which is what makes the two read as one
-                        // system rather than two coincidences.
-                        .w(rems(OUTLINE_INDENT))
-                        .flex_shrink_0()
-                        .when(entry.is_folder(), |this| {
-                            this.child(
-                                Icon::new(if entry.is_expanded() {
-                                    IconName::ChevronDown
-                                } else {
-                                    IconName::ChevronRight
-                                })
-                                .xsmall()
-                                .text_color(muted),
-                            )
-                        }),
-                );
-
-            // A whitespace indent is drawn as it was captured, which is what
-            // upstream's `Text(indent)` does.
-            if let Some(indent) = row.indent.as_ref() {
-                line = line.child(div().whitespace_nowrap().child(indent.clone()));
-            }
-
-            if let Some(icon) = row.icon() {
-                line = line.child(
-                    Icon::new(icon)
-                        .xsmall()
-                        .flex_shrink_0()
-                        .text_color(row.icon_color()),
-                );
-            }
-
-            line = line.child(if row.matches.is_empty() {
-                // One element, so a long label truncates with an ellipsis.
-                div().flex_1().min_w_0().truncate().child(label.clone())
-            } else {
-                let mut runs = h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap();
-                for (range, is_match) in crate::outline::highlight_segments(&label, &row.matches) {
-                    let text = label.get(range).unwrap_or_default().to_string();
-                    runs = runs.child(if is_match {
-                        // Upstream's find-highlight: a bright fill with dark
-                        // text. The foreground is a near-black literal rather
-                        // than `cx.theme().background`, because the fill is a
-                        // fixed bright yellow in *both* appearances — a theme
-                        // foreground would be light in a dark theme and vanish
-                        // into it. See `MATCH_FOREGROUND`.
-                        div()
-                            .bg(highlight)
-                            .text_color(MATCH_FOREGROUND)
-                            .child(text)
-                    } else {
-                        div().child(text)
-                    });
+                // A separator is a hairline rather than a label. Upstream draws a
+                // thin `Divider`; the rows of a virtualized list are all one height,
+                // so the line sits in the middle of a full row instead. One physical
+                // pixel is the intent — a rule that scaled with the interface font
+                // would stop reading as a rule — so this is a `px` value on purpose,
+                // like the settings window's `divider`.
+                if row.kind == Some(OutlineKind::Separator) {
+                    return base.child(div().w_full().h(px(1.)).bg(border));
                 }
-                runs
-            });
 
-            if row.kind.is_some_and(OutlineKind::is_bold) {
-                line = line.font_weight(FontWeight::SEMIBOLD);
-            }
+                let mut line = h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap_1()
+                    // One level of nesting is three quarters of the base font, so
+                    // the indent keeps its proportion to the row's own text when
+                    // the interface scale changes.
+                    .pl(rems(entry.depth() as f32 * OUTLINE_INDENT))
+                    // The disclosure control. The tree opens and closes a row on a
+                    // click anywhere along it, so this shows the state rather than
+                    // being the only way to change it — the one place SubText's
+                    // outline behaves differently from upstream's.
+                    .child(
+                        div()
+                            // A fixed lane, so a label does not shift sideways as it
+                            // gains or loses a disclosure triangle. Same width as one
+                            // indent step, which is what makes the two read as one
+                            // system rather than two coincidences.
+                            .w(rems(OUTLINE_INDENT))
+                            .flex_shrink_0()
+                            .when(entry.is_folder(), |this| {
+                                this.child(
+                                    Icon::new(if entry.is_expanded() {
+                                        IconName::ChevronDown
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .xsmall()
+                                    .text_color(muted),
+                                )
+                            }),
+                    );
 
-            base.child(line)
-        })
+                // A whitespace indent is drawn as it was captured, which is what
+                // upstream's `Text(indent)` does.
+                if let Some(indent) = row.indent.as_ref() {
+                    line = line.child(div().whitespace_nowrap().child(indent.clone()));
+                }
+
+                if let Some(icon) = row.icon() {
+                    line = line.child(
+                        Icon::new(icon)
+                            .xsmall()
+                            .flex_shrink_0()
+                            .text_color(row.icon_color()),
+                    );
+                }
+
+                line = line.child(if row.matches.is_empty() {
+                    // One element, so a long label truncates with an ellipsis.
+                    div().flex_1().min_w_0().truncate().child(label.clone())
+                } else {
+                    let mut runs = h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap();
+                    for (range, is_match) in
+                        crate::outline::highlight_segments(&label, &row.matches)
+                    {
+                        let text = label.get(range).unwrap_or_default().to_string();
+                        runs = runs.child(if is_match {
+                            // Upstream's find-highlight: a bright fill with dark
+                            // text. The foreground is a near-black literal rather
+                            // than `cx.theme().background`, because the fill is a
+                            // fixed bright yellow in *both* appearances — a theme
+                            // foreground would be light in a dark theme and vanish
+                            // into it. See `MATCH_FOREGROUND`.
+                            div().bg(highlight).text_color(MATCH_FOREGROUND).child(text)
+                        } else {
+                            div().child(text)
+                        });
+                    }
+                    runs
+                });
+
+                if row.kind.is_some_and(OutlineKind::is_bold) {
+                    line = line.font_weight(FontWeight::SEMIBOLD);
+                }
+
+                base.child(line)
+            },
+        )
         .into_any_element()
     }
 
@@ -6148,7 +6279,12 @@ impl Workspace {
             };
             v_flex()
                 .p_2()
-                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(message))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(message),
+                )
                 .into_any_element()
         } else {
             self.render_outline_tree(cx)
@@ -6221,17 +6357,21 @@ impl Workspace {
             .min_h_0()
             .child(section_title("Incompatible Characters", cx))
             .child(
-            div()
-                .text_sm()
-                .when(items.is_empty(), |this| this.text_color(cx.theme().muted_foreground))
-                .child(status),
-        );
+                div()
+                    .text_sm()
+                    .when(items.is_empty(), |this| {
+                        this.text_color(cx.theme().muted_foreground)
+                    })
+                    .child(status),
+            );
 
         if !items.is_empty() {
             // Upstream shows the character, and for one the encoding cannot
             // spell at all a `�` stands in for it.
             let converted = |item: &subtext_core::IncompatibleCharacter| {
-                item.converted.clone().unwrap_or_else(|| "\u{FFFD}".to_string())
+                item.converted
+                    .clone()
+                    .unwrap_or_else(|| "\u{FFFD}".to_string())
             };
             let _ = encoding;
             let rows: Vec<WarningRow> = items
@@ -6273,7 +6413,11 @@ impl Workspace {
         let status = if items.is_empty() {
             "No issues found.".to_string()
         } else {
-            format!("Found {} line endings other than {}.", items.len(), base.abbreviation())
+            format!(
+                "Found {} line endings other than {}.",
+                items.len(),
+                base.abbreviation()
+            )
         };
 
         let mut pane = v_flex()
@@ -6284,7 +6428,9 @@ impl Workspace {
             .child(
                 div()
                     .text_sm()
-                    .when(items.is_empty(), |this| this.text_color(cx.theme().muted_foreground))
+                    .when(items.is_empty(), |this| {
+                        this.text_color(cx.theme().muted_foreground)
+                    })
                     .child(status),
             );
 
@@ -6395,25 +6541,27 @@ impl Workspace {
             let mut table_row = TableRow::new();
             for (column, text) in cells.into_iter().take(columns).enumerate() {
                 let range = row.range.clone();
-                table_row = table_row.child(TableCell::new().child(
-                    div()
-                        .id((id, index * 3 + column))
-                        .w_full()
-                        .cursor_pointer()
-                        .when(column == 0, |this| this.text_right())
-                        .when(selected, |this| {
-                            this.bg(cx.theme().tokens.table_active).rounded_sm()
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                this.warnings_selected = Some(range.clone());
-                                this.select_range_in_editor(range.clone(), window, cx);
-                                cx.notify();
-                            }),
-                        )
-                        .child(text),
-                ));
+                table_row = table_row.child(
+                    TableCell::new().child(
+                        div()
+                            .id((id, index * 3 + column))
+                            .w_full()
+                            .cursor_pointer()
+                            .when(column == 0, |this| this.text_right())
+                            .when(selected, |this| {
+                                this.bg(cx.theme().tokens.table_active).rounded_sm()
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.warnings_selected = Some(range.clone());
+                                    this.select_range_in_editor(range.clone(), window, cx);
+                                    cx.notify();
+                                }),
+                            )
+                            .child(text),
+                    ),
+                );
             }
             body = body.child(table_row);
         }
@@ -6653,8 +6801,9 @@ impl Workspace {
                         // a dialog dismisses without a callback of its own.
                         .child(DialogClose::new().trigger(|button| button.label("Cancel")))
                         .child(
-                            Button::new("encoding-reinterpret").label("Reinterpret").on_click(
-                                move |_, window, cx| {
+                            Button::new("encoding-reinterpret")
+                                .label("Reinterpret")
+                                .on_click(move |_, window, cx| {
                                     reinterpret
                                         .update(cx, |workspace, cx| {
                                             workspace.reinterpret_encoding(
@@ -6665,8 +6814,7 @@ impl Workspace {
                                         })
                                         .ok();
                                     window.close_dialog(cx);
-                                },
-                            ),
+                                }),
                         )
                         .child(
                             Button::new("encoding-convert")
@@ -6782,9 +6930,9 @@ impl Workspace {
                                 .disabled(!can_next)
                                 .accessibility_label("Next Outline Item")
                                 .tooltip("Jump to next outline item")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.select_next_outline_item(cx)
-                                })),
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.select_next_outline_item(cx)),
+                                ),
                         )
                         .child(self.render_outline_menu(&entries, selection.clone(), cx)),
                 )
@@ -6798,9 +6946,8 @@ impl Workspace {
                         // Upstream draws one symbol and turns it a quarter turn
                         // when the split is vertical. `Icon::rotate` takes a
                         // fraction of a full turn, so this is that same -90°.
-                        Icon::new(IconName::SquareSplitHorizontal).rotate(percentage(
-                            if is_vertical { -0.25 } else { 0. },
-                        )),
+                        Icon::new(IconName::SquareSplitHorizontal)
+                            .rotate(percentage(if is_vertical { -0.25 } else { 0. })),
                     )
                     .accessibility_label("Split Editor")
                     .tooltip("Split editor")
@@ -6918,7 +7065,8 @@ impl Workspace {
         let Some(document) = self.active_document() else {
             return div().into_any_element();
         };
-        let encoding = FileEncoding::of_document(document.document.encoding(), document.document.bom());
+        let encoding =
+            FileEncoding::of_document(document.document.encoding(), document.document.bom());
         let line_ending = document.document.line_ending();
         let file_size = document.document.file_size();
         let editable = self.settings.editor.editable;
@@ -6942,12 +7090,36 @@ impl Workspace {
 
         let window = self.settings.window;
         let mut items: Vec<(bool, &str, String)> = vec![
-            (window.show_status_bar_lines, COUNT_LABELS[0], counts[0].formatted()),
-            (window.show_status_bar_chars, COUNT_LABELS[1], counts[1].formatted()),
-            (window.show_status_bar_words, COUNT_LABELS[2], counts[2].formatted()),
-            (window.show_status_bar_location, POSITION_LABELS[0], location.to_string()),
-            (window.show_status_bar_line, POSITION_LABELS[1], line.to_string()),
-            (window.show_status_bar_column, POSITION_LABELS[2], column.to_string()),
+            (
+                window.show_status_bar_lines,
+                COUNT_LABELS[0],
+                counts[0].formatted(),
+            ),
+            (
+                window.show_status_bar_chars,
+                COUNT_LABELS[1],
+                counts[1].formatted(),
+            ),
+            (
+                window.show_status_bar_words,
+                COUNT_LABELS[2],
+                counts[2].formatted(),
+            ),
+            (
+                window.show_status_bar_location,
+                POSITION_LABELS[0],
+                location.to_string(),
+            ),
+            (
+                window.show_status_bar_line,
+                POSITION_LABELS[1],
+                line.to_string(),
+            ),
+            (
+                window.show_status_bar_column,
+                POSITION_LABELS[2],
+                column.to_string(),
+            ),
         ];
         items.retain(|(shown, _, _)| *shown);
 
@@ -6955,7 +7127,10 @@ impl Workspace {
         // line — it uses an alert — so the notice *replaces* the counts for the
         // four seconds it lives rather than adding a second lane, which keeps
         // the layout identical to upstream's whenever nothing is being said.
-        let notice = self.status.as_ref().filter(|status| status.at.elapsed() <= STATUS_LIFETIME);
+        let notice = self
+            .status
+            .as_ref()
+            .filter(|status| status.at.elapsed() <= STATUS_LIFETIME);
 
         h_flex()
             .w_full()
@@ -7053,7 +7228,10 @@ impl Workspace {
                 // — the same ordering CotEditor relies on.
                 let workspace = cx.entity().downgrade();
                 v_flex()
-                    .id(ElementId::NamedInteger("editor-pane".into(), (document_id.0 << 8) | pane as u64))
+                    .id(ElementId::NamedInteger(
+                        "editor-pane".into(),
+                        (document_id.0 << 8) | pane as u64,
+                    ))
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
@@ -7111,7 +7289,6 @@ impl Workspace {
             .children(panes.into_iter().map(|pane| resizable_panel().child(pane)))
             .into_any_element()
     }
-
 }
 
 /// A byte count as a file size, the way the platform's `ByteCountFormatStyle`
@@ -7322,7 +7499,13 @@ fn reveal_in_file_manager(path: &Path) {
     let (program, arguments) = if cfg!(target_os = "macos") {
         ("open", vec![std::ffi::OsString::from("-R"), path.into()])
     } else if cfg!(target_os = "windows") {
-        ("explorer", vec![std::ffi::OsString::from(format!("/select,{}", path.display()))])
+        (
+            "explorer",
+            vec![std::ffi::OsString::from(format!(
+                "/select,{}",
+                path.display()
+            ))],
+        )
     } else {
         // The desktop environments have no "select this file" switch; opening
         // the containing folder is the closest thing that is not a dependency.
@@ -7334,10 +7517,9 @@ fn reveal_in_file_manager(path: &Path) {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = self.active_document().map_or_else(
-            || "SubText".to_string(),
-            |document| document.title(),
-        );
+        let title = self
+            .active_document()
+            .map_or_else(|| "SubText".to_string(), |document| document.title());
         window.set_window_title(&title);
 
         let mut root = v_flex()
@@ -7424,9 +7606,7 @@ impl Render for Workspace {
             panels.push(
                 resizable_panel()
                     .size(px(self.settings.window.sidebar_width * rem))
-                    .size_range(
-                        px(SIDEBAR_MIN_WIDTH * rem)..px(SIDEBAR_MAX_WIDTH * rem),
-                    )
+                    .size_range(px(SIDEBAR_MIN_WIDTH * rem)..px(SIDEBAR_MAX_WIDTH * rem))
                     // Fixed rather than growing: the document takes the surplus
                     // when the window widens, which is what upstream's sidebar
                     // item does and what keeps the reading column the widest
@@ -7464,9 +7644,7 @@ impl Render for Workspace {
             panels.push(
                 resizable_panel()
                     .size(px(self.settings.window.inspector_width * rem))
-                    .size_range(
-                        px(INSPECTOR_MIN_WIDTH * rem)..px(INSPECTOR_MAX_WIDTH * rem),
-                    )
+                    .size_range(px(INSPECTOR_MIN_WIDTH * rem)..px(INSPECTOR_MAX_WIDTH * rem))
                     .flex_none()
                     .child(self.render_inspector(window, cx)),
             );
@@ -7546,7 +7724,10 @@ impl Render for Workspace {
                     .inset_0()
                     // A click anywhere else dismisses it, as a popup's overlay
                     // does. The list itself is a later child, so it is on top.
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.cancel_completion(cx)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| this.cancel_completion(cx)),
+                    )
                     .child(completion),
             );
         }
@@ -7556,19 +7737,13 @@ impl Render for Workspace {
                 div()
                     .absolute()
                     .inset_0()
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .occlude()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.inspect_character = None;
-                                    cx.notify();
-                                }),
-                            ),
-                    )
+                    .child(div().absolute().inset_0().occlude().on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.inspect_character = None;
+                            cx.notify();
+                        }),
+                    ))
                     .child(popover),
             );
         }
@@ -7673,14 +7848,16 @@ fn outline_item(node: &FilteredNode, expanded: &HashSet<String>) -> TreeItem {
 pub fn load_syntaxes(resources: Option<&crate::resources::Resources>) -> SyntaxManager {
     let mut all: Vec<Syntax> = Vec::new();
     if let Some(resources) = resources
-        && let Ok(manager) = SyntaxManager::load_from_directory(resources.syntaxes()) {
-            all.extend(manager.all().iter().cloned());
-        }
+        && let Ok(manager) = SyntaxManager::load_from_directory(resources.syntaxes())
+    {
+        all.extend(manager.all().iter().cloned());
+    }
     let user = crate::resources::user_syntax_directory();
     if user.is_dir()
-        && let Ok(manager) = SyntaxManager::load_from_directory(&user) {
-            all.extend(manager.all().iter().cloned());
-        }
+        && let Ok(manager) = SyntaxManager::load_from_directory(&user)
+    {
+        all.extend(manager.all().iter().cloned());
+    }
     if all.is_empty() {
         all.push(Syntax::plain_text());
     }
@@ -7692,17 +7869,19 @@ pub fn load_syntaxes(resources: Option<&crate::resources::Resources>) -> SyntaxM
 pub fn load_themes(resources: Option<&crate::resources::Resources>) -> ThemeManager {
     let mut themes: Vec<Theme> = Vec::new();
     if let Some(resources) = resources
-        && let Ok(manager) = ThemeManager::load_from_directory(resources.themes()) {
-            themes.extend(manager.all().iter().cloned());
-        }
+        && let Ok(manager) = ThemeManager::load_from_directory(resources.themes())
+    {
+        themes.extend(manager.all().iter().cloned());
+    }
     let user = crate::resources::user_theme_directory();
     if user.is_dir()
-        && let Ok(manager) = ThemeManager::load_from_directory(&user) {
-            for theme in manager.all() {
-                themes.retain(|existing| existing.name != theme.name);
-                themes.push(theme.clone());
-            }
+        && let Ok(manager) = ThemeManager::load_from_directory(&user)
+    {
+        for theme in manager.all() {
+            themes.retain(|existing| existing.name != theme.name);
+            themes.push(theme.clone());
         }
+    }
     if themes.is_empty() {
         return ThemeManager::builtin();
     }
@@ -7774,13 +7953,22 @@ mod tests {
     fn the_line_column_sorts_as_a_number_not_a_string() {
         // The trap this guards: "10" < "2" as text, so a string sort would put
         // the tenth line before the second.
-        let mut rows =
-            vec![warning_row(10, "b", ""), warning_row(2, "a", ""), warning_row(1, "c", "")];
+        let mut rows = vec![
+            warning_row(10, "b", ""),
+            warning_row(2, "a", ""),
+            warning_row(1, "c", ""),
+        ];
         sort_warning_rows(&mut rows, WarningColumn::Line, false);
-        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![1, 2, 10]);
+        assert_eq!(
+            rows.iter().map(|row| row.line).collect::<Vec<_>>(),
+            vec![1, 2, 10]
+        );
 
         sort_warning_rows(&mut rows, WarningColumn::Line, true);
-        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![10, 2, 1]);
+        assert_eq!(
+            rows.iter().map(|row| row.line).collect::<Vec<_>>(),
+            vec![10, 2, 1]
+        );
     }
 
     #[test]
@@ -7793,13 +7981,17 @@ mod tests {
         sort_warning_rows(&mut rows, WarningColumn::First, false);
         // Upper case sorts before lower case, as `Character`'s `<` does.
         assert_eq!(
-            rows.iter().map(|row| row.first.as_str()).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| row.first.as_str())
+                .collect::<Vec<_>>(),
             vec!["Z", "a", "~"]
         );
 
         sort_warning_rows(&mut rows, WarningColumn::Second, false);
         assert_eq!(
-            rows.iter().map(|row| row.second.as_str()).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| row.second.as_str())
+                .collect::<Vec<_>>(),
             vec!["z", "—", "\u{FFFD}"]
         );
     }
@@ -7812,7 +8004,10 @@ mod tests {
             warning_row(1, "same", ""),
         ];
         sort_warning_rows(&mut rows, WarningColumn::First, false);
-        assert_eq!(rows.iter().map(|row| row.line).collect::<Vec<_>>(), vec![5, 9, 1]);
+        assert_eq!(
+            rows.iter().map(|row| row.line).collect::<Vec<_>>(),
+            vec![5, 9, 1]
+        );
     }
 
     #[test]

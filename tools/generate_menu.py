@@ -22,6 +22,7 @@ The output is deterministic, so re-running it on an unchanged table is a no-op.
 from __future__ import annotations
 
 import json
+import subprocess
 import re
 import sys
 from pathlib import Path
@@ -751,6 +752,18 @@ def main() -> None:
 
     MENU_RS.write_text(renderer.app_menus(), encoding="utf-8")
     KEYMAP_RS.write_text(renderer.keymap(), encoding="utf-8")
+
+    # These two files are generated *and* checked by `cargo fmt --check`, so the
+    # generator formats what it writes. Without this, regenerating would leave
+    # the tree failing the format gate — which is exactly how a gate gets turned
+    # off "just this once".
+    try:
+        subprocess.run(
+            ["rustfmt", "--edition", "2024", str(MENU_RS), str(KEYMAP_RS)],
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"rustfmt failed on the generated files: {error}")
 
     commands = sum(1 for entry in entries if entry["action"])
     shortcuts = sum(1 for entry in entries if entry["key"])

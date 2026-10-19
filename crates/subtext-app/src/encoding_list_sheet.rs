@@ -170,7 +170,10 @@ impl EncodingListSheet {
         for index in 0..self.list.len() {
             let id = self.next_id;
             self.next_id += 1;
-            rows.push(Row { id, item: self.list.item(index).flatten() });
+            rows.push(Row {
+                id,
+                item: self.list.item(index).flatten(),
+            });
         }
         self.rows = rows;
     }
@@ -200,7 +203,8 @@ impl EncodingListSheet {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.assert_in_step();
         self.addable = self.list.addable();
-        self.selection.retain(|id| self.rows.iter().any(|row| row.id == *id));
+        self.selection
+            .retain(|id| self.rows.iter().any(|row| row.id == *id));
         if let Some(anchor) = self.anchor
             && !self.rows.iter().any(|row| row.id == anchor)
         {
@@ -220,7 +224,9 @@ impl EncodingListSheet {
     }
 
     fn is_selected_at(&self, index: usize) -> bool {
-        self.rows.get(index).is_some_and(|row| self.is_selected(row.id))
+        self.rows
+            .get(index)
+            .is_some_and(|row| self.is_selected(row.id))
     }
 
     /// Handle a click on a row, the way a `List(selection:)` does.
@@ -267,9 +273,17 @@ impl EncodingListSheet {
     /// range, which is what a `List` does with nothing to extend from.
     fn range_to_anchor(&self, index: usize) -> Vec<u64> {
         let Some(anchor) = self.anchor.and_then(|anchor| self.index_of(anchor)) else {
-            return self.rows.get(index).map(|row| vec![row.id]).unwrap_or_default();
+            return self
+                .rows
+                .get(index)
+                .map(|row| vec![row.id])
+                .unwrap_or_default();
         };
-        let (start, end) = if anchor <= index { (anchor, index) } else { (index, anchor) };
+        let (start, end) = if anchor <= index {
+            (anchor, index)
+        } else {
+            (index, anchor)
+        };
         self.rows[start..=end].iter().map(|row| row.id).collect()
     }
 
@@ -281,7 +295,10 @@ impl EncodingListSheet {
     /// Upstream's own placement, from the help page: "select the item at the
     /// location to insert, click the Add + button".
     fn insertion_point(&self) -> Option<usize> {
-        self.selection.iter().filter_map(|id| self.index_of(*id)).max()
+        self.selection
+            .iter()
+            .filter_map(|id| self.index_of(*id))
+            .max()
     }
 
     /// Put `item` in at the insertion point and select it, so that the next Add
@@ -329,8 +346,11 @@ impl EncodingListSheet {
         if !matches!(self.removal(), Removal::Allowed) {
             return;
         }
-        let mut indices: Vec<usize> =
-            self.selection.iter().filter_map(|id| self.index_of(*id)).collect();
+        let mut indices: Vec<usize> = self
+            .selection
+            .iter()
+            .filter_map(|id| self.index_of(*id))
+            .collect();
         indices.sort_unstable();
         for index in indices.into_iter().rev() {
             self.list.remove(index);
@@ -368,8 +388,11 @@ impl EncodingListSheet {
     /// into reverse. Rows at an edge stay put; a separate selected row that can
     /// move still does so.
     fn move_selected(&mut self, up: bool) {
-        let mut indices: Vec<usize> =
-            self.selection.iter().filter_map(|id| self.index_of(*id)).collect();
+        let mut indices: Vec<usize> = self
+            .selection
+            .iter()
+            .filter_map(|id| self.index_of(*id))
+            .collect();
         indices.sort_unstable();
         if indices.is_empty() {
             return;
@@ -392,7 +415,11 @@ impl EncodingListSheet {
 
     /// Swap the row at `index` with its neighbour, moving the identity with it.
     fn swap_adjacent(&mut self, up: bool, index: usize) {
-        let landed = if up { self.list.move_up(index) } else { self.list.move_down(index) };
+        let landed = if up {
+            self.list.move_up(index)
+        } else {
+            self.list.move_down(index)
+        };
         if let Some(landed) = landed {
             self.rows.swap(index, landed);
         }
@@ -524,30 +551,28 @@ impl EncodingListSheet {
             .tooltip("Add a text encoding or a separator")
             .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, window, _cx| {
                 let separator = sheet.clone();
-                let mut menu = menu.item(PopupMenuItem::new("Separator").on_click(
-                    move |_, _, cx| {
+                let mut menu =
+                    menu.item(PopupMenuItem::new("Separator").on_click(move |_, _, cx| {
                         separator
                             .update(cx, |sheet, cx| {
                                 sheet.add(None);
                                 sheet.refresh(cx);
                             })
                             .ok();
-                    },
-                ));
+                    }));
                 menu = menu.separator();
                 menu = menu.item(PopupMenuItem::label("Text Encoding"));
                 for encoding in addable.iter().copied() {
                     let sheet = sheet.clone();
-                    menu = menu.item(PopupMenuItem::new(encoding.name).on_click(
-                        move |_, _, cx| {
+                    menu =
+                        menu.item(PopupMenuItem::new(encoding.name).on_click(move |_, _, cx| {
                             sheet
                                 .update(cx, |sheet, cx| {
                                     sheet.add(Some(encoding));
                                     sheet.refresh(cx);
                                 })
                                 .ok();
-                        },
-                    ));
+                        }));
                 }
                 // `max_h` takes pixels, so the design scale is applied by hand
                 // as it is everywhere else a `rems` value meets a `Pixels` one.
@@ -676,7 +701,10 @@ mod tests {
     /// method that needs a live entity to write to.
     fn sheet(names: &[Option<&str>]) -> EncodingListSheet {
         let list = EncodingList::from_identifiers(
-            &names.iter().map(|name| name.map(str::to_owned)).collect::<Vec<_>>(),
+            &names
+                .iter()
+                .map(|name| name.map(str::to_owned))
+                .collect::<Vec<_>>(),
         );
         let mut sheet = EncodingListSheet {
             workspace: WeakEntity::new_invalid(),
@@ -701,11 +729,19 @@ mod tests {
     /// The same, read off the rows rather than the list, so that a test can
     /// tell the two apart when they have come unstuck.
     fn row_entries(sheet: &EncodingListSheet) -> Vec<Option<&'static str>> {
-        sheet.rows.iter().map(|row| row.item.map(|e| e.identifier())).collect()
+        sheet
+            .rows
+            .iter()
+            .map(|row| row.item.map(|e| e.identifier()))
+            .collect()
     }
 
     fn assert_in_step(sheet: &EncodingListSheet) {
-        assert_eq!(entries(sheet), row_entries(sheet), "the rows and the list came apart");
+        assert_eq!(
+            entries(sheet),
+            row_entries(sheet),
+            "the rows and the list came apart"
+        );
         assert_eq!(sheet.rows.len(), sheet.list.len());
     }
 
@@ -714,15 +750,25 @@ mod tests {
     }
 
     fn shift() -> Modifiers {
-        Modifiers { shift: true, ..Default::default() }
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        }
     }
 
     fn command() -> Modifiers {
-        Modifiers { platform: true, ..Default::default() }
+        Modifiers {
+            platform: true,
+            ..Default::default()
+        }
     }
 
     fn both() -> Modifiers {
-        Modifiers { shift: true, platform: true, ..Default::default() }
+        Modifiers {
+            shift: true,
+            platform: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -730,8 +776,15 @@ mod tests {
         let sheet = sheet(&[Some("utf-8"), None, Some("shift_jis")]);
         assert_in_step(&sheet);
         assert_eq!(sheet.rows.len(), 3);
-        assert_eq!(ids(&sheet), vec![0, 1, 2], "identities are handed out in order");
-        assert_eq!(sheet.next_id, 3, "the counter is past the identities it gave out");
+        assert_eq!(
+            ids(&sheet),
+            vec![0, 1, 2],
+            "identities are handed out in order"
+        );
+        assert_eq!(
+            sheet.next_id, 3,
+            "the counter is past the identities it gave out"
+        );
     }
 
     /// A plain click replaces the selection; ⌘-click toggles; ⇧-click takes the
@@ -804,7 +857,11 @@ mod tests {
             entries(&sheet),
             vec![Some("windows-1252"), Some("utf-8"), Some("shift_jis")]
         );
-        assert_eq!(sheet.selection, vec![rows[0], rows[1]], "the identities travelled with their rows");
+        assert_eq!(
+            sheet.selection,
+            vec![rows[0], rows[1]],
+            "the identities travelled with their rows"
+        );
 
         sheet.move_selected(true);
         assert_in_step(&sheet);
@@ -826,8 +883,12 @@ mod tests {
     /// A run in the middle moves as a block.
     #[test]
     fn a_run_in_the_middle_moves_as_a_block() {
-        let mut sheet =
-            sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252"), Some("euc-jp")]);
+        let mut sheet = sheet(&[
+            Some("utf-8"),
+            Some("shift_jis"),
+            Some("windows-1252"),
+            Some("euc-jp"),
+        ]);
         let rows = ids(&sheet);
 
         sheet.selection = vec![rows[1], rows[2]];
@@ -835,13 +896,23 @@ mod tests {
         assert_in_step(&sheet);
         assert_eq!(
             entries(&sheet),
-            vec![Some("utf-8"), Some("euc-jp"), Some("shift_jis"), Some("windows-1252")]
+            vec![
+                Some("utf-8"),
+                Some("euc-jp"),
+                Some("shift_jis"),
+                Some("windows-1252")
+            ]
         );
 
         sheet.move_selected(true);
         assert_eq!(
             entries(&sheet),
-            vec![Some("utf-8"), Some("shift_jis"), Some("windows-1252"), Some("euc-jp")]
+            vec![
+                Some("utf-8"),
+                Some("shift_jis"),
+                Some("windows-1252"),
+                Some("euc-jp")
+            ]
         );
     }
 
@@ -909,7 +980,10 @@ mod tests {
         sheet.selection = vec![rows[1]];
         sheet.move_selected(true);
         assert_in_step(&sheet);
-        assert_eq!(entries(&sheet), vec![None, Some("utf-8"), Some("shift_jis")]);
+        assert_eq!(
+            entries(&sheet),
+            vec![None, Some("utf-8"), Some("shift_jis")]
+        );
     }
 
     /// The two arrow buttons are greyed independently: a selection that cannot
@@ -919,16 +993,25 @@ mod tests {
         let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
         let rows = ids(&sheet);
 
-        assert!(!sheet.can_move_selected(true), "nothing selected, nothing to move");
+        assert!(
+            !sheet.can_move_selected(true),
+            "nothing selected, nothing to move"
+        );
         assert!(!sheet.can_move_selected(false));
 
         sheet.selection = vec![rows[0]];
-        assert!(!sheet.can_move_selected(true), "the first row has nothing above it");
+        assert!(
+            !sheet.can_move_selected(true),
+            "the first row has nothing above it"
+        );
         assert!(sheet.can_move_selected(false));
 
         sheet.selection = vec![rows[2]];
         assert!(sheet.can_move_selected(true));
-        assert!(!sheet.can_move_selected(false), "the last row has nothing below it");
+        assert!(
+            !sheet.can_move_selected(false),
+            "the last row has nothing below it"
+        );
 
         // A run of adjacent rows is blocked as a unit, in the direction it is
         // already packed against.
@@ -949,8 +1032,12 @@ mod tests {
     fn a_blocked_row_does_not_hold_back_the_others() {
         // Down: the first row is blocked at the top, the third still steps
         // back past its neighbour.
-        let mut downward =
-            sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252"), Some("euc-jp")]);
+        let mut downward = sheet(&[
+            Some("utf-8"),
+            Some("shift_jis"),
+            Some("windows-1252"),
+            Some("euc-jp"),
+        ]);
         let rows = ids(&downward);
         downward.selection = vec![rows[0], rows[2]];
         assert!(downward.can_move_selected(false));
@@ -958,20 +1045,37 @@ mod tests {
         assert_in_step(&downward);
         assert_eq!(
             entries(&downward),
-            vec![Some("shift_jis"), Some("utf-8"), Some("euc-jp"), Some("windows-1252")]
+            vec![
+                Some("shift_jis"),
+                Some("utf-8"),
+                Some("euc-jp"),
+                Some("windows-1252")
+            ]
         );
 
         // Up: the first row is blocked again, the last still steps forward.
-        let mut upward =
-            sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252"), Some("euc-jp")]);
+        let mut upward = sheet(&[
+            Some("utf-8"),
+            Some("shift_jis"),
+            Some("windows-1252"),
+            Some("euc-jp"),
+        ]);
         let rows = ids(&upward);
         upward.selection = vec![rows[0], rows[3]];
-        assert!(upward.can_move_selected(true), "the last row can still move");
+        assert!(
+            upward.can_move_selected(true),
+            "the last row can still move"
+        );
         upward.move_selected(true);
         assert_in_step(&upward);
         assert_eq!(
             entries(&upward),
-            vec![Some("utf-8"), Some("shift_jis"), Some("euc-jp"), Some("windows-1252")]
+            vec![
+                Some("utf-8"),
+                Some("shift_jis"),
+                Some("euc-jp"),
+                Some("windows-1252")
+            ]
         );
     }
 
@@ -1000,7 +1104,11 @@ mod tests {
             _ => panic!("UTF-8 was not refused"),
         }
         sheet.remove_selected();
-        assert_eq!(entries(&sheet).len(), 3, "a refused removal changed the list");
+        assert_eq!(
+            entries(&sheet).len(),
+            3,
+            "a refused removal changed the list"
+        );
 
         // Shift JIS is the default here, so it refuses too — with the message
         // that does not name the encoding, because the user cannot tell which
@@ -1072,8 +1180,15 @@ mod tests {
         sheet.selection = vec![rows[0]];
         sheet.add(Some(koi8));
         assert_in_step(&sheet);
-        assert_eq!(entries(&sheet), vec![Some("utf-8"), Some("koi8-r"), Some("shift_jis")]);
-        assert_eq!(sheet.selection, vec![sheet.rows[1].id], "the added row is selected");
+        assert_eq!(
+            entries(&sheet),
+            vec![Some("utf-8"), Some("koi8-r"), Some("shift_jis")]
+        );
+        assert_eq!(
+            sheet.selection,
+            vec![sheet.rows[1].id],
+            "the added row is selected"
+        );
 
         // With nothing selected the entry goes to the top, as upstream's
         // `?? 0` does.
@@ -1111,7 +1226,9 @@ mod tests {
         let mut sheet = sheet(&[Some("utf-8")]);
         let before = sheet.addable.len();
 
-        sheet.add(Some(TextEncoding::from_identifier("koi8-r").expect("registered")));
+        sheet.add(Some(
+            TextEncoding::from_identifier("koi8-r").expect("registered"),
+        ));
         sheet.addable = sheet.list.addable();
         assert_eq!(sheet.addable.len(), before - 1);
         assert!(

@@ -90,7 +90,10 @@ pub struct Query {
 
 impl Query {
     pub fn new(find_string: impl Into<String>, mode: Mode) -> Self {
-        Self { find_string: find_string.into(), mode }
+        Self {
+            find_string: find_string.into(),
+            mode,
+        }
     }
 
     /// Compile the query into a searcher.
@@ -170,7 +173,10 @@ impl Default for Options {
         Self {
             includes_other_file_types: false,
             includes_hidden_files: false,
-            excluded_names: [".DS_Store", ".git"].iter().map(|name| name.to_string()).collect(),
+            excluded_names: [".DS_Store", ".git"]
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
             maximum_file_size: 1_000_000_000,
             maximum_match_count: 500_000,
             maximum_match_count_per_file: 5_000,
@@ -268,7 +274,10 @@ impl Progress {
 
     /// The counters as they stand right now.
     pub fn snapshot(&self) -> Metrics {
-        self.0.lock().expect("progress mutex is never poisoned").clone()
+        self.0
+            .lock()
+            .expect("progress mutex is never poisoned")
+            .clone()
     }
 
     fn update(&self, metrics: &Metrics) {
@@ -365,7 +374,10 @@ impl Search {
         cancel: Option<&Cancellation>,
     ) -> Result<Summary, Cancelled> {
         self.search_directory(&self.root.clone(), progress, cancel)?;
-        let summary = Summary { metrics: self.metrics.clone(), files: std::mem::take(&mut self.files) };
+        let summary = Summary {
+            metrics: self.metrics.clone(),
+            files: std::mem::take(&mut self.files),
+        };
         if let Some(progress) = progress {
             progress.update(&summary.metrics);
         }
@@ -392,7 +404,9 @@ impl Search {
             check_cancelled(cancel)?;
 
             let path = entry.path();
-            let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned())
+            let Some(name) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
             else {
                 continue;
             };
@@ -411,7 +425,11 @@ impl Search {
                 continue;
             }
             let is_directory = metadata.is_dir();
-            let candidate = Candidate { path, is_directory, file_size: metadata.len() };
+            let candidate = Candidate {
+                path,
+                is_directory,
+                file_size: metadata.len(),
+            };
             if !is_directory && !self.includes(&candidate) {
                 continue;
             }
@@ -419,15 +437,19 @@ impl Search {
         }
 
         // Directories first, then files, each group in Finder order.
-        candidates.sort_by(|lhs, rhs| {
-            match (lhs.is_directory, rhs.is_directory) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => {
-                    let lhs = lhs.path.file_name().map(|n| n.to_string_lossy().into_owned());
-                    let rhs = rhs.path.file_name().map(|n| n.to_string_lossy().into_owned());
-                    natural_compare(&lhs.unwrap_or_default(), &rhs.unwrap_or_default())
-                }
+        candidates.sort_by(|lhs, rhs| match (lhs.is_directory, rhs.is_directory) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => {
+                let lhs = lhs
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned());
+                let rhs = rhs
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned());
+                natural_compare(&lhs.unwrap_or_default(), &rhs.unwrap_or_default())
             }
         });
 
@@ -470,10 +492,11 @@ impl Search {
             return;
         };
 
-        let maximum = self
-            .options
-            .maximum_match_count_per_file
-            .min(self.options.maximum_match_count.saturating_sub(self.metrics.match_count));
+        let maximum = self.options.maximum_match_count_per_file.min(
+            self.options
+                .maximum_match_count
+                .saturating_sub(self.metrics.match_count),
+        );
         if maximum == 0 {
             return;
         }
@@ -489,9 +512,8 @@ impl Search {
         }
 
         let root_components = normalized_components(&self.root);
-        let directory_components = normalized_components(
-            candidate.path.parent().unwrap_or_else(|| Path::new("")),
-        );
+        let directory_components =
+            normalized_components(candidate.path.parent().unwrap_or_else(|| Path::new("")));
         let Some(relative) = directory_components.strip_prefix(root_components.as_slice()) else {
             return;
         };
@@ -532,7 +554,10 @@ impl Search {
     fn includes(&self, candidate: &Candidate) -> bool {
         let is_text = self.options.includes_other_file_types
             || is_searchable_text(&candidate.path)
-            || self.is_included.as_ref().is_some_and(|predicate| predicate(&candidate.path));
+            || self
+                .is_included
+                .as_ref()
+                .is_some_and(|predicate| predicate(&candidate.path));
 
         is_text
             && self
@@ -590,7 +615,11 @@ fn display_match(text: &str, range: Range<usize>) -> Match {
     let start = range.start.max(fragment.start) - fragment.start;
     let end = range.end.min(fragment.end).max(range.start) - fragment.start;
 
-    Match { range, line, range_in_line: start..end }
+    Match {
+        range,
+        line,
+        range_in_line: start..end,
+    }
 }
 
 /// The line-content range covering `range`, terminators excluded.
@@ -661,7 +690,11 @@ fn lines(text: &str) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
     while index < bytes.len() {
         match bytes[index] {
             b'\r' => {
-                let end = if bytes.get(index + 1) == Some(&b'\n') { index + 2 } else { index + 1 };
+                let end = if bytes.get(index + 1) == Some(&b'\n') {
+                    index + 2
+                } else {
+                    index + 1
+                };
                 ranges.push((start, index, end));
                 index = end;
                 start = end;
@@ -757,7 +790,9 @@ fn normalized_components(path: &Path) -> Vec<std::ffi::OsString> {
     path.components()
         .filter_map(|component| match component {
             std::path::Component::Normal(name) => Some(name.to_os_string()),
-            std::path::Component::RootDir => Some(std::ffi::OsString::from(std::path::MAIN_SEPARATOR.to_string())),
+            std::path::Component::RootDir => Some(std::ffi::OsString::from(
+                std::path::MAIN_SEPARATOR.to_string(),
+            )),
             _ => None,
         })
         .collect()
@@ -803,9 +838,7 @@ pub fn natural_compare(lhs: &str, rhs: &str) -> std::cmp::Ordering {
                 } else {
                     lhs_chars.next();
                     rhs_chars.next();
-                    for (left, right) in
-                        left.to_lowercase().zip(right.to_lowercase())
-                    {
+                    for (left, right) in left.to_lowercase().zip(right.to_lowercase()) {
                         match left.cmp(&right) {
                             std::cmp::Ordering::Equal => {}
                             ordering => return ordering,
@@ -848,24 +881,167 @@ pub fn is_searchable_text(path: &Path) -> bool {
 /// Extensions treated as text without asking the file's contents.
 const TEXT_EXTENSIONS: &[&str] = &[
     // Plain text and the languages people keep in it.
-    "txt", "text", "md", "markdown", "rst", "adoc", "asciidoc", "org", "tex", "latex", "bib",
-    "log", "csv", "tsv", "tab", "diff", "patch", "srt", "vtt",
+    "txt",
+    "text",
+    "md",
+    "markdown",
+    "rst",
+    "adoc",
+    "asciidoc",
+    "org",
+    "tex",
+    "latex",
+    "bib",
+    "log",
+    "csv",
+    "tsv",
+    "tab",
+    "diff",
+    "patch",
+    "srt",
+    "vtt",
     // Data and configuration.
-    "json", "json5", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "config", "env",
-    "properties", "xml", "xsd", "xsl", "xslt", "dtd", "plist", "strings", "stringsdict",
-    "plistdict", "entitlements", "pbxproj", "xcconfig", "gradle", "pom",
+    "json",
+    "json5",
+    "jsonc",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "config",
+    "env",
+    "properties",
+    "xml",
+    "xsd",
+    "xsl",
+    "xslt",
+    "dtd",
+    "plist",
+    "strings",
+    "stringsdict",
+    "plistdict",
+    "entitlements",
+    "pbxproj",
+    "xcconfig",
+    "gradle",
+    "pom",
     // Web.
-    "html", "htm", "xhtml", "css", "scss", "sass", "less", "js", "mjs", "cjs", "jsx", "ts",
-    "tsx", "vue", "svelte", "svg",
+    "html",
+    "htm",
+    "xhtml",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "mjs",
+    "cjs",
+    "jsx",
+    "ts",
+    "tsx",
+    "vue",
+    "svelte",
+    "svg",
     // Programming languages.
-    "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "m", "mm", "cs", "java", "kt", "kts",
-    "scala", "groovy", "go", "rs", "swift", "py", "pyi", "rb", "rake", "gemspec", "php", "pl",
-    "pm", "lua", "tcl", "r", "jl", "dart", "hs", "lhs", "ml", "mli", "fs", "fsx", "erl", "hrl",
-    "ex", "exs", "clj", "cljs", "edn", "scm", "lisp", "el", "vim", "asm", "s", "f", "f90",
-    "f95", "for", "pas", "pp", "d", "zig", "nim", "cr", "v", "sv", "vhd", "vhdl", "sol", "sh",
-    "bash", "zsh", "fish", "ksh", "csh", "bat", "cmd", "ps1", "psm1", "awk", "sed", "sql",
-    "graphql", "gql", "proto", "thrift", "make", "mk", "cmake", "am", "ac", "in", "dockerfile",
-    "gitignore", "gitattributes", "editorconfig", "htaccess", "service", "desktop", "spec",
+    "c",
+    "h",
+    "cc",
+    "cpp",
+    "cxx",
+    "hpp",
+    "hh",
+    "hxx",
+    "m",
+    "mm",
+    "cs",
+    "java",
+    "kt",
+    "kts",
+    "scala",
+    "groovy",
+    "go",
+    "rs",
+    "swift",
+    "py",
+    "pyi",
+    "rb",
+    "rake",
+    "gemspec",
+    "php",
+    "pl",
+    "pm",
+    "lua",
+    "tcl",
+    "r",
+    "jl",
+    "dart",
+    "hs",
+    "lhs",
+    "ml",
+    "mli",
+    "fs",
+    "fsx",
+    "erl",
+    "hrl",
+    "ex",
+    "exs",
+    "clj",
+    "cljs",
+    "edn",
+    "scm",
+    "lisp",
+    "el",
+    "vim",
+    "asm",
+    "s",
+    "f",
+    "f90",
+    "f95",
+    "for",
+    "pas",
+    "pp",
+    "d",
+    "zig",
+    "nim",
+    "cr",
+    "v",
+    "sv",
+    "vhd",
+    "vhdl",
+    "sol",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "ksh",
+    "csh",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "awk",
+    "sed",
+    "sql",
+    "graphql",
+    "gql",
+    "proto",
+    "thrift",
+    "make",
+    "mk",
+    "cmake",
+    "am",
+    "ac",
+    "in",
+    "dockerfile",
+    "gitignore",
+    "gitattributes",
+    "editorconfig",
+    "htaccess",
+    "service",
+    "desktop",
+    "spec",
 ];
 
 /// Whether a file looks binary.
@@ -969,9 +1145,7 @@ impl FileScope {
 }
 
 /// How a scope's rules combine.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Conjunction {
     /// A file is included when any rule matches.
     #[default]
@@ -1000,19 +1174,23 @@ pub struct Rule {
 
 impl Rule {
     pub fn new(target: Target, comparison: Comparison, value: impl Into<String>) -> Self {
-        Self { target, comparison, value: value.into() }
+        Self {
+            target,
+            comparison,
+            value: value.into(),
+        }
     }
 
     /// Whether the rule can be used as it stands.
     pub fn is_valid(&self) -> bool {
-        FileScope::new(Conjunction::Any, vec![self.clone()]).validate().is_ok()
+        FileScope::new(Conjunction::Any, vec![self.clone()])
+            .validate()
+            .is_ok()
     }
 }
 
 /// What a rule looks at.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Target {
     #[default]
     Filename,
@@ -1037,9 +1215,7 @@ impl Target {
 /// Every comparison but the regular expression is case-insensitive, which is
 /// upstream's rule. The regular expression must match the whole value and is
 /// case-sensitive unless the pattern says otherwise with `(?i)`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Comparison {
     #[default]
     Contains,
@@ -1107,7 +1283,11 @@ impl FileScopeMatcher {
     fn new(scope: &FileScope) -> Result<Self, FileScopeError> {
         Ok(Self {
             conjunction: scope.conjunction,
-            rules: scope.rules.iter().map(CompiledRule::new).collect::<Result<_, _>>()?,
+            rules: scope
+                .rules
+                .iter()
+                .map(CompiledRule::new)
+                .collect::<Result<_, _>>()?,
         })
     }
 
@@ -1141,9 +1321,10 @@ impl CompiledRule {
             // end in an extended-mode comment: the newline terminates the
             // comment before `\z`, and is itself ignored as whitespace.
             let pattern = format!("\\A(?:{}(?x)\n)\\z", rule.value);
-            Some(Regex::new(&pattern).map_err(|error| {
-                FileScopeError::InvalidRegularExpression(error.to_string())
-            })?)
+            Some(
+                Regex::new(&pattern)
+                    .map_err(|error| FileScopeError::InvalidRegularExpression(error.to_string()))?,
+            )
         } else {
             None
         };
@@ -1197,7 +1378,11 @@ impl ScopeValues {
             .map(|extension| extension.to_string_lossy().into_owned())
             .unwrap_or_default();
         let file_path = relative_path(&candidate.path, root);
-        Self { filename, file_path, file_extension }
+        Self {
+            filename,
+            file_path,
+            file_extension,
+        }
     }
 
     fn value(&self, target: Target) -> &str {
@@ -1238,12 +1423,21 @@ mod tests {
 
     #[test]
     fn an_empty_find_string_does_not_compile() {
-        assert_eq!(textual("").searcher().unwrap_err(), QueryError::EmptyFindString);
+        assert_eq!(
+            textual("").searcher().unwrap_err(),
+            QueryError::EmptyFindString
+        );
     }
 
     #[test]
     fn a_broken_regular_expression_does_not_compile() {
-        let query = Query::new("([", Mode { uses_regular_expression: true, ignores_case: false });
+        let query = Query::new(
+            "([",
+            Mode {
+                uses_regular_expression: true,
+                ignores_case: false,
+            },
+        );
         assert!(matches!(
             query.searcher().unwrap_err(),
             QueryError::InvalidRegularExpression(_)
@@ -1260,7 +1454,13 @@ mod tests {
         let searcher = textual("needle").searcher().unwrap();
         assert_eq!(searcher.find_all(text, &scope).len(), 1);
 
-        let query = Query::new("needle", Mode { uses_regular_expression: false, ignores_case: true });
+        let query = Query::new(
+            "needle",
+            Mode {
+                uses_regular_expression: false,
+                ignores_case: true,
+            },
+        );
         let searcher = query.searcher().unwrap();
         assert_eq!(searcher.find_all(text, &scope).len(), 3);
     }
@@ -1365,10 +1565,8 @@ mod tests {
 
     impl TempDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "subtext-folderfind-{name}-{}",
-                std::process::id()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("subtext-folderfind-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).expect("temp dir");
             Self(path)
@@ -1436,10 +1634,16 @@ mod tests {
         }
 
         let options = Options {
-            excluded_names: ["Skip".to_string(), "ignore.txt".to_string()].into_iter().collect(),
+            excluded_names: ["Skip".to_string(), "ignore.txt".to_string()]
+                .into_iter()
+                .collect(),
             file_scope: Some(FileScope::new(
                 Conjunction::Any,
-                vec![Rule::new(Target::FileExtension, Comparison::IsEqualTo, "txt")],
+                vec![Rule::new(
+                    Target::FileExtension,
+                    Comparison::IsEqualTo,
+                    "txt",
+                )],
             )),
             ..Default::default()
         };
@@ -1447,7 +1651,11 @@ mod tests {
 
         let names: Vec<_> = summary.files.iter().map(FileResult::filename).collect();
         assert_eq!(names, ["keep.txt", "keep.txt", "a2.txt", "a10.txt"]);
-        let paths: Vec<_> = summary.files.iter().map(FileResult::directory_path).collect();
+        let paths: Vec<_> = summary
+            .files
+            .iter()
+            .map(FileResult::directory_path)
+            .collect();
         assert_eq!(paths, ["Z2", "Z10", "", ""]);
         assert_eq!(summary.metrics.match_count, 4);
     }
@@ -1459,7 +1667,14 @@ mod tests {
         dir.write("a.txt", "needle needle needle needle");
         dir.write("b.txt", "needle");
 
-        let summary = run(&dir.0, &textual("needle"), Options { maximum_match_count_per_file: 3, ..Default::default() });
+        let summary = run(
+            &dir.0,
+            &textual("needle"),
+            Options {
+                maximum_match_count_per_file: 3,
+                ..Default::default()
+            },
+        );
 
         let names: Vec<_> = summary.files.iter().map(FileResult::filename).collect();
         assert_eq!(names, ["a.txt", "b.txt"]);
@@ -1481,7 +1696,14 @@ mod tests {
             dir.write(name, "needle needle");
         }
 
-        let summary = run(&dir.0, &textual("needle"), Options { maximum_match_count: 3, ..Default::default() });
+        let summary = run(
+            &dir.0,
+            &textual("needle"),
+            Options {
+                maximum_match_count: 3,
+                ..Default::default()
+            },
+        );
 
         let names: Vec<_> = summary.files.iter().map(FileResult::filename).collect();
         assert_eq!(names, ["a.txt", "b.txt"]);
@@ -1501,7 +1723,14 @@ mod tests {
         dir.write("a.txt", "needle needle");
         dir.write("b.txt", "needle needle");
 
-        let summary = run(&dir.0, &textual("needle"), Options { maximum_match_count: 4, ..Default::default() });
+        let summary = run(
+            &dir.0,
+            &textual("needle"),
+            Options {
+                maximum_match_count: 4,
+                ..Default::default()
+            },
+        );
 
         assert_eq!(summary.files.len(), 2);
         assert_eq!(summary.metrics.match_count, 4);
@@ -1550,7 +1779,10 @@ mod tests {
         let summary = run(
             &dir.0,
             &textual("needle"),
-            Options { includes_hidden_files: true, ..Default::default() },
+            Options {
+                includes_hidden_files: true,
+                ..Default::default()
+            },
         );
         assert_eq!(summary.metrics.match_count, 2);
     }
@@ -1596,7 +1828,14 @@ mod tests {
         dir.write("small.txt", "needle");
         dir.write("large.txt", "needle needle");
 
-        let summary = run(&dir.0, &textual("needle"), Options { maximum_file_size: 8, ..Default::default() });
+        let summary = run(
+            &dir.0,
+            &textual("needle"),
+            Options {
+                maximum_file_size: 8,
+                ..Default::default()
+            },
+        );
         assert_eq!(summary.metrics.match_count, 1);
         let names: Vec<_> = summary.files.iter().map(FileResult::filename).collect();
         assert_eq!(names, ["small.txt"]);
@@ -1611,7 +1850,14 @@ mod tests {
         dir.write_bytes("invalid.bin", &[0xFF]);
         dir.write("valid.txt", "needle");
 
-        let summary = run(&dir.0, &textual("needle"), Options { includes_other_file_types: true, ..Default::default() });
+        let summary = run(
+            &dir.0,
+            &textual("needle"),
+            Options {
+                includes_other_file_types: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(summary.metrics.match_count, 1);
     }
 
@@ -1627,7 +1873,9 @@ mod tests {
             &dir.0,
             &textual("needle"),
             Options::default(),
-            Some(Box::new(|path: &Path| path.extension().is_some_and(|e| e == "syntaxless"))),
+            Some(Box::new(|path: &Path| {
+                path.extension().is_some_and(|e| e == "syntaxless")
+            })),
         )
         .expect("search");
         let summary = search.run(None, None).expect("run");
@@ -1650,11 +1898,19 @@ mod tests {
         let dir = TempDir::new("other");
         dir.write("a.weird", "needle");
 
-        assert_eq!(run(&dir.0, &textual("needle"), Options::default()).metrics.match_count, 0);
+        assert_eq!(
+            run(&dir.0, &textual("needle"), Options::default())
+                .metrics
+                .match_count,
+            0
+        );
         let summary = run(
             &dir.0,
             &textual("needle"),
-            Options { includes_other_file_types: true, ..Default::default() },
+            Options {
+                includes_other_file_types: true,
+                ..Default::default()
+            },
         );
         assert_eq!(summary.metrics.match_count, 1);
     }
@@ -1665,10 +1921,20 @@ mod tests {
         let dir = TempDir::new("regex");
         dir.write("regex.txt", "item-1\nitem-22\nitem-x\n");
 
-        let query = Query::new(r"item-\d+", Mode { uses_regular_expression: true, ignores_case: false });
+        let query = Query::new(
+            r"item-\d+",
+            Mode {
+                uses_regular_expression: true,
+                ignores_case: false,
+            },
+        );
         let summary = run(&dir.0, &query, Options::default());
         assert_eq!(summary.metrics.match_count, 2);
-        let lines: Vec<_> = summary.files[0].matches.iter().map(|m| m.line.as_str()).collect();
+        let lines: Vec<_> = summary.files[0]
+            .matches
+            .iter()
+            .map(|m| m.line.as_str())
+            .collect();
         assert_eq!(lines, ["item-1", "item-22"]);
     }
 
@@ -1679,7 +1945,13 @@ mod tests {
         let dir = TempDir::new("dollar");
         dir.write("a.txt", &"a".repeat(600));
 
-        let query = Query::new("$", Mode { uses_regular_expression: true, ignores_case: false });
+        let query = Query::new(
+            "$",
+            Mode {
+                uses_regular_expression: true,
+                ignores_case: false,
+            },
+        );
         let summary = run(&dir.0, &query, Options::default());
         assert_eq!(summary.metrics.match_count, 1);
         assert_eq!(summary.files[0].matches[0].range, 600..600);
@@ -1691,7 +1963,11 @@ mod tests {
         // `emptyFileScopeRuleValueThrowsBeforeScanning`.
         let broken = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::Filename, Comparison::MatchesRegularExpression, "([")],
+            vec![Rule::new(
+                Target::Filename,
+                Comparison::MatchesRegularExpression,
+                "([",
+            )],
         );
         assert!(matches!(
             scope_error(broken),
@@ -1702,7 +1978,10 @@ mod tests {
             Conjunction::Any,
             vec![Rule::new(Target::Filename, Comparison::Contains, "")],
         );
-        assert_eq!(scope_error(empty), SearchError::Scope(FileScopeError::EmptyValue));
+        assert_eq!(
+            scope_error(empty),
+            SearchError::Scope(FileScopeError::EmptyValue)
+        );
     }
 
     /// The error a scope raises, asserting that it raises one at all.
@@ -1710,7 +1989,10 @@ mod tests {
     /// `Search` holds a boxed predicate and so has no `Debug`, which is what
     /// `expect_err` would ask for.
     fn scope_error(scope: FileScope) -> SearchError {
-        let options = Options { file_scope: Some(scope), ..Default::default() };
+        let options = Options {
+            file_scope: Some(scope),
+            ..Default::default()
+        };
         match Search::new(Path::new("/nonexistent"), &textual("needle"), options, None) {
             Err(error) => error,
             Ok(_) => panic!("the scope should not have compiled"),
@@ -1724,7 +2006,10 @@ mod tests {
         let summary = run(
             &dir.0,
             &textual("needle"),
-            Options { file_scope: Some(FileScope::default()), ..Default::default() },
+            Options {
+                file_scope: Some(FileScope::default()),
+                ..Default::default()
+            },
         );
         assert_eq!(summary.metrics.match_count, 1);
     }
@@ -1756,8 +2041,10 @@ mod tests {
             (Comparison::EndsWith, ".TXT", true),
         ];
         for (comparison, value, expected) in cases {
-            let scope =
-                FileScope::new(Conjunction::Any, vec![Rule::new(Target::Filename, comparison, value)]);
+            let scope = FileScope::new(
+                Conjunction::Any,
+                vec![Rule::new(Target::Filename, comparison, value)],
+            );
             assert_eq!(
                 scope_contains(&scope, "needle.txt", root),
                 expected,
@@ -1773,7 +2060,11 @@ mod tests {
         let root = Path::new("/root");
         let scope = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::Filename, Comparison::MatchesRegularExpression, r"note.*\.md")],
+            vec![Rule::new(
+                Target::Filename,
+                Comparison::MatchesRegularExpression,
+                r"note.*\.md",
+            )],
         );
         assert!(scope_contains(&scope, "note.md", root));
         assert!(scope_contains(&scope, "notes.md", root));
@@ -1785,13 +2076,21 @@ mod tests {
         let root = Path::new("/root");
         let plain = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::Filename, Comparison::MatchesRegularExpression, r"note\.md")],
+            vec![Rule::new(
+                Target::Filename,
+                Comparison::MatchesRegularExpression,
+                r"note\.md",
+            )],
         );
         assert!(!scope_contains(&plain, "NOTE.md", root));
 
         let folded = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::Filename, Comparison::MatchesRegularExpression, r"(?i)note\.md")],
+            vec![Rule::new(
+                Target::Filename,
+                Comparison::MatchesRegularExpression,
+                r"(?i)note\.md",
+            )],
         );
         assert!(scope_contains(&folded, "NOTE.md", root));
     }
@@ -1840,7 +2139,11 @@ mod tests {
         let root = Path::new("/root");
         let scope = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::FilePath, Comparison::IsEqualTo, "sub/dir/note.md")],
+            vec![Rule::new(
+                Target::FilePath,
+                Comparison::IsEqualTo,
+                "sub/dir/note.md",
+            )],
         );
         assert!(scope_contains(&scope, "sub/dir/note.md", root));
         assert!(!scope_contains(&scope, "note.md", root));
@@ -1852,7 +2155,11 @@ mod tests {
         let root = Path::new("/root");
         let scope = FileScope::new(
             Conjunction::Any,
-            vec![Rule::new(Target::FilePath, Comparison::Contains, "elsewhere")],
+            vec![Rule::new(
+                Target::FilePath,
+                Comparison::Contains,
+                "elsewhere",
+            )],
         );
         assert!(scope_contains(&scope, "../elsewhere/note.md", root));
     }

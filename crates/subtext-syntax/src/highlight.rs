@@ -74,7 +74,10 @@ impl HighlightToken {
     }
 
     pub fn priority(self) -> usize {
-        PRIORITY.iter().position(|t| *t == self).unwrap_or(usize::MAX)
+        PRIORITY
+            .iter()
+            .position(|t| *t == self)
+            .unwrap_or(usize::MAX)
     }
 }
 
@@ -134,9 +137,11 @@ impl HighlightRule {
     pub fn compile(raw: RawRule) -> Result<Self, regex::Error> {
         let begin = compile_pattern(&raw.begin, raw.regular_expression, raw.ignore_case)?;
         let terminator = match &raw.end {
-            Some(pattern) => {
-                Terminator::Pattern(compile_pattern(pattern, raw.regular_expression, raw.ignore_case)?)
-            }
+            Some(pattern) => Terminator::Pattern(compile_pattern(
+                pattern,
+                raw.regular_expression,
+                raw.ignore_case,
+            )?),
             None => Terminator::None,
         };
         Ok(Self {
@@ -193,7 +198,11 @@ impl HighlightRule {
                 break;
             };
             // A zero-width match would loop forever; step past it.
-            let advance = if found.end() > found.start() { found.end() } else { found.end() + 1 };
+            let advance = if found.end() > found.start() {
+                found.end()
+            } else {
+                found.end() + 1
+            };
 
             // A prefix such as Rust's `r` belongs to the literal, so the span
             // starts at the prefix, not at the delimiter.
@@ -202,7 +211,11 @@ impl HighlightRule {
                 continue;
             };
 
-            let limit = if self.is_multiline { text.len() } else { line_end(text, found.start()) };
+            let limit = if self.is_multiline {
+                text.len()
+            } else {
+                line_end(text, found.start())
+            };
             let span_end = self.end_of(text, found.end(), limit);
 
             if span_end > span_start {
@@ -228,7 +241,10 @@ impl HighlightRule {
             let before = text[..start].strip_suffix(prefix.as_str())?;
             // The prefix must be a standalone token, not the tail of an
             // identifier: `br"` is a prefix, `foo"` is not.
-            let standalone = !before.chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_');
+            let standalone = !before
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
             standalone.then_some(start - prefix.len())
         })
     }
@@ -298,9 +314,20 @@ impl HighlightRule {
     }
 }
 
-fn compile_pattern(pattern: &str, is_regex: bool, ignore_case: bool) -> Result<Regex, regex::Error> {
-    let source = if is_regex { pattern.to_string() } else { regex::escape(pattern) };
-    RegexBuilder::new(&source).case_insensitive(ignore_case).multi_line(true).build()
+fn compile_pattern(
+    pattern: &str,
+    is_regex: bool,
+    ignore_case: bool,
+) -> Result<Regex, regex::Error> {
+    let source = if is_regex {
+        pattern.to_string()
+    } else {
+        regex::escape(pattern)
+    };
+    RegexBuilder::new(&source)
+        .case_insensitive(ignore_case)
+        .multi_line(true)
+        .build()
 }
 
 /// End of the line containing `offset`, excluding the newline.
@@ -330,7 +357,10 @@ impl Highlighter {
             .into_iter()
             .filter_map(|token| rules.get(&token).map(|rules| (token, rules.clone())))
             .collect();
-        Self { rules: ordered, spans: Vec::new() }
+        Self {
+            rules: ordered,
+            spans: Vec::new(),
+        }
     }
 
     /// Recompute every span for `text`.
@@ -351,7 +381,10 @@ impl Highlighter {
                         continue;
                     }
                     claimed[range.clone()].fill(true);
-                    spans.push(TokenSpan { range, token: *token });
+                    spans.push(TokenSpan {
+                        range,
+                        token: *token,
+                    });
                 }
             }
         }
@@ -389,7 +422,9 @@ mod tests {
         let mut map: BTreeMap<HighlightToken, Vec<HighlightRule>> = BTreeMap::new();
         for (key, raw) in entries {
             let token = HighlightToken::from_key(key).unwrap();
-            map.entry(token).or_default().push(HighlightRule::compile(raw.clone()).unwrap());
+            map.entry(token)
+                .or_default()
+                .push(HighlightRule::compile(raw.clone()).unwrap());
         }
         map
     }
@@ -449,8 +484,14 @@ mod tests {
         let text = "let s = \"a\"; // a comment";
         highlighter.rehighlight(text);
         let comment_start = text.find("//").unwrap();
-        assert_eq!(highlighter.token_at(comment_start), Some(HighlightToken::Comments));
-        assert_eq!(highlighter.token_at(text.len() - 1), Some(HighlightToken::Comments));
+        assert_eq!(
+            highlighter.token_at(comment_start),
+            Some(HighlightToken::Comments)
+        );
+        assert_eq!(
+            highlighter.token_at(text.len() - 1),
+            Some(HighlightToken::Comments)
+        );
         // The string before the comment is untouched by the comment rule.
         assert_eq!(highlighter.token_at(8), Some(HighlightToken::Strings));
     }
@@ -500,7 +541,8 @@ mod tests {
 
     #[test]
     fn escape_characters_protect_the_closing_delimiter() {
-        let rule = HighlightRule::delimited("\"", "\"", Some('\\'), false, false, Vec::new()).unwrap();
+        let rule =
+            HighlightRule::delimited("\"", "\"", Some('\\'), false, false, Vec::new()).unwrap();
         let mut map: BTreeMap<HighlightToken, Vec<HighlightRule>> = BTreeMap::new();
         map.insert(HighlightToken::Strings, vec![rule]);
         let mut highlighter = Highlighter::new(&map);
@@ -533,7 +575,10 @@ mod tests {
         map.insert(HighlightToken::Strings, vec![rule]);
         let mut highlighter = Highlighter::new(&map);
         highlighter.rehighlight("foo\"bar\"");
-        assert!(highlighter.spans().is_empty(), "`foo` is an identifier, not a prefix");
+        assert!(
+            highlighter.spans().is_empty(),
+            "`foo` is an identifier, not a prefix"
+        );
     }
 
     #[test]
@@ -546,7 +591,10 @@ mod tests {
         let text = "/* outer /* inner */ still */ after";
         highlighter.rehighlight(text);
         assert_eq!(highlighter.spans().len(), 1);
-        assert_eq!(&text[highlighter.spans()[0].range.clone()], "/* outer /* inner */ still */");
+        assert_eq!(
+            &text[highlighter.spans()[0].range.clone()],
+            "/* outer /* inner */ still */"
+        );
     }
 
     #[test]
@@ -558,7 +606,10 @@ mod tests {
 
         let text = "/* outer /* inner */ still */ after";
         highlighter.rehighlight(text);
-        assert_eq!(&text[highlighter.spans()[0].range.clone()], "/* outer /* inner */");
+        assert_eq!(
+            &text[highlighter.spans()[0].range.clone()],
+            "/* outer /* inner */"
+        );
     }
 
     #[test]
@@ -568,7 +619,11 @@ mod tests {
         let text = "let letter = 1; fn f() { return }";
         highlighter.rehighlight(text);
 
-        let spans: Vec<_> = highlighter.spans().iter().map(|s| s.range.clone()).collect();
+        let spans: Vec<_> = highlighter
+            .spans()
+            .iter()
+            .map(|s| s.range.clone())
+            .collect();
         assert_eq!(spans.len(), 3);
         assert_eq!(&text[spans[0].clone()], "let");
         assert_eq!(&text[spans[1].clone()], "fn");

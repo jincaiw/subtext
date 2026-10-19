@@ -242,7 +242,11 @@ impl MultipleReplace {
     /// Every rule searches the *original* text, so unlike [`Self::replace`] no
     /// rule here sees an earlier rule's work.
     pub fn find(&self, text: &str, scope: Range<usize>, in_selection: bool) -> Vec<Range<usize>> {
-        let scope = if in_selection { clamp(&scope, text) } else { 0..text.len() };
+        let scope = if in_selection {
+            clamp(&scope, text)
+        } else {
+            0..text.len()
+        };
         if scope.is_empty() {
             return Vec::new();
         }
@@ -295,7 +299,11 @@ impl MultipleReplace {
             }
         }
 
-        Outcome { string, selected_range: selection, count }
+        Outcome {
+            string,
+            selected_range: selection,
+            count,
+        }
     }
 }
 
@@ -311,7 +319,9 @@ fn replace_in(
     line_ending: Option<LineEnding>,
     count: &mut usize,
 ) -> (String, usize) {
-    let matches = regex.captures_iter(&text[scope.clone()]).collect::<Vec<_>>();
+    let matches = regex
+        .captures_iter(&text[scope.clone()])
+        .collect::<Vec<_>>();
     if matches.is_empty() {
         return (text.to_string(), scope.len());
     }
@@ -428,7 +438,10 @@ impl MultipleReplace {
             .filter(|line| !line.is_empty())
             .filter_map(parse_tsv_line)
             .collect();
-        Self { replacements, settings: Settings::default() }
+        Self {
+            replacements,
+            settings: Settings::default(),
+        }
     }
 }
 
@@ -499,8 +512,13 @@ mod tests {
     #[test]
     fn an_empty_definition_holds_nothing() {
         assert!(MultipleReplace::default().is_empty());
-        assert!(MultipleReplace { replacements: vec![Replacement::default()], ..Default::default() }
-            .is_empty());
+        assert!(
+            MultipleReplace {
+                replacements: vec![Replacement::default()],
+                ..Default::default()
+            }
+            .is_empty()
+        );
         assert!(
             MultipleReplace {
                 replacements: vec![Replacement::default(), Replacement::default()],
@@ -509,7 +527,11 @@ mod tests {
             .is_empty()
         );
         assert!(
-            !MultipleReplace { replacements: vec![rule("a", "")], ..Default::default() }.is_empty()
+            !MultipleReplace {
+                replacements: vec![rule("a", "")],
+                ..Default::default()
+            }
+            .is_empty()
         );
     }
 
@@ -518,7 +540,11 @@ mod tests {
         assert!(Replacement::default().is_empty());
         assert!(!rule("a", "").is_empty());
         assert!(
-            !Replacement { description: Some("a".into()), ..Default::default() }.is_empty()
+            !Replacement {
+                description: Some("a".into()),
+                ..Default::default()
+            }
+            .is_empty()
         );
     }
 
@@ -527,12 +553,24 @@ mod tests {
         // Two scalars that Unicode canonicalises together are still two
         // different find strings, because a rule that said one and now says the
         // other has been edited.
-        let left = MultipleReplace { replacements: vec![rule("\u{00B7}", "")], ..Default::default() };
-        let right = MultipleReplace { replacements: vec![rule("\u{0387}", "")], ..Default::default() };
+        let left = MultipleReplace {
+            replacements: vec![rule("\u{00B7}", "")],
+            ..Default::default()
+        };
+        let right = MultipleReplace {
+            replacements: vec![rule("\u{0387}", "")],
+            ..Default::default()
+        };
         assert_ne!(left, right);
 
-        let left = MultipleReplace { replacements: vec![rule("x", "\u{00B7}")], ..Default::default() };
-        let right = MultipleReplace { replacements: vec![rule("x", "\u{0387}")], ..Default::default() };
+        let left = MultipleReplace {
+            replacements: vec![rule("x", "\u{00B7}")],
+            ..Default::default()
+        };
+        let right = MultipleReplace {
+            replacements: vec![rule("x", "\u{0387}")],
+            ..Default::default()
+        };
         assert_ne!(left, right);
     }
 
@@ -550,7 +588,10 @@ mod tests {
 
     #[test]
     fn one_bad_rule_invalidates_the_set() {
-        let valid = MultipleReplace { replacements: vec![rule("a", "")], ..Default::default() };
+        let valid = MultipleReplace {
+            replacements: vec![rule("a", "")],
+            ..Default::default()
+        };
         assert!(valid.validate());
 
         let empty = MultipleReplace {
@@ -568,9 +609,15 @@ mod tests {
 
     #[test]
     fn a_textual_rule_can_be_restricted_to_whole_words() {
-        let settings = Settings { matches_full_word: true, ..Default::default() };
+        let settings = Settings {
+            matches_full_word: true,
+            ..Default::default()
+        };
         let definition = MultipleReplace {
-            replacements: vec![Replacement { ignores_case: true, ..rule("cat", "dog") }],
+            replacements: vec![Replacement {
+                ignores_case: true,
+                ..rule("cat", "dog")
+            }],
             settings,
         };
         let outcome = definition.replace("cats cat Cat", 0..0, false, None);
@@ -587,7 +634,10 @@ mod tests {
             ..Default::default()
         };
         let outcome = definition.replace("\u{00B7}", 0..0, false, None);
-        assert_eq!(outcome.string.chars().map(u32::from).collect::<Vec<_>>(), vec![0x0387]);
+        assert_eq!(
+            outcome.string.chars().map(u32::from).collect::<Vec<_>>(),
+            vec![0x0387]
+        );
     }
 
     #[test]
@@ -595,7 +645,10 @@ mod tests {
         // Upstream's pattern is `(?!=a)b(c)(?=d)`, which needs lookaround. The
         // test is about case folding and `\t`, so it is spelled without one.
         let definition = MultipleReplace {
-            replacements: vec![Replacement { ignores_case: true, ..regex_rule("b(c)", "$1\\t") }],
+            replacements: vec![Replacement {
+                ignores_case: true,
+                ..regex_rule("b(c)", "$1\\t")
+            }],
             ..Default::default()
         };
         let outcome = definition.replace("abcdefg ABCDEFG", 0..0, false, None);
@@ -652,7 +705,12 @@ mod tests {
             ],
             ..Default::default()
         };
-        let outcome = definition.replace("before\r|dog\r\ncow|after\r", 0..0, false, Some(LineEnding::LF));
+        let outcome = definition.replace(
+            "before\r|dog\r\ncow|after\r",
+            0..0,
+            false,
+            Some(LineEnding::LF),
+        );
         assert_eq!(outcome.string, "before\r|cat\n|after\r");
     }
 
@@ -670,7 +728,10 @@ mod tests {
     fn disabled_and_invalid_rules_are_skipped() {
         let definition = MultipleReplace {
             replacements: vec![
-                Replacement { is_enabled: false, ..rule("hello", "hi") },
+                Replacement {
+                    is_enabled: false,
+                    ..rule("hello", "hi")
+                },
                 regex_rule("(", "X"),
                 rule("world", "earth"),
             ],
@@ -696,7 +757,10 @@ mod tests {
     fn find_ignores_disabled_rules() {
         let definition = MultipleReplace {
             replacements: vec![
-                Replacement { is_enabled: false, ..rule("abc", "") },
+                Replacement {
+                    is_enabled: false,
+                    ..rule("abc", "")
+                },
                 rule("def", ""),
             ],
             ..Default::default()
@@ -757,7 +821,9 @@ mod tests {
     #[test]
     fn tsv_import_splits_on_both_line_endings() {
         assert_eq!(
-            MultipleReplace::from_tsv("a\tb\r\nc\td\re\tf").replacements.len(),
+            MultipleReplace::from_tsv("a\tb\r\nc\td\re\tf")
+                .replacements
+                .len(),
             3
         );
     }
@@ -780,14 +846,20 @@ mod tests {
 
     #[test]
     fn unescaping_is_only_for_regular_expression_rules() {
-        let settings = Settings { unescapes_replacement_string: true, ..Default::default() };
+        let settings = Settings {
+            unescapes_replacement_string: true,
+            ..Default::default()
+        };
         assert_eq!(rule("a", r"\n").template(&settings), r"\n");
         assert_eq!(regex_rule("a", r"\n").template(&settings), "\n");
     }
 
     #[test]
     fn unescaping_can_be_switched_off() {
-        let settings = Settings { unescapes_replacement_string: false, ..Default::default() };
+        let settings = Settings {
+            unescapes_replacement_string: false,
+            ..Default::default()
+        };
         assert_eq!(regex_rule("a", r"\n").template(&settings), r"\n");
     }
 

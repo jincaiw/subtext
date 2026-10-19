@@ -178,7 +178,10 @@ impl Script {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
     Script(Script),
-    Folder { name: String, items: Vec<Item> },
+    Folder {
+        name: String,
+        items: Vec<Item>,
+    },
     /// A file called `-`, which is how upstream lets a folder of scripts be
     /// divided into groups without a submenu.
     Separator,
@@ -196,7 +199,9 @@ impl Item {
 
     /// The script at `path`, if this item holds it.
     pub fn find(&self, path: &Path) -> Option<&Script> {
-        self.scripts().into_iter().find(|script| script.path == path)
+        self.scripts()
+            .into_iter()
+            .find(|script| script.path == path)
     }
 }
 
@@ -431,7 +436,10 @@ pub fn bindings(items: &[Item], scope: Option<&str>) -> Vec<(PathBuf, String)> {
 /// The items of the submenu called `name`, if the bar has one.
 fn folder<'a>(items: &'a [Item], name: &str) -> Option<&'a [Item]> {
     items.iter().find_map(|item| match item {
-        Item::Folder { name: folder, items } if folder == name => Some(items.as_slice()),
+        Item::Folder {
+            name: folder,
+            items,
+        } if folder == name => Some(items.as_slice()),
         _ => None,
     })
 }
@@ -473,10 +481,8 @@ mod tests {
 
     impl Fixture {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "subtext-scripts-{}-{name}",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("subtext-scripts-{}-{name}", std::process::id()));
             fs::remove_dir_all(&path).ok();
             fs::create_dir_all(&path).expect("the fixture folder is creatable");
             Self(path)
@@ -581,7 +587,10 @@ mod tests {
     fn the_shortcut_comes_out_of_the_file_name() {
         let script = Script::of_path(Path::new("Save.@s.sh"), "Save.@s").unwrap();
         assert_eq!(script.name, "Save");
-        assert_eq!(script.shortcut.map(Shortcut::keystroke).as_deref(), Some("secondary-s"));
+        assert_eq!(
+            script.shortcut.map(Shortcut::keystroke).as_deref(),
+            Some("secondary-s")
+        );
     }
 
     /// A word spelling and the symbols macOS shows are read too, because the
@@ -643,7 +652,11 @@ mod tests {
         let items = scan(fixture.path());
 
         if cfg!(target_os = "macos") {
-            assert_eq!(shape(&items), ["Action"], "the bundle is an item, not a submenu");
+            assert_eq!(
+                shape(&items),
+                ["Action"],
+                "the bundle is an item, not a submenu"
+            );
             assert_eq!(
                 only(&items).kind,
                 ScriptKind::AppleScript,
@@ -707,7 +720,10 @@ mod tests {
 
     #[test]
     fn a_script_that_asks_for_nothing_asks_for_nothing() {
-        assert_eq!(Invocation::scan("#!/bin/sh\necho hi\n"), Invocation::default());
+        assert_eq!(
+            Invocation::scan("#!/bin/sh\necho hi\n"),
+            Invocation::default()
+        );
         assert_eq!(
             Invocation::scan("%%%{CotEditorXInput=Clipboard}%%%").input,
             None,
@@ -737,7 +753,10 @@ mod tests {
         let text = "first\nsecond\nthird";
         let caret = 8..8;
 
-        assert_eq!(OutputType::ReplaceSelection.range(text, &(2..5)), Some(2..5));
+        assert_eq!(
+            OutputType::ReplaceSelection.range(text, &(2..5)),
+            Some(2..5)
+        );
         assert_eq!(
             OutputType::ReplaceCurrentLine.range(text, &caret),
             Some(6..13)

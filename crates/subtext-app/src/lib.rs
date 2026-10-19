@@ -94,15 +94,16 @@ pub fn run() {
             // editor is built, or the first document would open unhighlighted.
             // It is keyed by language name and holds its own copy of the
             // syntax list, so the workspace keeps the manager for lookups.
-            highlighter::install_factory(
-                std::sync::Arc::new(syntaxes.all().to_vec()),
-                cx,
-            );
+            highlighter::install_factory(std::sync::Arc::new(syntaxes.all().to_vec()), cx);
 
             // CotEditor applies the saved theme at launch; so does the editor,
             // which means the component layer has to be told as well as the
             // text.
-            if let Some(theme) = settings.theme.as_deref().and_then(|name| themes.by_name(name)) {
+            if let Some(theme) = settings
+                .theme
+                .as_deref()
+                .and_then(|name| themes.by_name(name))
+            {
                 let mode = if theme.is_dark() {
                     gpui_kit::component::ThemeMode::Dark
                 } else {
@@ -165,9 +166,7 @@ fn open_main_window(
     };
 
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-        let workspace = cx.new(|cx| {
-            Workspace::new(syntaxes, themes, settings, window, cx)
-        });
+        let workspace = cx.new(|cx| Workspace::new(syntaxes, themes, settings, window, cx));
         bridge::register(workspace.downgrade(), window.window_handle(), cx);
         workspace
     });

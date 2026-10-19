@@ -50,8 +50,7 @@ impl FileAttributes {
             size: metadata.len(),
             permissions: FilePermissions::of(&metadata),
             owner: owner_name(&metadata),
-            tags: finder_tags_value(path)
-                .map_or_else(Vec::new, |data| parse_finder_tags(&data)),
+            tags: finder_tags_value(path).map_or_else(Vec::new, |data| parse_finder_tags(&data)),
         })
     }
 }
@@ -74,7 +73,9 @@ impl FilePermissions {
     /// From a POSIX mask. Bits above the twelve that mean something are
     /// dropped, as they are upstream.
     pub fn from_mask(mask: u32) -> Self {
-        Self { mask: (mask & 0o7777) as u16 }
+        Self {
+            mask: (mask & 0o7777) as u16,
+        }
     }
 
     /// The nine permission bits, without the special ones.
@@ -117,9 +118,7 @@ impl FilePermissions {
     /// it is not, which is what `chmod` prints.
     pub fn symbolic(self) -> String {
         let mut out = String::with_capacity(9);
-        for (group, special) in
-            [(6u16, 0o4u16), (3, 0o2), (0, 0o1)]
-        {
+        for (group, special) in [(6u16, 0o4u16), (3, 0o2), (0, 0o1)] {
             let bits = (self.mask >> group) & 0o7;
             for (bit, letter) in PERMISSION_BITS {
                 if bits & bit != 0 {
@@ -133,8 +132,20 @@ impl FilePermissions {
             }
             let executable = bits & 0o1 != 0;
             let letter = match special {
-                0o4 | 0o2 => if executable { 's' } else { 'S' },
-                _ => if executable { 't' } else { 'T' },
+                0o4 | 0o2 => {
+                    if executable {
+                        's'
+                    } else {
+                        'S'
+                    }
+                }
+                _ => {
+                    if executable {
+                        't'
+                    } else {
+                        'T'
+                    }
+                }
             };
             out.pop();
             out.push(letter);
@@ -188,14 +199,23 @@ fn lookup_user(uid: u32) -> Option<String> {
     // SAFETY: `entry` and `result` are valid pointers for the duration of the
     // call, and `buffer` outlives it.
     let status = unsafe {
-        libc::getpwuid_r(uid, &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut result)
+        libc::getpwuid_r(
+            uid,
+            &mut entry,
+            buffer.as_mut_ptr(),
+            buffer.len(),
+            &mut result,
+        )
     };
     if status != 0 || result.is_null() || entry.pw_name.is_null() {
         return None;
     }
     // SAFETY: the call succeeded, so `pw_name` points into `buffer` at a
     // NUL-terminated string.
-    unsafe { CStr::from_ptr(entry.pw_name) }.to_str().ok().map(str::to_string)
+    unsafe { CStr::from_ptr(entry.pw_name) }
+        .to_str()
+        .ok()
+        .map(str::to_string)
 }
 
 /// A timestamp in the shape CotEditor's File section shows it.
@@ -249,7 +269,10 @@ mod tests {
     #[test]
     fn bits_above_the_twelve_are_dropped() {
         // The file-type bits of `st_mode` are not permissions.
-        assert_eq!(FilePermissions::from_mask(0o100644).formatted(), "644 (-rw-r--r--)");
+        assert_eq!(
+            FilePermissions::from_mask(0o100644).formatted(),
+            "644 (-rw-r--r--)"
+        );
         assert_eq!(FilePermissions::from_mask(0o100644).mask(), 0o644);
     }
 
@@ -268,10 +291,16 @@ mod tests {
         // The owner is a real account name, not a number.
         #[cfg(unix)]
         {
-            let owner = attributes.owner.as_deref().expect("a unix file has an owner");
+            let owner = attributes
+                .owner
+                .as_deref()
+                .expect("a unix file has an owner");
             assert!(!owner.is_empty());
             assert!(owner.chars().any(|c| c.is_alphanumeric()), "{owner:?}");
-            assert!(!owner.chars().all(|c| c.is_ascii_digit()), "{owner:?} is a uid");
+            assert!(
+                !owner.chars().all(|c| c.is_ascii_digit()),
+                "{owner:?} is a uid"
+            );
         }
 
         std::fs::remove_file(&path).ok();
@@ -290,7 +319,10 @@ mod tests {
         // *shape* is asserted here — the day and the clock time move with it.
         let time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_792_065_600);
         let formatted = format_timestamp(time).expect("a representable time");
-        assert!(formatted.ends_with(" AM") || formatted.ends_with(" PM"), "{formatted:?}");
+        assert!(
+            formatted.ends_with(" AM") || formatted.ends_with(" PM"),
+            "{formatted:?}"
+        );
         assert!(formatted.contains(" at "), "{formatted:?}");
         assert!(formatted.contains("2026"), "{formatted:?}");
         assert!(formatted.contains(','), "{formatted:?}");
@@ -380,7 +412,10 @@ impl FinderTag {
             .next()
             .and_then(|index| index.parse::<u8>().ok())
             .map_or(FinderColor::None, FinderColor::from_index);
-        Some(Self { name: name.to_string(), color })
+        Some(Self {
+            name: name.to_string(),
+            color,
+        })
     }
 }
 
@@ -431,7 +466,9 @@ fn bplist_string_array(data: &[u8]) -> Option<Vec<String>> {
             return None;
         }
         let start = table.checked_add(index.checked_mul(offset_size)?)?;
-        big_endian(data.get(start..start + offset_size)?).try_into().ok()
+        big_endian(data.get(start..start + offset_size)?)
+            .try_into()
+            .ok()
     };
 
     let root_offset = offset_of(root)?;
@@ -498,7 +535,9 @@ fn bplist_string(data: &[u8], offset: usize) -> Option<String> {
 
 /// A big-endian unsigned integer of however many bytes were handed over.
 fn big_endian(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0u64, |value, byte| (value << 8) | u64::from(*byte))
+    bytes
+        .iter()
+        .fold(0u64, |value, byte| (value << 8) | u64::from(*byte))
 }
 
 /// The `com.apple.metadata:_kMDItemUserTags` value of a file, on macOS.
@@ -517,9 +556,8 @@ fn finder_tags_value(path: &Path) -> Option<Vec<u8>> {
 
     // SAFETY: both C strings outlive the calls, and a null buffer with a zero
     // size is the documented way to ask for the value's length.
-    let size = unsafe {
-        libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0, 0, 0)
-    };
+    let size =
+        unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
     if size <= 0 {
         return None;
     }
@@ -554,30 +592,29 @@ mod tag_tests {
 
     /// Real `bplist00` output, produced by `plistlib` with `FMT_BINARY`.
     const TWO: &[u8] = &[
-        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa2, 0x01, 0x02, 0x57, 0x47, 0x72,
-        0x65, 0x65, 0x6e, 0x0a, 0x32, 0x54, 0x4e, 0x6f, 0x6e, 0x65, 0x08, 0x0b, 0x13, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x18,
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa2, 0x01, 0x02, 0x57, 0x47, 0x72, 0x65,
+        0x65, 0x6e, 0x0a, 0x32, 0x54, 0x4e, 0x6f, 0x6e, 0x65, 0x08, 0x0b, 0x13, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18,
     ];
     const ONE_RED: &[u8] = &[
-        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x55, 0x52, 0x65, 0x64,
-        0x0a, 0x36, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x55, 0x52, 0x65, 0x64, 0x0a,
+        0x36, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x10,
     ];
     const EMPTY: &[u8] = &[
-        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa0, 0x08, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa0, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
     ];
     /// `["中文\n4"]` — a UTF-16BE string object, which is what a tag whose name
     /// is not ASCII is stored as.
     const CJK: &[u8] = &[
-        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x64, 0x4e, 0x2d, 0x65,
-        0x87, 0x00, 0x0a, 0x00, 0x34, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13,
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xa1, 0x01, 0x64, 0x4e, 0x2d, 0x65, 0x87,
+        0x00, 0x0a, 0x00, 0x34, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13,
     ];
 
     #[test]
@@ -586,13 +623,22 @@ mod tag_tests {
         assert_eq!(
             parse_finder_tags(TWO),
             vec![
-                FinderTag { name: "Green".into(), color: FinderColor::Green },
-                FinderTag { name: "None".into(), color: FinderColor::None },
+                FinderTag {
+                    name: "Green".into(),
+                    color: FinderColor::Green
+                },
+                FinderTag {
+                    name: "None".into(),
+                    color: FinderColor::None
+                },
             ]
         );
         assert_eq!(
             parse_finder_tags(ONE_RED),
-            vec![FinderTag { name: "Red".into(), color: FinderColor::Red }]
+            vec![FinderTag {
+                name: "Red".into(),
+                color: FinderColor::Red
+            }]
         );
     }
 
@@ -606,7 +652,10 @@ mod tag_tests {
         // The attribute stores non-ASCII names as UTF-16, not UTF-8.
         assert_eq!(
             parse_finder_tags(CJK),
-            vec![FinderTag { name: "中文".into(), color: FinderColor::Blue }]
+            vec![FinderTag {
+                name: "中文".into(),
+                color: FinderColor::Blue
+            }]
         );
     }
 
@@ -629,12 +678,18 @@ mod tag_tests {
         // A name with no index is a tag with no colour.
         assert_eq!(
             FinderTag::parse("Later"),
-            Some(FinderTag { name: "Later".into(), color: FinderColor::None })
+            Some(FinderTag {
+                name: "Later".into(),
+                color: FinderColor::None
+            })
         );
         // An index that is not a number is treated the same way.
         assert_eq!(
             FinderTag::parse("Later\nred"),
-            Some(FinderTag { name: "Later".into(), color: FinderColor::None })
+            Some(FinderTag {
+                name: "Later".into(),
+                color: FinderColor::None
+            })
         );
         // An empty name is not a tag.
         assert_eq!(FinderTag::parse(""), None);

@@ -178,15 +178,15 @@ impl Shortcut {
     pub fn rejection(self) -> Option<Rejection> {
         // Tab, Backtab and Shift-Return move the caret in a text view; a
         // shortcut on them would break typing rather than add a command.
-        if self.key == '\t' || self.key == '\u{19}' || (self.shift && matches!(self.key, '\r' | '\n'))
+        if self.key == '\t'
+            || self.key == '\u{19}'
+            || (self.shift && matches!(self.key, '\r' | '\n'))
         {
             return Some(Rejection::Unsupported);
         }
         // Shift and a letter inserts a capital letter instead of running a
         // command, so AppKit never delivers it.
-        if self.shift
-            && !(self.control || self.option || self.command)
-            && self.key.is_alphabetic()
+        if self.shift && !(self.control || self.option || self.command) && self.key.is_alphabetic()
         {
             return Some(Rejection::ShiftOnly);
         }
@@ -225,17 +225,23 @@ impl Shortcut {
             strip_modifier_symbols(text),
             Some(strip_modifier_specs(text)),
         ];
-        let (modifiers, key) = spellings.into_iter().flatten().find_map(|(modifiers, rest)| {
-            let mut chars = rest.chars();
-            let key = chars.next()?;
-            // A special key has no character to store, so the key is exactly one
-            // character and anything left over is not a shortcut. `-` is a key
-            // of its own rather than a separator, which is why it survives.
-            chars.next().is_none().then_some((modifiers, key))
-        })?;
+        let (modifiers, key) = spellings
+            .into_iter()
+            .flatten()
+            .find_map(|(modifiers, rest)| {
+                let mut chars = rest.chars();
+                let key = chars.next()?;
+                // A special key has no character to store, so the key is exactly one
+                // character and anything left over is not a shortcut. `-` is a key
+                // of its own rather than a separator, which is why it survives.
+                chars.next().is_none().then_some((modifiers, key))
+            })?;
 
         if key.is_ascii_uppercase() {
-            return Some(Self { shift: true, ..modifiers.with_key(key.to_ascii_lowercase()) });
+            return Some(Self {
+                shift: true,
+                ..modifiers.with_key(key.to_ascii_lowercase())
+            });
         }
         Some(modifiers.with_key(key))
     }
@@ -332,7 +338,12 @@ struct Modifiers {
 
 impl Modifiers {
     fn none() -> Self {
-        Self { control: false, option: false, shift: false, command: false }
+        Self {
+            control: false,
+            option: false,
+            shift: false,
+            command: false,
+        }
     }
 
     fn with_key(self, key: char) -> Shortcut {
@@ -444,7 +455,13 @@ pub struct Snippet {
 impl Snippet {
     /// A snippet with nothing in it, for the settings table's *Add* command.
     pub fn new(id: u64, name: impl Into<String>) -> Self {
-        Self { id, name: name.into(), scope: None, shortcut: None, format: String::new() }
+        Self {
+            id,
+            name: name.into(),
+            scope: None,
+            shortcut: None,
+            format: String::new(),
+        }
     }
 
     /// Whether this snippet is offered in every syntax.
@@ -534,7 +551,10 @@ pub struct Sections<'a> {
 impl<'a> Sections<'a> {
     /// Split `snippets` for a document whose syntax is `scope`.
     pub fn of(snippets: &'a [Snippet], scope: Option<&'a str>) -> Self {
-        let general = snippets.iter().filter(|snippet| snippet.is_general()).collect();
+        let general = snippets
+            .iter()
+            .filter(|snippet| snippet.is_general())
+            .collect();
         let scoped = match scope {
             Some(scope) => snippets
                 .iter()
@@ -542,7 +562,11 @@ impl<'a> Sections<'a> {
                 .collect(),
             None => Vec::new(),
         };
-        Self { general, scope, scoped }
+        Self {
+            general,
+            scope,
+            scoped,
+        }
     }
 
     /// Whether the shortcut of a general snippet is worth showing.
@@ -670,7 +694,13 @@ mod tests {
     use super::*;
 
     fn snippet(format: &str) -> Snippet {
-        Snippet { id: 1, name: String::new(), scope: None, shortcut: None, format: format.into() }
+        Snippet {
+            id: 1,
+            name: String::new(),
+            scope: None,
+            shortcut: None,
+            format: format.into(),
+        }
     }
 
     /// Join symbols the way AppKit does, with a thin space rather than a gap.
@@ -702,13 +732,25 @@ mod tests {
     /// Upstream's `shortcutSymbols` and `menuItemShortcut`.
     #[test]
     fn a_shortcut_reads_back_from_its_displayed_symbols() {
-        assert_eq!(Shortcut::parse("^$a").unwrap().symbol(), shown(&["^", "⇧", "A"]));
-        assert_eq!(Shortcut::parse("~@b").unwrap().symbol(), shown(&["⌥", "⌘", "B"]));
+        assert_eq!(
+            Shortcut::parse("^$a").unwrap().symbol(),
+            shown(&["^", "⇧", "A"])
+        );
+        assert_eq!(
+            Shortcut::parse("~@b").unwrap().symbol(),
+            shown(&["⌥", "⌘", "B"])
+        );
         // The Command-Shift-C that AppKit hands back for a `C` key equivalent.
-        assert_eq!(Shortcut::parse("$@k").unwrap().symbol(), shown(&["⇧", "⌘", "K"]));
+        assert_eq!(
+            Shortcut::parse("$@k").unwrap().symbol(),
+            shown(&["⇧", "⌘", "K"])
+        );
 
         // The thin spaces macOS writes are optional, and so are plain ones.
-        assert_eq!(Shortcut::parse(&shown(&["⇧", "⌘", "K"])).unwrap().spec(), "$@k");
+        assert_eq!(
+            Shortcut::parse(&shown(&["⇧", "⌘", "K"])).unwrap().spec(),
+            "$@k"
+        );
         assert_eq!(Shortcut::parse("⇧ ⌘ K").unwrap().spec(), "$@k");
         assert_eq!(Shortcut::parse("⌘⇧K").unwrap().spec(), "$@k");
     }
@@ -719,9 +761,18 @@ mod tests {
         assert_eq!(Shortcut::parse("cmd-shift-k").unwrap(), shortcut);
         assert_eq!(Shortcut::parse("command-shift-k").unwrap(), shortcut);
         assert_eq!(Shortcut::parse("secondary-shift-k").unwrap(), shortcut);
-        assert_eq!(Shortcut::parse("ctrl-k").unwrap(), Shortcut::parse("^k").unwrap());
-        assert_eq!(Shortcut::parse("alt-k").unwrap(), Shortcut::parse("~k").unwrap());
-        assert_eq!(Shortcut::parse("option-k").unwrap(), Shortcut::parse("~k").unwrap());
+        assert_eq!(
+            Shortcut::parse("ctrl-k").unwrap(),
+            Shortcut::parse("^k").unwrap()
+        );
+        assert_eq!(
+            Shortcut::parse("alt-k").unwrap(),
+            Shortcut::parse("~k").unwrap()
+        );
+        assert_eq!(
+            Shortcut::parse("option-k").unwrap(),
+            Shortcut::parse("~k").unwrap()
+        );
     }
 
     /// Upstream's `equivalent`.
@@ -729,8 +780,14 @@ mod tests {
     fn an_uppercase_key_becomes_shift() {
         // AppKit treats ⌘⇧c and ⌘C as one shortcut, so the two spellings have to
         // collapse into one value.
-        assert_eq!(Shortcut::parse("^A").unwrap(), Shortcut::parse("^$a").unwrap());
-        assert_eq!(Shortcut::parse("cmd-K").unwrap(), Shortcut::parse("$@k").unwrap());
+        assert_eq!(
+            Shortcut::parse("^A").unwrap(),
+            Shortcut::parse("^$a").unwrap()
+        );
+        assert_eq!(
+            Shortcut::parse("cmd-K").unwrap(),
+            Shortcut::parse("$@k").unwrap()
+        );
         assert_eq!(Shortcut::parse("⌘K").unwrap().spec(), "$@k");
     }
 
@@ -770,8 +827,14 @@ mod tests {
 
     #[test]
     fn a_shortcut_becomes_a_keystroke_the_keymap_knows() {
-        assert_eq!(Shortcut::parse("$@k").unwrap().keystroke(), "secondary-shift-k");
-        assert_eq!(Shortcut::parse("^~$@k").unwrap().keystroke(), "secondary-ctrl-alt-shift-k");
+        assert_eq!(
+            Shortcut::parse("$@k").unwrap().keystroke(),
+            "secondary-shift-k"
+        );
+        assert_eq!(
+            Shortcut::parse("^~$@k").unwrap().keystroke(),
+            "secondary-ctrl-alt-shift-k"
+        );
         // Command moves to Control off macOS, the way every other shortcut does.
         assert_eq!(Shortcut::parse("@,").unwrap().keystroke(), "secondary-,");
     }
@@ -780,23 +843,33 @@ mod tests {
     #[test]
     fn a_key_the_text_view_needs_is_not_a_shortcut() {
         // Tab, Backtab and Shift-Return move the caret.
-        assert_eq!(Shortcut::parse("@\t").unwrap().rejection(), Some(Rejection::Unsupported));
+        assert_eq!(
+            Shortcut::parse("@\t").unwrap().rejection(),
+            Some(Rejection::Unsupported)
+        );
         assert_eq!(
             Shortcut::parse("$\r").unwrap().rejection(),
             Some(Rejection::Unsupported)
         );
         // Shift and a letter types a capital letter instead of running a
         // command.
-        assert_eq!(Shortcut::parse("$k").unwrap().rejection(), Some(Rejection::ShiftOnly));
+        assert_eq!(
+            Shortcut::parse("$k").unwrap().rejection(),
+            Some(Rejection::ShiftOnly)
+        );
         // One key with nothing to modify it.
-        assert_eq!(Shortcut::parse("k").unwrap().rejection(), Some(Rejection::SingleKey));
+        assert_eq!(
+            Shortcut::parse("k").unwrap().rejection(),
+            Some(Rejection::SingleKey)
+        );
         // Shift and punctuation is fine: it is not something a person types.
         assert_eq!(Shortcut::parse("$,").unwrap().rejection(), None);
         assert_eq!(Shortcut::parse("^$a").unwrap().rejection(), None);
     }
 
     #[test]
-    fn a_shortcut_round_trips_through_json_as_its_spec() {        let json = serde_json::to_string(&Shortcut::parse("$@k").unwrap()).unwrap();
+    fn a_shortcut_round_trips_through_json_as_its_spec() {
+        let json = serde_json::to_string(&Shortcut::parse("$@k").unwrap()).unwrap();
         assert_eq!(json, "\"$@k\"");
         let back: Shortcut = serde_json::from_str(&json).unwrap();
         assert_eq!(back.spec(), "$@k");
@@ -889,7 +962,10 @@ mod tests {
         // the shortcuts follow that order.
         assert_eq!(
             sections.bindings(),
-            [(1, "secondary-k".to_string()), (2, "secondary-r".to_string())]
+            [
+                (1, "secondary-k".to_string()),
+                (2, "secondary-r".to_string())
+            ]
         );
         assert_eq!(
             Sections::of(&snippets, None).bindings(),
@@ -946,7 +1022,10 @@ mod tests {
     /// and whose names are what the *Insert Variable* menu shows.
     #[test]
     fn the_variables_are_the_tokens_a_format_holds() {
-        let tokens: Vec<String> = Variable::ALL.iter().map(|variable| variable.token()).collect();
+        let tokens: Vec<String> = Variable::ALL
+            .iter()
+            .map(|variable| variable.token())
+            .collect();
         assert_eq!(tokens, TOKENS);
         assert_eq!(Variable::Selection.name(), "SELECTION");
         assert_eq!(Variable::Cursor.name(), "CURSOR");

@@ -183,15 +183,30 @@ mod tests {
     fn an_incomplete_search_stops_at_the_character_it_cannot_find() {
         let string = "The fox jumps over the lazy dogcow.";
 
-        assert_eq!(abbreviated_matched_ranges(string, "lazy tanuki", false), None);
         assert_eq!(
-            abbreviated_matched_ranges(string, "lazy tanuki", true).unwrap().len(),
+            abbreviated_matched_ranges(string, "lazy tanuki", false),
+            None
+        );
+        assert_eq!(
+            abbreviated_matched_ranges(string, "lazy tanuki", true)
+                .unwrap()
+                .len(),
             5
         );
 
         // Every character is present here, so both forms find all six.
-        assert_eq!(abbreviated_matched_ranges(string, "lazy w", false).unwrap().len(), 6);
-        assert_eq!(abbreviated_matched_ranges(string, "lazy w", true).unwrap().len(), 6);
+        assert_eq!(
+            abbreviated_matched_ranges(string, "lazy w", false)
+                .unwrap()
+                .len(),
+            6
+        );
+        assert_eq!(
+            abbreviated_matched_ranges(string, "lazy w", true)
+                .unwrap()
+                .len(),
+            6
+        );
     }
 
     /// `StringMatchTests.abbreviatedMatchedRanges`, case for case.
@@ -199,10 +214,21 @@ mod tests {
     fn a_filter_of_nothing_matches_nothing() {
         assert_eq!(abbreviated_matched_ranges("AbC", "", false), None);
         assert_eq!(abbreviated_matched_ranges("", "a", false), None);
-        assert_eq!(abbreviated_matched_ranges("AbC", "ac", false).unwrap().len(), 2);
-        assert_eq!(abbreviated_matched_ranges("AbC", "ac", true).unwrap().len(), 2);
+        assert_eq!(
+            abbreviated_matched_ranges("AbC", "ac", false)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            abbreviated_matched_ranges("AbC", "ac", true).unwrap().len(),
+            2
+        );
         assert_eq!(abbreviated_matched_ranges("AbC", "ad", false), None);
-        assert_eq!(abbreviated_matched_ranges("AbC", "ad", true).unwrap().len(), 1);
+        assert_eq!(
+            abbreviated_matched_ranges("AbC", "ad", true).unwrap().len(),
+            1
+        );
     }
 
     /// The search is case-insensitive in both directions.

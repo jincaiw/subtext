@@ -24,159 +24,194 @@ use crate::actions;
 /// Every default shortcut, in CotEditor's menu order.
 pub fn default_bindings() -> Vec<KeyBinding> {
     vec![
-    // CotEditor > Settings…
-    KeyBinding::new("secondary-,", actions::app::ShowSettingsWindow, None),
-    // CotEditor > Hide CotEditor
-    KeyBinding::new("secondary-h", actions::app::Hide, None),
-    // CotEditor > Hide Others
-    KeyBinding::new("alt-secondary-h", actions::app::HideOtherApplications, None),
-    // CotEditor > Quit CotEditor
-    KeyBinding::new("secondary-q", actions::app::Terminate, None),
-    // File > New
-    KeyBinding::new("secondary-n", actions::file::NewDocument, None),
-    // File > New Window
-    KeyBinding::new("shift-secondary-n", actions::file::NewDocumentAsWindow, None),
-    // File > New Tab
-    KeyBinding::new("secondary-t", actions::file::NewDocumentAsTab, None),
-    // File > Open…
-    KeyBinding::new("secondary-o", actions::file::OpenDocument, None),
-    // File > Close
-    KeyBinding::new("secondary-w", actions::file::PerformClose, None),
-    // File > Save
-    KeyBinding::new("secondary-s", actions::file::SaveDocument, None),
-    // File > Save As…
-    KeyBinding::new("shift-secondary-s", actions::file::SaveDocumentAs, None),
-    // File > Page Setup…
-    KeyBinding::new("shift-secondary-p", actions::file::RunPageLayout, None),
-    // File > Print…
-    KeyBinding::new("secondary-p", actions::file::PrintDocument, None),
-    // Edit > Undo
-    KeyBinding::new("secondary-z", actions::edit::Undo, None),
-    // Edit > Redo
-    KeyBinding::new("shift-secondary-z", actions::edit::Redo, None),
-    // Edit > Cut
-    KeyBinding::new("secondary-x", actions::edit::Cut, None),
-    // Edit > Copy
-    KeyBinding::new("secondary-c", actions::edit::Copy, None),
-    // Edit > Copy as Rich Text
-    KeyBinding::new("shift-secondary-c", actions::edit::CopyWithStyle, None),
-    // Edit > Paste
-    KeyBinding::new("secondary-v", actions::edit::Paste, None),
-    // Edit > Paste Exactly
-    KeyBinding::new("alt-secondary-v", actions::edit::PasteAsIs, None),
-    // Edit > Delete
-    KeyBinding::new("secondary-backspace", actions::edit::Delete, None),
-    // Edit > Select > Select All
-    KeyBinding::new("secondary-a", actions::edit::SelectAll, None),
-    // Edit > Select > Select Line
-    KeyBinding::new("shift-secondary-a", actions::edit::SelectParagraph, None),
-    // Edit > Select > Select Word
-    KeyBinding::new("secondary-d", actions::edit::SelectWord, None),
-    // Edit > Select > Select Column Up
-    KeyBinding::new("ctrl-shift-up", actions::edit::SelectColumnUp, None),
-    // Edit > Select > Select Column Down
-    KeyBinding::new("ctrl-shift-down", actions::edit::SelectColumnDown, None),
-    // Edit > Select > Split Selection by Lines
-    KeyBinding::new("ctrl-shift-l", actions::edit::SplitSelectionByLines, None),
-    // Edit > Complete
-    KeyBinding::new("alt-escape", actions::edit::Complete, None),
-    // Edit > Insert Backslash
-    KeyBinding::new("secondary-¥", actions::edit::InputBackSlash, None),
-    // Edit > Insert Yen Mark
-    KeyBinding::new("secondary-y", actions::edit::InputYenMark, None),
-    // Edit > Spelling and Grammar > Show Spelling and Grammar
-    KeyBinding::new("shift-secondary-;", actions::spelling::ShowGuessPanel, None),
-    // Edit > Spelling and Grammar > Check Document Now
-    KeyBinding::new("secondary-;", actions::spelling::CheckSpelling, None),
-    // Format > Reset Syntax Analysis
-    KeyBinding::new("alt-secondary-r", actions::format::RecolorAll, None),
-    // Format > Font > Bigger
-    KeyBinding::new("shift-secondary-=", actions::format::BiggerFont, None),
-    // Format > Font > Smaller
-    KeyBinding::new("secondary--", actions::format::SmallerFont, None),
-    // Format > Font > Reset to Default
-    KeyBinding::new("secondary-0", actions::format::ResetFont, None),
-    // View > Show Tab Bar
-    KeyBinding::new("shift-secondary-t", actions::view::ToggleTabBar, None),
-    // View > Hide Toolbar
-    KeyBinding::new("alt-secondary-t", actions::view::ToggleToolbarShown, None),
-    // View > Show Quick Actions…
-    KeyBinding::new("secondary-k", actions::view::ShowQuickActions, None),
-    // View > Sidebar > File Browser
-    KeyBinding::new("ctrl-secondary-1", actions::view::ShowFileBrowser, None),
-    // View > Sidebar > Folder Find
-    KeyBinding::new("ctrl-secondary-2", actions::view::ShowFolderFinder, None),
-    // View > Sidebar > Show Sidebar
-    KeyBinding::new("ctrl-secondary-s", actions::view::ToggleSidebar, None),
-    // View > Inspector > Show Inspector
-    KeyBinding::new("secondary-i", actions::view::ToggleInspector, None),
-    // View > Move Focus to Next Editor
-    KeyBinding::new("ctrl-`", actions::view::FocusNextEditor, None),
-    // View > Move Focus to Previous Editor
-    KeyBinding::new("ctrl-shift-`", actions::view::FocusPreviousEditor, None),
-    // View > Enter Full Screen
-    KeyBinding::new("ctrl-secondary-f", actions::view::ToggleFullScreen, None),
-    // Text > Comment > Toggle Comment
-    KeyBinding::new("secondary-/", actions::text::ToggleComment, None),
-    // Text > Indentation > Shift Right
-    KeyBinding::new("secondary-]", actions::text::ShiftRight, None),
-    // Text > Indentation > Shift Left
-    KeyBinding::new("secondary-[", actions::text::ShiftLeft, None),
-    // Text > Surround Selection With > Single Quotes
-    KeyBinding::new("secondary-'", actions::text::SurroundSelectionWithSingleQuotes, None),
-    // Text > Surround Selection With > Double Quotes
-    KeyBinding::new("shift-secondary-'", actions::text::SurroundSelectionWithDoubleQuotes, None),
-    // Text > Surround Selection With > Parentheses
-    KeyBinding::new("shift-secondary-9", actions::text::SurroundSelectionWithParentheses, None),
-    // Text > Surround Selection With > Custom…
-    KeyBinding::new("shift-secondary-l", actions::text::SurroundSelection, None),
-    // Text > Lines > Move Up
-    KeyBinding::new("ctrl-secondary-up", actions::text::MoveLineUp, None),
-    // Text > Lines > Move Down
-    KeyBinding::new("ctrl-secondary-down", actions::text::MoveLineDown, None),
-    // Text > Lines > Duplicate Line
-    KeyBinding::new("shift-secondary-d", actions::text::DuplicateLine, None),
-    // Text > Lines > Delete Line
-    KeyBinding::new("shift-secondary-backspace", actions::text::DeleteLine, None),
-    // Text > Lines > Join Lines
-    KeyBinding::new("shift-secondary-j", actions::text::JoinLines, None),
-    // Text > Inspect Character
-    KeyBinding::new("alt-secondary-i", actions::text::ShowSelectionInfo, None),
-    // Text > Edit Color Code…
-    KeyBinding::new("ctrl-secondary-h", actions::text::EditColorCode, None),
-    // Find > Find…
-    KeyBinding::new("secondary-f", actions::find::PerformTextFinderAction, None),
-    // Find > Find Next
-    KeyBinding::new("secondary-g", actions::find::FindNext, None),
-    // Find > Find Previous
-    KeyBinding::new("shift-secondary-g", actions::find::FindPrevious, None),
-    // Find > Find All
-    KeyBinding::new("shift-secondary-f", actions::find::FindAll, None),
-    // Find > Use Selection for Find
-    KeyBinding::new("secondary-e", actions::find::UseSelectionForFind, None),
-    // Find > Use Selection for Replace
-    KeyBinding::new("shift-secondary-e", actions::find::UseSelectionForReplace, None),
-    // Find > Jump to Selection
-    KeyBinding::new("secondary-j", actions::find::CenterSelectionInVisibleArea, None),
-    // Find > Replace and Find Next
-    KeyBinding::new("alt-secondary-g", actions::find::ReplaceAndFindNext, None),
-    // Find > Highlight All
-    KeyBinding::new("shift-secondary-h", actions::find::HighlightAll, None),
-    // Find > Remove Highlights
-    KeyBinding::new("ctrl-shift-secondary-h", actions::find::RemoveHighlights, None),
-    // Find > Select Previous Outline Item
-    KeyBinding::new("alt-secondary-up", actions::find::SelectPrevItemOfOutlineMenu, None),
-    // Find > Select Next Outline Item
-    KeyBinding::new("alt-secondary-down", actions::find::SelectNextItemOfOutlineMenu, None),
-    // Find > Go to Line…
-    KeyBinding::new("secondary-l", actions::find::GotoLocation, None),
-    // Window > Minimize
-    KeyBinding::new("secondary-m", actions::window::PerformMiniaturize, None),
-    // Help > CotEditor Help
-    KeyBinding::new("shift-secondary-/", actions::help::ShowHelp, None),
+        // CotEditor > Settings…
+        KeyBinding::new("secondary-,", actions::app::ShowSettingsWindow, None),
+        // CotEditor > Hide CotEditor
+        KeyBinding::new("secondary-h", actions::app::Hide, None),
+        // CotEditor > Hide Others
+        KeyBinding::new("alt-secondary-h", actions::app::HideOtherApplications, None),
+        // CotEditor > Quit CotEditor
+        KeyBinding::new("secondary-q", actions::app::Terminate, None),
+        // File > New
+        KeyBinding::new("secondary-n", actions::file::NewDocument, None),
+        // File > New Window
+        KeyBinding::new(
+            "shift-secondary-n",
+            actions::file::NewDocumentAsWindow,
+            None,
+        ),
+        // File > New Tab
+        KeyBinding::new("secondary-t", actions::file::NewDocumentAsTab, None),
+        // File > Open…
+        KeyBinding::new("secondary-o", actions::file::OpenDocument, None),
+        // File > Close
+        KeyBinding::new("secondary-w", actions::file::PerformClose, None),
+        // File > Save
+        KeyBinding::new("secondary-s", actions::file::SaveDocument, None),
+        // File > Save As…
+        KeyBinding::new("shift-secondary-s", actions::file::SaveDocumentAs, None),
+        // File > Page Setup…
+        KeyBinding::new("shift-secondary-p", actions::file::RunPageLayout, None),
+        // File > Print…
+        KeyBinding::new("secondary-p", actions::file::PrintDocument, None),
+        // Edit > Undo
+        KeyBinding::new("secondary-z", actions::edit::Undo, None),
+        // Edit > Redo
+        KeyBinding::new("shift-secondary-z", actions::edit::Redo, None),
+        // Edit > Cut
+        KeyBinding::new("secondary-x", actions::edit::Cut, None),
+        // Edit > Copy
+        KeyBinding::new("secondary-c", actions::edit::Copy, None),
+        // Edit > Copy as Rich Text
+        KeyBinding::new("shift-secondary-c", actions::edit::CopyWithStyle, None),
+        // Edit > Paste
+        KeyBinding::new("secondary-v", actions::edit::Paste, None),
+        // Edit > Paste Exactly
+        KeyBinding::new("alt-secondary-v", actions::edit::PasteAsIs, None),
+        // Edit > Delete
+        KeyBinding::new("secondary-backspace", actions::edit::Delete, None),
+        // Edit > Select > Select All
+        KeyBinding::new("secondary-a", actions::edit::SelectAll, None),
+        // Edit > Select > Select Line
+        KeyBinding::new("shift-secondary-a", actions::edit::SelectParagraph, None),
+        // Edit > Select > Select Word
+        KeyBinding::new("secondary-d", actions::edit::SelectWord, None),
+        // Edit > Select > Select Column Up
+        KeyBinding::new("ctrl-shift-up", actions::edit::SelectColumnUp, None),
+        // Edit > Select > Select Column Down
+        KeyBinding::new("ctrl-shift-down", actions::edit::SelectColumnDown, None),
+        // Edit > Select > Split Selection by Lines
+        KeyBinding::new("ctrl-shift-l", actions::edit::SplitSelectionByLines, None),
+        // Edit > Complete
+        KeyBinding::new("alt-escape", actions::edit::Complete, None),
+        // Edit > Insert Backslash
+        KeyBinding::new("secondary-¥", actions::edit::InputBackSlash, None),
+        // Edit > Insert Yen Mark
+        KeyBinding::new("secondary-y", actions::edit::InputYenMark, None),
+        // Edit > Spelling and Grammar > Show Spelling and Grammar
+        KeyBinding::new("shift-secondary-;", actions::spelling::ShowGuessPanel, None),
+        // Edit > Spelling and Grammar > Check Document Now
+        KeyBinding::new("secondary-;", actions::spelling::CheckSpelling, None),
+        // Format > Reset Syntax Analysis
+        KeyBinding::new("alt-secondary-r", actions::format::RecolorAll, None),
+        // Format > Font > Bigger
+        KeyBinding::new("shift-secondary-=", actions::format::BiggerFont, None),
+        // Format > Font > Smaller
+        KeyBinding::new("secondary--", actions::format::SmallerFont, None),
+        // Format > Font > Reset to Default
+        KeyBinding::new("secondary-0", actions::format::ResetFont, None),
+        // View > Show Tab Bar
+        KeyBinding::new("shift-secondary-t", actions::view::ToggleTabBar, None),
+        // View > Hide Toolbar
+        KeyBinding::new("alt-secondary-t", actions::view::ToggleToolbarShown, None),
+        // View > Show Quick Actions…
+        KeyBinding::new("secondary-k", actions::view::ShowQuickActions, None),
+        // View > Sidebar > File Browser
+        KeyBinding::new("ctrl-secondary-1", actions::view::ShowFileBrowser, None),
+        // View > Sidebar > Folder Find
+        KeyBinding::new("ctrl-secondary-2", actions::view::ShowFolderFinder, None),
+        // View > Sidebar > Show Sidebar
+        KeyBinding::new("ctrl-secondary-s", actions::view::ToggleSidebar, None),
+        // View > Inspector > Show Inspector
+        KeyBinding::new("secondary-i", actions::view::ToggleInspector, None),
+        // View > Move Focus to Next Editor
+        KeyBinding::new("ctrl-`", actions::view::FocusNextEditor, None),
+        // View > Move Focus to Previous Editor
+        KeyBinding::new("ctrl-shift-`", actions::view::FocusPreviousEditor, None),
+        // View > Enter Full Screen
+        KeyBinding::new("ctrl-secondary-f", actions::view::ToggleFullScreen, None),
+        // Text > Comment > Toggle Comment
+        KeyBinding::new("secondary-/", actions::text::ToggleComment, None),
+        // Text > Indentation > Shift Right
+        KeyBinding::new("secondary-]", actions::text::ShiftRight, None),
+        // Text > Indentation > Shift Left
+        KeyBinding::new("secondary-[", actions::text::ShiftLeft, None),
+        // Text > Surround Selection With > Single Quotes
+        KeyBinding::new(
+            "secondary-'",
+            actions::text::SurroundSelectionWithSingleQuotes,
+            None,
+        ),
+        // Text > Surround Selection With > Double Quotes
+        KeyBinding::new(
+            "shift-secondary-'",
+            actions::text::SurroundSelectionWithDoubleQuotes,
+            None,
+        ),
+        // Text > Surround Selection With > Parentheses
+        KeyBinding::new(
+            "shift-secondary-9",
+            actions::text::SurroundSelectionWithParentheses,
+            None,
+        ),
+        // Text > Surround Selection With > Custom…
+        KeyBinding::new("shift-secondary-l", actions::text::SurroundSelection, None),
+        // Text > Lines > Move Up
+        KeyBinding::new("ctrl-secondary-up", actions::text::MoveLineUp, None),
+        // Text > Lines > Move Down
+        KeyBinding::new("ctrl-secondary-down", actions::text::MoveLineDown, None),
+        // Text > Lines > Duplicate Line
+        KeyBinding::new("shift-secondary-d", actions::text::DuplicateLine, None),
+        // Text > Lines > Delete Line
+        KeyBinding::new("shift-secondary-backspace", actions::text::DeleteLine, None),
+        // Text > Lines > Join Lines
+        KeyBinding::new("shift-secondary-j", actions::text::JoinLines, None),
+        // Text > Inspect Character
+        KeyBinding::new("alt-secondary-i", actions::text::ShowSelectionInfo, None),
+        // Text > Edit Color Code…
+        KeyBinding::new("ctrl-secondary-h", actions::text::EditColorCode, None),
+        // Find > Find…
+        KeyBinding::new("secondary-f", actions::find::PerformTextFinderAction, None),
+        // Find > Find Next
+        KeyBinding::new("secondary-g", actions::find::FindNext, None),
+        // Find > Find Previous
+        KeyBinding::new("shift-secondary-g", actions::find::FindPrevious, None),
+        // Find > Find All
+        KeyBinding::new("shift-secondary-f", actions::find::FindAll, None),
+        // Find > Use Selection for Find
+        KeyBinding::new("secondary-e", actions::find::UseSelectionForFind, None),
+        // Find > Use Selection for Replace
+        KeyBinding::new(
+            "shift-secondary-e",
+            actions::find::UseSelectionForReplace,
+            None,
+        ),
+        // Find > Jump to Selection
+        KeyBinding::new(
+            "secondary-j",
+            actions::find::CenterSelectionInVisibleArea,
+            None,
+        ),
+        // Find > Replace and Find Next
+        KeyBinding::new("alt-secondary-g", actions::find::ReplaceAndFindNext, None),
+        // Find > Highlight All
+        KeyBinding::new("shift-secondary-h", actions::find::HighlightAll, None),
+        // Find > Remove Highlights
+        KeyBinding::new(
+            "ctrl-shift-secondary-h",
+            actions::find::RemoveHighlights,
+            None,
+        ),
+        // Find > Select Previous Outline Item
+        KeyBinding::new(
+            "alt-secondary-up",
+            actions::find::SelectPrevItemOfOutlineMenu,
+            None,
+        ),
+        // Find > Select Next Outline Item
+        KeyBinding::new(
+            "alt-secondary-down",
+            actions::find::SelectNextItemOfOutlineMenu,
+            None,
+        ),
+        // Find > Go to Line…
+        KeyBinding::new("secondary-l", actions::find::GotoLocation, None),
+        // Window > Minimize
+        KeyBinding::new("secondary-m", actions::window::PerformMiniaturize, None),
+        // Help > CotEditor Help
+        KeyBinding::new("shift-secondary-/", actions::help::ShowHelp, None),
     ]
 }
-
 
 /// Every default shortcut, as the Key Bindings pane shows it.
 ///
@@ -194,86 +229,433 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 /// would be a second thing to get wrong.
 pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
     ("CotEditor > Settings…", "⌘,", "command", ",", "secondary-,"),
-    ("CotEditor > Hide CotEditor", "⌘H", "command", "h", "secondary-h"),
-    ("CotEditor > Hide Others", "⌥⌘H", "option command", "h", "alt-secondary-h"),
-    ("CotEditor > Quit CotEditor", "⌘Q", "command", "q", "secondary-q"),
+    (
+        "CotEditor > Hide CotEditor",
+        "⌘H",
+        "command",
+        "h",
+        "secondary-h",
+    ),
+    (
+        "CotEditor > Hide Others",
+        "⌥⌘H",
+        "option command",
+        "h",
+        "alt-secondary-h",
+    ),
+    (
+        "CotEditor > Quit CotEditor",
+        "⌘Q",
+        "command",
+        "q",
+        "secondary-q",
+    ),
     ("File > New", "⌘N", "command", "n", "secondary-n"),
-    ("File > New Window", "⇧⌘N", "shift command", "N", "shift-secondary-n"),
+    (
+        "File > New Window",
+        "⇧⌘N",
+        "shift command",
+        "N",
+        "shift-secondary-n",
+    ),
     ("File > New Tab", "⌘T", "command", "t", "secondary-t"),
     ("File > Open…", "⌘O", "command", "o", "secondary-o"),
     ("File > Close", "⌘W", "command", "w", "secondary-w"),
     ("File > Save", "⌘S", "command", "s", "secondary-s"),
-    ("File > Save As…", "⇧⌘S", "shift command", "S", "shift-secondary-s"),
-    ("File > Page Setup…", "⇧⌘P", "shift command", "P", "shift-secondary-p"),
+    (
+        "File > Save As…",
+        "⇧⌘S",
+        "shift command",
+        "S",
+        "shift-secondary-s",
+    ),
+    (
+        "File > Page Setup…",
+        "⇧⌘P",
+        "shift command",
+        "P",
+        "shift-secondary-p",
+    ),
     ("File > Print…", "⌘P", "command", "p", "secondary-p"),
     ("Edit > Undo", "⌘Z", "command", "z", "secondary-z"),
-    ("Edit > Redo", "⇧⌘Z", "shift command", "Z", "shift-secondary-z"),
+    (
+        "Edit > Redo",
+        "⇧⌘Z",
+        "shift command",
+        "Z",
+        "shift-secondary-z",
+    ),
     ("Edit > Cut", "⌘X", "command", "x", "secondary-x"),
     ("Edit > Copy", "⌘C", "command", "c", "secondary-c"),
-    ("Edit > Copy as Rich Text", "⇧⌘C", "shift command", "C", "shift-secondary-c"),
+    (
+        "Edit > Copy as Rich Text",
+        "⇧⌘C",
+        "shift command",
+        "C",
+        "shift-secondary-c",
+    ),
     ("Edit > Paste", "⌘V", "command", "v", "secondary-v"),
-    ("Edit > Paste Exactly", "⌥⌘V", "option command", "v", "alt-secondary-v"),
+    (
+        "Edit > Paste Exactly",
+        "⌥⌘V",
+        "option command",
+        "v",
+        "alt-secondary-v",
+    ),
     ("Edit > Delete", "⌘⌫", "command", "⌫", "secondary-backspace"),
-    ("Edit > Select > Select All", "⌘A", "command", "a", "secondary-a"),
-    ("Edit > Select > Select Line", "⇧⌘A", "shift command", "A", "shift-secondary-a"),
-    ("Edit > Select > Select Word", "⌘D", "command", "d", "secondary-d"),
-    ("Edit > Select > Select Column Up", "⌃⇧↑", "control shift", "↑", "ctrl-shift-up"),
-    ("Edit > Select > Select Column Down", "⌃⇧↓", "control shift", "↓", "ctrl-shift-down"),
-    ("Edit > Select > Split Selection by Lines", "⌃⇧L", "control shift", "L", "ctrl-shift-l"),
+    (
+        "Edit > Select > Select All",
+        "⌘A",
+        "command",
+        "a",
+        "secondary-a",
+    ),
+    (
+        "Edit > Select > Select Line",
+        "⇧⌘A",
+        "shift command",
+        "A",
+        "shift-secondary-a",
+    ),
+    (
+        "Edit > Select > Select Word",
+        "⌘D",
+        "command",
+        "d",
+        "secondary-d",
+    ),
+    (
+        "Edit > Select > Select Column Up",
+        "⌃⇧↑",
+        "control shift",
+        "↑",
+        "ctrl-shift-up",
+    ),
+    (
+        "Edit > Select > Select Column Down",
+        "⌃⇧↓",
+        "control shift",
+        "↓",
+        "ctrl-shift-down",
+    ),
+    (
+        "Edit > Select > Split Selection by Lines",
+        "⌃⇧L",
+        "control shift",
+        "L",
+        "ctrl-shift-l",
+    ),
     ("Edit > Complete", "⌥⎋", "option", "⎋", "alt-escape"),
-    ("Edit > Insert Backslash", "⌘¥", "command", "¥", "secondary-¥"),
-    ("Edit > Insert Yen Mark", "⌘Y", "command", "y", "secondary-y"),
-    ("Edit > Spelling and Grammar > Show Spelling and Grammar", "⇧⌘;", "shift command", ":", "shift-secondary-;"),
-    ("Edit > Spelling and Grammar > Check Document Now", "⌘;", "command", ";", "secondary-;"),
-    ("Format > Reset Syntax Analysis", "⌥⌘R", "option command", "r", "alt-secondary-r"),
-    ("Format > Font > Bigger", "⇧⌘=", "shift command", "+", "shift-secondary-="),
-    ("Format > Font > Smaller", "⌘-", "command", "-", "secondary--"),
-    ("Format > Font > Reset to Default", "⌘0", "command", "0", "secondary-0"),
-    ("View > Show Tab Bar", "⇧⌘T", "shift command", "T", "shift-secondary-t"),
-    ("View > Hide Toolbar", "⌥⌘T", "option command", "t", "alt-secondary-t"),
-    ("View > Show Quick Actions…", "⌘K", "command", "k", "secondary-k"),
-    ("View > Sidebar > File Browser", "⌃⌘1", "control command", "1", "ctrl-secondary-1"),
-    ("View > Sidebar > Folder Find", "⌃⌘2", "control command", "2", "ctrl-secondary-2"),
-    ("View > Sidebar > Show Sidebar", "⌃⌘S", "control command", "s", "ctrl-secondary-s"),
-    ("View > Inspector > Show Inspector", "⌘I", "command", "i", "secondary-i"),
-    ("View > Move Focus to Next Editor", "⌃`", "control", "`", "ctrl-`"),
-    ("View > Move Focus to Previous Editor", "⌃⇧`", "control shift", "`", "ctrl-shift-`"),
-    ("View > Enter Full Screen", "⌃⌘F", "control command", "f", "ctrl-secondary-f"),
-    ("Text > Comment > Toggle Comment", "⌘/", "command", "/", "secondary-/"),
-    ("Text > Indentation > Shift Right", "⌘]", "command", "]", "secondary-]"),
-    ("Text > Indentation > Shift Left", "⌘[", "command", "[", "secondary-["),
-    ("Text > Surround Selection With > Single Quotes", "⌘'", "command", "'", "secondary-'"),
-    ("Text > Surround Selection With > Double Quotes", "⇧⌘'", "shift command", "\"", "shift-secondary-'"),
-    ("Text > Surround Selection With > Parentheses", "⇧⌘9", "shift command", "(", "shift-secondary-9"),
-    ("Text > Surround Selection With > Custom…", "⇧⌘L", "shift command", "L", "shift-secondary-l"),
-    ("Text > Lines > Move Up", "⌃⌘↑", "control command", "↑", "ctrl-secondary-up"),
-    ("Text > Lines > Move Down", "⌃⌘↓", "control command", "↓", "ctrl-secondary-down"),
-    ("Text > Lines > Duplicate Line", "⇧⌘D", "shift command", "D", "shift-secondary-d"),
-    ("Text > Lines > Delete Line", "⇧⌘⌫", "shift command", "⌫", "shift-secondary-backspace"),
-    ("Text > Lines > Join Lines", "⇧⌘J", "shift command", "J", "shift-secondary-j"),
-    ("Text > Inspect Character", "⌥⌘I", "option command", "i", "alt-secondary-i"),
-    ("Text > Edit Color Code…", "⌃⌘H", "control command", "h", "ctrl-secondary-h"),
+    (
+        "Edit > Insert Backslash",
+        "⌘¥",
+        "command",
+        "¥",
+        "secondary-¥",
+    ),
+    (
+        "Edit > Insert Yen Mark",
+        "⌘Y",
+        "command",
+        "y",
+        "secondary-y",
+    ),
+    (
+        "Edit > Spelling and Grammar > Show Spelling and Grammar",
+        "⇧⌘;",
+        "shift command",
+        ":",
+        "shift-secondary-;",
+    ),
+    (
+        "Edit > Spelling and Grammar > Check Document Now",
+        "⌘;",
+        "command",
+        ";",
+        "secondary-;",
+    ),
+    (
+        "Format > Reset Syntax Analysis",
+        "⌥⌘R",
+        "option command",
+        "r",
+        "alt-secondary-r",
+    ),
+    (
+        "Format > Font > Bigger",
+        "⇧⌘=",
+        "shift command",
+        "+",
+        "shift-secondary-=",
+    ),
+    (
+        "Format > Font > Smaller",
+        "⌘-",
+        "command",
+        "-",
+        "secondary--",
+    ),
+    (
+        "Format > Font > Reset to Default",
+        "⌘0",
+        "command",
+        "0",
+        "secondary-0",
+    ),
+    (
+        "View > Show Tab Bar",
+        "⇧⌘T",
+        "shift command",
+        "T",
+        "shift-secondary-t",
+    ),
+    (
+        "View > Hide Toolbar",
+        "⌥⌘T",
+        "option command",
+        "t",
+        "alt-secondary-t",
+    ),
+    (
+        "View > Show Quick Actions…",
+        "⌘K",
+        "command",
+        "k",
+        "secondary-k",
+    ),
+    (
+        "View > Sidebar > File Browser",
+        "⌃⌘1",
+        "control command",
+        "1",
+        "ctrl-secondary-1",
+    ),
+    (
+        "View > Sidebar > Folder Find",
+        "⌃⌘2",
+        "control command",
+        "2",
+        "ctrl-secondary-2",
+    ),
+    (
+        "View > Sidebar > Show Sidebar",
+        "⌃⌘S",
+        "control command",
+        "s",
+        "ctrl-secondary-s",
+    ),
+    (
+        "View > Inspector > Show Inspector",
+        "⌘I",
+        "command",
+        "i",
+        "secondary-i",
+    ),
+    (
+        "View > Move Focus to Next Editor",
+        "⌃`",
+        "control",
+        "`",
+        "ctrl-`",
+    ),
+    (
+        "View > Move Focus to Previous Editor",
+        "⌃⇧`",
+        "control shift",
+        "`",
+        "ctrl-shift-`",
+    ),
+    (
+        "View > Enter Full Screen",
+        "⌃⌘F",
+        "control command",
+        "f",
+        "ctrl-secondary-f",
+    ),
+    (
+        "Text > Comment > Toggle Comment",
+        "⌘/",
+        "command",
+        "/",
+        "secondary-/",
+    ),
+    (
+        "Text > Indentation > Shift Right",
+        "⌘]",
+        "command",
+        "]",
+        "secondary-]",
+    ),
+    (
+        "Text > Indentation > Shift Left",
+        "⌘[",
+        "command",
+        "[",
+        "secondary-[",
+    ),
+    (
+        "Text > Surround Selection With > Single Quotes",
+        "⌘'",
+        "command",
+        "'",
+        "secondary-'",
+    ),
+    (
+        "Text > Surround Selection With > Double Quotes",
+        "⇧⌘'",
+        "shift command",
+        "\"",
+        "shift-secondary-'",
+    ),
+    (
+        "Text > Surround Selection With > Parentheses",
+        "⇧⌘9",
+        "shift command",
+        "(",
+        "shift-secondary-9",
+    ),
+    (
+        "Text > Surround Selection With > Custom…",
+        "⇧⌘L",
+        "shift command",
+        "L",
+        "shift-secondary-l",
+    ),
+    (
+        "Text > Lines > Move Up",
+        "⌃⌘↑",
+        "control command",
+        "↑",
+        "ctrl-secondary-up",
+    ),
+    (
+        "Text > Lines > Move Down",
+        "⌃⌘↓",
+        "control command",
+        "↓",
+        "ctrl-secondary-down",
+    ),
+    (
+        "Text > Lines > Duplicate Line",
+        "⇧⌘D",
+        "shift command",
+        "D",
+        "shift-secondary-d",
+    ),
+    (
+        "Text > Lines > Delete Line",
+        "⇧⌘⌫",
+        "shift command",
+        "⌫",
+        "shift-secondary-backspace",
+    ),
+    (
+        "Text > Lines > Join Lines",
+        "⇧⌘J",
+        "shift command",
+        "J",
+        "shift-secondary-j",
+    ),
+    (
+        "Text > Inspect Character",
+        "⌥⌘I",
+        "option command",
+        "i",
+        "alt-secondary-i",
+    ),
+    (
+        "Text > Edit Color Code…",
+        "⌃⌘H",
+        "control command",
+        "h",
+        "ctrl-secondary-h",
+    ),
     ("Find > Find…", "⌘F", "command", "f", "secondary-f"),
     ("Find > Find Next", "⌘G", "command", "g", "secondary-g"),
-    ("Find > Find Previous", "⇧⌘G", "shift command", "G", "shift-secondary-g"),
-    ("Find > Find All", "⇧⌘F", "shift command", "F", "shift-secondary-f"),
-    ("Find > Use Selection for Find", "⌘E", "command", "e", "secondary-e"),
-    ("Find > Use Selection for Replace", "⇧⌘E", "shift command", "E", "shift-secondary-e"),
-    ("Find > Jump to Selection", "⌘J", "command", "j", "secondary-j"),
-    ("Find > Replace and Find Next", "⌥⌘G", "option command", "g", "alt-secondary-g"),
-    ("Find > Highlight All", "⇧⌘H", "shift command", "H", "shift-secondary-h"),
-    ("Find > Remove Highlights", "⌃⇧⌘H", "control shift command", "H", "ctrl-shift-secondary-h"),
-    ("Find > Select Previous Outline Item", "⌥⌘↑", "option command", "↑", "alt-secondary-up"),
-    ("Find > Select Next Outline Item", "⌥⌘↓", "option command", "↓", "alt-secondary-down"),
+    (
+        "Find > Find Previous",
+        "⇧⌘G",
+        "shift command",
+        "G",
+        "shift-secondary-g",
+    ),
+    (
+        "Find > Find All",
+        "⇧⌘F",
+        "shift command",
+        "F",
+        "shift-secondary-f",
+    ),
+    (
+        "Find > Use Selection for Find",
+        "⌘E",
+        "command",
+        "e",
+        "secondary-e",
+    ),
+    (
+        "Find > Use Selection for Replace",
+        "⇧⌘E",
+        "shift command",
+        "E",
+        "shift-secondary-e",
+    ),
+    (
+        "Find > Jump to Selection",
+        "⌘J",
+        "command",
+        "j",
+        "secondary-j",
+    ),
+    (
+        "Find > Replace and Find Next",
+        "⌥⌘G",
+        "option command",
+        "g",
+        "alt-secondary-g",
+    ),
+    (
+        "Find > Highlight All",
+        "⇧⌘H",
+        "shift command",
+        "H",
+        "shift-secondary-h",
+    ),
+    (
+        "Find > Remove Highlights",
+        "⌃⇧⌘H",
+        "control shift command",
+        "H",
+        "ctrl-shift-secondary-h",
+    ),
+    (
+        "Find > Select Previous Outline Item",
+        "⌥⌘↑",
+        "option command",
+        "↑",
+        "alt-secondary-up",
+    ),
+    (
+        "Find > Select Next Outline Item",
+        "⌥⌘↓",
+        "option command",
+        "↓",
+        "alt-secondary-down",
+    ),
     ("Find > Go to Line…", "⌘L", "command", "l", "secondary-l"),
     ("Window > Minimize", "⌘M", "command", "m", "secondary-m"),
-    ("Help > CotEditor Help", "⇧⌘/", "shift command", "?", "shift-secondary-/"),
+    (
+        "Help > CotEditor Help",
+        "⇧⌘/",
+        "shift command",
+        "?",
+        "shift-secondary-/",
+    ),
 ];
 
 /// Shortcuts CotEditor assigns twice, kept visible rather than silently
 /// resolved. macOS settles them by menu order; so do we.
-pub const KNOWN_COLLISIONS: &[(&str, &str, &str)] = &[
-];
+pub const KNOWN_COLLISIONS: &[(&str, &str, &str)] = &[];
 
 #[cfg(test)]
 mod tests {

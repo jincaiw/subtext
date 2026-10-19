@@ -5,7 +5,9 @@
 
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum LineEnding {
     #[default]
     LF,
@@ -209,7 +211,10 @@ pub fn convert(text: &str, ending: LineEnding) -> String {
                 offset += len;
             }
             None => {
-                let c = text[offset..].chars().next().expect("offset is on a char boundary");
+                let c = text[offset..]
+                    .chars()
+                    .next()
+                    .expect("offset is on a char boundary");
                 out.push(c);
                 offset += c.len_utf8();
             }
@@ -286,7 +291,10 @@ mod tests {
 
     #[test]
     fn the_basic_set_is_what_the_format_pane_offers() {
-        assert_eq!(LineEnding::BASIC, [LineEnding::LF, LineEnding::CR, LineEnding::CRLF]);
+        assert_eq!(
+            LineEnding::BASIC,
+            [LineEnding::LF, LineEnding::CR, LineEnding::CRLF]
+        );
         for ending in LineEnding::BASIC {
             assert!(ending.is_basic(), "{ending:?} should be basic");
         }

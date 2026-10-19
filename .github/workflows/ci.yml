@@ -1,10 +1,10 @@
 name: CI
 
-# The gates the project holds itself to are `cargo test --workspace` and a clean
-# clippy; this runs exactly those, on the one platform the build has been
-# verified on. Linux and Windows are deliberately absent rather than red: GPUI's
-# platform backends have not been exercised here, and a workflow that fails on
-# push teaches people to ignore it.
+# The gates the project holds itself to are `cargo test --workspace`, a clean
+# clippy, and `cargo fmt --check`; this runs exactly those, on the one platform
+# the build has been verified on. Linux and Windows are deliberately absent
+# rather than red: GPUI's platform backends have not been exercised here, and a
+# workflow that fails on push teaches people to ignore it.
 on:
   push:
     branches: [main]
@@ -20,9 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # `--locked` keeps CI on the versions the lockfile pins, so a released
       # combination is the one that gets tested.
+      - name: Format
+        run: cargo fmt --all --check
       - name: Test
         run: cargo test --workspace --locked
       - name: Clippy

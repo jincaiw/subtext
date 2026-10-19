@@ -54,8 +54,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::LazyLock;
 
-use gpui_kit::assets::IconName;
 use gpui_kit::Hsla;
+use gpui_kit::assets::IconName;
 use regex::{Captures, Regex};
 use subtext_syntax::OutlineItem;
 
@@ -352,7 +352,10 @@ fn collapse_whitespace(label: &str) -> String {
 /// Cocoa — `resources/syntaxes/Rust.cotsyntax` relies on it.
 fn expand(captures: &Captures<'_>, template: &str) -> String {
     if template.is_empty() {
-        return captures.get(0).map(|m| m.as_str().to_string()).unwrap_or_default();
+        return captures
+            .get(0)
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default();
     }
     let mut out = String::new();
     captures.expand(&brace_group_references(template), &mut out);
@@ -1039,7 +1042,10 @@ mod tests {
 
     #[test]
     fn a_broken_pattern_is_skipped() {
-        let rules = [rule("heading", "([", "$1"), rule("heading", r"^# (.+)$", "$1")];
+        let rules = [
+            rule("heading", "([", "$1"),
+            rule("heading", r"^# (.+)$", "$1"),
+        ];
         let entries = extract("# Title\n", &rules);
         assert_eq!(titles(&entries), ["Title"]);
     }
@@ -1128,10 +1134,7 @@ mod tests {
         // This is the whole reason `Indent` has two cases. Upstream:
         // `guard case .level(let level) = item.indent else { roots.append(node);
         // stack.removeAll() }`.
-        let mut entries = extract(
-            "# Top\n",
-            &[rule("heading.1", r"^# (.+)$", "$1")],
-        );
+        let mut entries = extract("# Top\n", &[rule("heading.1", r"^# (.+)$", "$1")]);
         // A whitespace entry, as a `function` rule would produce.
         entries.push(OutlineEntry {
             id: String::new(),
@@ -1141,10 +1144,7 @@ mod tests {
             kind: Some(OutlineKind::Function),
         });
         let tree = build_tree(&entries);
-        assert_eq!(
-            tree_titles(&tree),
-            [(0, "Top".into()), (0, "loose".into())]
-        );
+        assert_eq!(tree_titles(&tree), [(0, "Top".into()), (0, "loose".into())]);
     }
 
     #[test]
@@ -1157,10 +1157,7 @@ mod tests {
         ];
         let entries = extract("# One\n### Three\n", &rules);
         let tree = build_tree(&entries);
-        assert_eq!(
-            tree_titles(&tree),
-            [(0, "One".into()), (1, "Three".into())]
-        );
+        assert_eq!(tree_titles(&tree), [(0, "One".into()), (1, "Three".into())]);
     }
 
     #[test]
@@ -1219,7 +1216,10 @@ mod tests {
         // The search for each character starts where the last one ended, so a
         // second `a` cannot be found in the same place.
         assert_eq!(abbreviated_matched_ranges("ab", "aa"), None);
-        assert_eq!(abbreviated_matched_ranges("aba", "aa"), Some(vec![0..1, 2..3]));
+        assert_eq!(
+            abbreviated_matched_ranges("aba", "aa"),
+            Some(vec![0..1, 2..3])
+        );
     }
 
     #[test]
@@ -1252,7 +1252,10 @@ mod tests {
         let entries = extract("# One\n# Two\n", &rules);
         let tree = build_tree(&entries);
         let filtered = filtered_tree(&tree, "");
-        assert_eq!(filtered_titles(&filtered), [(0, "One".into()), (0, "Two".into())]);
+        assert_eq!(
+            filtered_titles(&filtered),
+            [(0, "One".into()), (0, "Two".into())]
+        );
         assert!(filtered.iter().all(|node| node.matches.is_empty()));
     }
 
@@ -1335,13 +1338,13 @@ mod tests {
         }
         let separator = Some(OutlineKind::Separator);
         vec![
-            item(10..15, "dog", None),        // 0
-            item(20..25, "", separator),      // 1
-            item(30..35, "", separator),      // 2
-            item(40..45, "dogcow", None),     // 3
-            item(50..55, "", separator),      // 4
-            item(60..65, "cow", None),        // 5
-            item(70..75, "", separator),      // 6
+            item(10..15, "dog", None),    // 0
+            item(20..25, "", separator),  // 1
+            item(30..35, "", separator),  // 2
+            item(40..45, "dogcow", None), // 3
+            item(50..55, "", separator),  // 4
+            item(60..65, "cow", None),    // 5
+            item(70..75, "", separator),  // 6
         ]
     }
 
@@ -1440,12 +1443,7 @@ mod tests {
         let segments = highlight_segments("Guten Tag", &[0..1, 6..7]);
         assert_eq!(
             segments,
-            [
-                (0..1, true),
-                (1..6, false),
-                (6..7, true),
-                (7..9, false),
-            ]
+            [(0..1, true), (1..6, false), (6..7, true), (7..9, false),]
         );
     }
 
@@ -1486,7 +1484,10 @@ mod tests {
         };
         assert_eq!(row(OutlineKind::Container).icon(), Some(IconName::Box));
         assert_eq!(row(OutlineKind::Value).icon(), Some(IconName::SquareDot));
-        assert_eq!(row(OutlineKind::Function).icon(), Some(IconName::SquareFunction));
+        assert_eq!(
+            row(OutlineKind::Function).icon(),
+            Some(IconName::SquareFunction)
+        );
         assert_eq!(row(OutlineKind::Title).icon(), Some(IconName::Tag));
         assert_eq!(row(OutlineKind::Mark).icon(), Some(IconName::Flag));
         assert_eq!(row(OutlineKind::Separator).icon(), Some(IconName::Minus));
@@ -1545,7 +1546,10 @@ mod tests {
             assert_eq!(OutlineKind::from_name(kind.name()), Some(kind));
             assert!(!kind.label().is_empty());
         }
-        assert_eq!(OutlineKind::from_name("heading.4"), Some(OutlineKind::Heading));
+        assert_eq!(
+            OutlineKind::from_name("heading.4"),
+            Some(OutlineKind::Heading)
+        );
         assert_eq!(OutlineKind::from_name("nonsense"), None);
         assert_eq!(OutlineKind::from_name(""), None);
     }

@@ -62,7 +62,10 @@ impl KeyChoice {
     }
 
     fn index(self) -> usize {
-        Self::ALL.iter().position(|choice| *choice == self).unwrap_or(0)
+        Self::ALL
+            .iter()
+            .position(|choice| *choice == self)
+            .unwrap_or(0)
     }
 
     fn from_index(index: usize) -> Self {
@@ -214,11 +217,19 @@ impl SortSheet {
                 h_flex()
                     .gap_2()
                     .child(div().text_sm().child("Position:"))
-                    .child(div().w(rems(7.)).child(NumberInput::new(&self.position).small())),
+                    .child(
+                        div()
+                            .w(rems(7.))
+                            .child(NumberInput::new(&self.position).small()),
+                    ),
             )
     }
 
-    fn render_pattern(&self, error: Option<&'static str>, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_pattern(
+        &self,
+        error: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         v_flex()
             .gap_2()
             .child(
@@ -228,30 +239,34 @@ impl SortSheet {
                     .child(div().flex_1().child(Input::new(&self.pattern).small())),
             )
             .child(
-                h_flex()
-                    .gap_4()
-                    .child(Checkbox::new("sort-pattern-case")
+                h_flex().gap_4().child(
+                    Checkbox::new("sort-pattern-case")
                         .checked(self.pattern_ignores_case)
                         .label("Ignore case")
                         .on_click(cx.listener(|this, checked, _, cx| {
                             this.pattern_ignores_case = *checked;
                             cx.notify();
-                        }))),
+                        })),
+                ),
             )
             .child(
                 h_flex()
                     .gap_2()
-                    .child(Checkbox::new("sort-capture-group")
-                        .checked(self.uses_capture_group)
-                        .label("Use captured group:")
-                        .on_click(cx.listener(|this, checked, _, cx| {
-                            this.uses_capture_group = *checked;
-                            cx.notify();
-                        })))
                     .child(
-                        div()
-                            .w(rems(7.))
-                            .child(NumberInput::new(&self.group).small().disabled(!self.uses_capture_group)),
+                        Checkbox::new("sort-capture-group")
+                            .checked(self.uses_capture_group)
+                            .label("Use captured group:")
+                            .on_click(cx.listener(|this, checked, _, cx| {
+                                this.uses_capture_group = *checked;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div().w(rems(7.)).child(
+                            NumberInput::new(&self.group)
+                                .small()
+                                .disabled(!self.uses_capture_group),
+                        ),
                     ),
             )
             .when_some(error, |this, message| {
@@ -297,7 +312,9 @@ impl SortSheet {
                     .checked(false)
                     .disabled(true)
                     .label("Respect language rules")
-                    .tooltip("Locale-aware collation needs an ICU dependency SubText does not carry"),
+                    .tooltip(
+                        "Locale-aware collation needs an ICU dependency SubText does not carry",
+                    ),
             )
     }
 

@@ -75,7 +75,10 @@ fn bound_actions() -> BTreeMap<String, String> {
         if !left.starts_with("actions::") {
             continue;
         }
-        let Some(name) = right.trim().strip_prefix('"').and_then(|rest| rest.split('"').next())
+        let Some(name) = right
+            .trim()
+            .strip_prefix('"')
+            .and_then(|rest| rest.split('"').next())
         else {
             continue;
         };
@@ -115,7 +118,11 @@ fn dispatched_names() -> BTreeSet<String> {
         let Some(close) = after.find('"') else { break };
         let literal = &after[..close];
         // Names are identifiers; message text in this region holds spaces.
-        if !literal.is_empty() && literal.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if !literal.is_empty()
+            && literal
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             names.insert(literal.to_string());
         }
         rest = &after[close + 1..];
@@ -155,9 +162,7 @@ fn every_menu_action_is_bound_to_a_name() {
     let bound = bound_actions();
     let missing: Vec<String> = menu_actions()
         .into_iter()
-        .filter(|action| {
-            !bound.contains_key(action) && !RUNTIME_ACTIONS.contains(&action.as_str())
-        })
+        .filter(|action| !bound.contains_key(action) && !RUNTIME_ACTIONS.contains(&action.as_str()))
         .collect();
     assert!(
         missing.is_empty(),
@@ -188,10 +193,7 @@ fn the_generated_table_gates_exactly_the_commands_that_say_so() {
     // greyed by the *generator* rather than by the item. That makes the
     // generated line the contract: one gate, on the one command that has it,
     // and it tests the field the workspace actually maintains.
-    let gated: Vec<&str> = MENU
-        .lines()
-        .filter(|line| line.contains(".disabled(state."))
-        .collect();
+    let gated = gated_items();
     assert_eq!(
         gated.len(),
         1,
@@ -202,11 +204,33 @@ fn the_generated_table_gates_exactly_the_commands_that_say_so() {
     assert!(
         gated[0].contains("StraightenQuotesInSelection"),
         "the gate is on the wrong command: {}",
-        gated[0].trim()
+        gated[0]
     );
     assert!(
         gated[0].contains("state.selection_empty"),
         "the gate tests a field the workspace does not maintain: {}",
-        gated[0].trim()
+        gated[0]
     );
+}
+
+/// Every generated item that carries a state-dependent `.disabled(…)`.
+///
+/// The item is spelled across as many lines as rustfmt decides — the generated
+/// files are formatted by the generator, so a test that read one line would
+/// pass or fail on formatting rather than on the gate. Each result is the
+/// `MenuItem::action(…)` call plus the suffix attached to it, joined.
+fn gated_items() -> Vec<String> {
+    let lines: Vec<&str> = MENU.lines().collect();
+    let mut found = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains(".disabled(state.") {
+            continue;
+        }
+        let start = (0..=index)
+            .rev()
+            .find(|at| lines[*at].contains("MenuItem::action("))
+            .unwrap_or(index);
+        found.push(lines[start..=index].join(" "));
+    }
+    found
 }

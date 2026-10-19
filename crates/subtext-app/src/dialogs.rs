@@ -35,11 +35,13 @@ impl Render for AboutView {
 
         let resources = Resources::discover()
             .map(|resources| {
-                format!("Resources: {:?} — {}", resources.origin, resources.root.display())
+                format!(
+                    "Resources: {:?} — {}",
+                    resources.origin,
+                    resources.root.display()
+                )
             })
-            .unwrap_or_else(|| {
-                "Resources: not found; using the built-in fallbacks".to_string()
-            });
+            .unwrap_or_else(|| "Resources: not found; using the built-in fallbacks".to_string());
 
         v_flex()
             .size_full()
@@ -54,7 +56,12 @@ impl Render for AboutView {
                     .large()
                     .text_color(cx.theme().primary),
             )
-            .child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child("SubText"))
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("SubText"),
+            )
             .child(div().text_sm().child(format!("Version {VERSION}")))
             .child(
                 div()
@@ -74,14 +81,11 @@ impl Render for AboutView {
                     .child(resources),
             )
             .child(
-                h_flex()
-                    .gap_2()
-                    .pt_2()
-                    .child(
-                        Button::new("close-about")
-                            .label("Close")
-                            .on_click(|_, window, _| window.remove_window()),
-                    ),
+                h_flex().gap_2().pt_2().child(
+                    Button::new("close-about")
+                        .label("Close")
+                        .on_click(|_, window, _| window.remove_window()),
+                ),
             )
     }
 }

@@ -220,7 +220,9 @@ impl FileDropItem {
             return true;
         }
         path_extension.is_some_and(|extension| {
-            self.extensions.iter().any(|candidate| candidate.eq_ignore_ascii_case(extension))
+            self.extensions
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
         })
     }
 
@@ -374,7 +376,8 @@ impl DroppedFile {
 
 /// A path component as a string, or empty when there is none.
 fn component(part: Option<&std::ffi::OsStr>) -> String {
-    part.map(|part| part.to_string_lossy().into_owned()).unwrap_or_default()
+    part.map(|part| part.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The path part of a URL: everything from the first `/` after the authority.
@@ -399,9 +402,7 @@ fn url_path(url: &str) -> &str {
 /// has no extension.
 fn split_extension(filename: &str) -> (String, String) {
     match filename.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => {
-            (stem.to_string(), extension.to_string())
-        }
+        Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), extension.to_string()),
         _ => (filename.to_string(), String::new()),
     }
 }
@@ -596,11 +597,7 @@ mod tests {
 
     #[test]
     fn an_image_size_is_inserted_when_it_was_read() {
-        let item = item(
-            "width=<<<IMAGEWIDTH>>> height=<<<IMAGEHEIGHT>>>",
-            &[],
-            None,
-        );
+        let item = item("width=<<<IMAGEWIDTH>>> height=<<<IMAGEHEIGHT>>>", &[], None);
         let file = DroppedFile::new(Path::new("/a/b.png"), None).with_image_size(Some((640, 480)));
         assert_eq!(item.drop_text(&file), "width=640 height=480");
     }
@@ -648,7 +645,10 @@ mod tests {
             Some("Markdown"),
         );
         let json = serde_json::to_string(&original).unwrap();
-        assert_eq!(serde_json::from_str::<FileDropItem>(&json).unwrap(), original);
+        assert_eq!(
+            serde_json::from_str::<FileDropItem>(&json).unwrap(),
+            original
+        );
     }
 
     /// A settings file written before this feature existed has no `fileDrop`
@@ -669,9 +669,15 @@ mod tests {
     #[test]
     fn the_variables_are_the_ones_upstream_names() {
         assert_eq!(Variable::ALL.len(), 11);
-        assert_eq!(Variable::PATH.len() + Variable::TEXT.len() + Variable::IMAGE.len(), 11);
+        assert_eq!(
+            Variable::PATH.len() + Variable::TEXT.len() + Variable::IMAGE.len(),
+            11
+        );
         assert_eq!(Variable::AbsolutePath.token(), "<<<ABSOLUTE-PATH>>>");
-        assert_eq!(Variable::FilenameWithoutExtension.token(), "<<<FILENAME-NOSUFFIX>>>");
+        assert_eq!(
+            Variable::FilenameWithoutExtension.token(),
+            "<<<FILENAME-NOSUFFIX>>>"
+        );
         assert_eq!(Variable::ImageHeight.token(), "<<<IMAGEHEIGHT>>>");
 
         for variable in Variable::ALL {
@@ -681,7 +687,10 @@ mod tests {
                     || Variable::IMAGE.contains(&variable),
                 "{variable:?} is in no group"
             );
-            assert!(!variable.description().is_empty(), "{variable:?} has no description");
+            assert!(
+                !variable.description().is_empty(),
+                "{variable:?} has no description"
+            );
         }
     }
 

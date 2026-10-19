@@ -10,9 +10,17 @@ use crate::line_ending::{self, LineEnding};
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentError {
     #[error("cannot read {path}: {source}")]
-    Read { path: PathBuf, #[source] source: std::io::Error },
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("cannot write {path}: {source}")]
-    Write { path: PathBuf, #[source] source: std::io::Error },
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("{0} is not valid UTF-8 and no other encoding matched")]
     Undecodable(PathBuf),
     /// The text holds characters the document's encoding cannot spell.
@@ -98,8 +106,10 @@ impl Document {
         options: &DetectionOptions<'_>,
     ) -> Result<Self, DocumentError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path)
-            .map_err(|source| DocumentError::Read { path: path.to_path_buf(), source })?;
+        let bytes = std::fs::read(path).map_err(|source| DocumentError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
         let metadata = std::fs::metadata(path).ok();
 
         let decoded = DecodedFile::decode(&bytes, fallback, options);
@@ -144,10 +154,10 @@ impl Document {
     }
 
     pub fn display_name(&self) -> String {
-        self.path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map_or_else(|| "Untitled".to_string(), |n| n.to_string_lossy().into_owned())
+        self.path.as_ref().and_then(|p| p.file_name()).map_or_else(
+            || "Untitled".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
     }
 
     pub fn text(&self) -> &str {
@@ -237,7 +247,11 @@ impl Document {
     /// the text — CotEditor's "Convert Encoding".
     pub fn convert_encoding(&mut self, encoding: TextEncoding, bom: Bom) {
         self.encoding = encoding;
-        self.bom = if encoding.supports_bom() { bom } else { Bom::None };
+        self.bom = if encoding.supports_bom() {
+            bom
+        } else {
+            Bom::None
+        };
         self.dirty = true;
     }
 
@@ -254,15 +268,25 @@ impl Document {
             self.dirty = true;
             return Ok(());
         };
-        let bytes = std::fs::read(&path)
-            .map_err(|source| DocumentError::Read { path: path.clone(), source })?;
+        let bytes = std::fs::read(&path).map_err(|source| DocumentError::Read {
+            path: path.clone(),
+            source,
+        })?;
         let bom = crate::encoding::detect_bom(&bytes);
         // An unspecified-order encoding reads the mark itself.
-        let body = if encoding.is_unspecified_order() { &bytes[..] } else { &bytes[bom.len()..] };
+        let body = if encoding.is_unspecified_order() {
+            &bytes[..]
+        } else {
+            &bytes[bom.len()..]
+        };
         let (text, _) = encoding.decode(body);
         self.text = text;
         self.encoding = encoding;
-        self.bom = if encoding.supports_bom() { bom } else { Bom::None };
+        self.bom = if encoding.supports_bom() {
+            bom
+        } else {
+            Bom::None
+        };
         self.line_ending = line_ending::detect(&self.text);
         Ok(())
     }
@@ -296,10 +320,14 @@ impl Document {
         // Write to a sibling temp file and rename, so a crash mid-write cannot
         // truncate the user's document. This is what an editor must do.
         let temp = target.with_extension("subtext-tmp");
-        std::fs::write(&temp, &bytes)
-            .map_err(|source| DocumentError::Write { path: temp.clone(), source })?;
-        std::fs::rename(&temp, &target)
-            .map_err(|source| DocumentError::Write { path: target.clone(), source })?;
+        std::fs::write(&temp, &bytes).map_err(|source| DocumentError::Write {
+            path: temp.clone(),
+            source,
+        })?;
+        std::fs::rename(&temp, &target).map_err(|source| DocumentError::Write {
+            path: target.clone(),
+            source,
+        })?;
 
         let metadata = std::fs::metadata(&target).ok();
         self.path = Some(target);
@@ -324,7 +352,11 @@ impl Document {
             _ => false,
         };
         let changed_len = self.saved_len.is_some_and(|before| before != len);
-        if changed_time || changed_len { FileStatus::Modified } else { FileStatus::Unchanged }
+        if changed_time || changed_len {
+            FileStatus::Modified
+        } else {
+            FileStatus::Unchanged
+        }
     }
 
     /// Reload the file from disk, discarding the buffer.
@@ -376,7 +408,11 @@ mod tests {
         assert_eq!(plain.encoding(), TextEncoding::UTF8);
 
         let with_bom = Document::untitled(FileEncoding::utf8_with_bom(), LineEnding::LF);
-        assert_eq!(with_bom.bom(), Bom::Utf8, "the mark the user asked for was dropped");
+        assert_eq!(
+            with_bom.bom(),
+            Bom::Utf8,
+            "the mark the user asked for was dropped"
+        );
 
         // Only the *unspecified-order* forms carry a mark of their own, which is
         // what upstream's `FileEncoding.hasBOM` says: true for `.utf16`/`.utf32`,
@@ -384,7 +420,11 @@ mod tests {
         let utf16 = Document::untitled(FileEncoding::of(TextEncoding::UTF16), LineEnding::LF);
         assert_eq!(utf16.bom(), Bom::Utf16Le);
         let utf16_le = Document::untitled(FileEncoding::of(TextEncoding::UTF16_LE), LineEnding::LF);
-        assert_eq!(utf16_le.bom(), Bom::None, "an endian-specific form is written bare");
+        assert_eq!(
+            utf16_le.bom(),
+            Bom::None,
+            "an endian-specific form is written bare"
+        );
     }
 
     /// The two forms that leave the byte order to the mark, and the four that do
@@ -413,7 +453,9 @@ mod tests {
             let path = temp_path(&format!("wide-{index}.txt"));
             let mut document = Document::untitled(FileEncoding::of(encoding), LineEnding::LF);
             document.set_text("a".to_string(), true);
-            document.save(Some(path.clone())).expect("the save must succeed");
+            document
+                .save(Some(path.clone()))
+                .expect("the save must succeed");
 
             let bytes = std::fs::read(&path).expect("the file was written");
             assert_eq!(bytes, expected, "{encoding} wrote the wrong bytes");
@@ -461,14 +503,22 @@ mod tests {
         // would look saved and would not be the document.
         let encoding = TextEncoding::from_identifier("shift_jis").expect("Shift JIS");
         let mut document = Document::untitled(
-            FileEncoding { encoding, with_utf8_bom: false },
+            FileEncoding {
+                encoding,
+                with_utf8_bom: false,
+            },
             LineEnding::LF,
         );
         document.set_text("hello 👾 world".to_string(), true);
 
         let path = std::env::temp_dir().join("subtext-lossy-save.txt");
-        let error = document.save(Some(path.clone())).expect_err("the save must fail");
-        assert!(matches!(error, DocumentError::LossyEncoding("Japanese (Shift JIS)")));
+        let error = document
+            .save(Some(path.clone()))
+            .expect_err("the save must fail");
+        assert!(matches!(
+            error,
+            DocumentError::LossyEncoding("Japanese (Shift JIS)")
+        ));
         // …and nothing was written, not even a half file.
         assert!(!path.exists());
 
@@ -485,7 +535,10 @@ mod tests {
         // of the session saves through without asking again.
         let encoding = TextEncoding::from_identifier("shift_jis").expect("Shift JIS");
         let mut document = Document::untitled(
-            FileEncoding { encoding, with_utf8_bom: false },
+            FileEncoding {
+                encoding,
+                with_utf8_bom: false,
+            },
             LineEnding::LF,
         );
         document.set_text("hello 👾 world".to_string(), true);
@@ -506,16 +559,21 @@ mod tests {
     #[test]
     fn save_then_open_round_trips_everything() {
         let path = temp_path("round-trip.txt");
-        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::CRLF);
+        let mut document =
+            Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::CRLF);
         document.set_text("first\r\nsecond\r\n", true);
         document.set_line_ending(LineEnding::CRLF);
         document.save(Some(path.clone())).unwrap();
 
-        let reopened = Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
+        let reopened =
+            Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
         assert_eq!(reopened.text(), "first\r\nsecond\r\n");
         assert_eq!(reopened.line_ending(), LineEnding::CRLF);
         assert!(!reopened.is_dirty());
-        assert_eq!(reopened.display_name(), path.file_name().unwrap().to_string_lossy());
+        assert_eq!(
+            reopened.display_name(),
+            path.file_name().unwrap().to_string_lossy()
+        );
 
         std::fs::remove_file(&path).ok();
     }
@@ -546,16 +604,21 @@ mod tests {
     fn an_untitled_document_refuses_to_save_without_a_path() {
         let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         document.set_text("draft", true);
-        assert!(matches!(document.save(None), Err(DocumentError::Write { .. })));
+        assert!(matches!(
+            document.save(None),
+            Err(DocumentError::Write { .. })
+        ));
         // Nothing reached a disk, so the buffer is still unsaved.
         assert!(document.is_dirty());
         assert!(document.is_untitled());
     }
 
     #[test]
-    fn external_modification_is_detected() {        let path = temp_path("external.txt");
+    fn external_modification_is_detected() {
+        let path = temp_path("external.txt");
         std::fs::write(&path, "original").unwrap();
-        let document = Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
+        let document =
+            Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
         assert_eq!(document.file_status(), FileStatus::Unchanged);
 
         std::fs::write(&path, "changed and longer").unwrap();
@@ -569,7 +632,10 @@ mod tests {
     fn convert_encoding_does_not_change_the_text() {
         let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
         document.set_text("日本語", false);
-        document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::None);
+        document.convert_encoding(
+            TextEncoding::from_identifier("shift_jis").unwrap(),
+            Bom::None,
+        );
         assert_eq!(document.text(), "日本語");
         assert!(document.is_dirty());
     }
@@ -577,7 +643,10 @@ mod tests {
     #[test]
     fn bom_is_dropped_for_encodings_that_cannot_carry_one() {
         let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
-        document.convert_encoding(TextEncoding::from_identifier("shift_jis").unwrap(), Bom::Utf8);
+        document.convert_encoding(
+            TextEncoding::from_identifier("shift_jis").unwrap(),
+            Bom::Utf8,
+        );
         assert_eq!(document.bom(), Bom::None);
     }
 }

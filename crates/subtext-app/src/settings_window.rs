@@ -354,8 +354,18 @@ impl SettingsWindow {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(Button::new("settings-export").small().label("Export…").disabled(true))
-                    .child(Button::new("settings-import").small().label("Import…").disabled(true)),
+                    .child(
+                        Button::new("settings-export")
+                            .small()
+                            .label("Export…")
+                            .disabled(true),
+                    )
+                    .child(
+                        Button::new("settings-import")
+                            .small()
+                            .label("Import…")
+                            .disabled(true),
+                    ),
             )
             .child(note(
                 "Not implemented yet. The settings file can be edited directly, at the path below.",
@@ -365,7 +375,12 @@ impl SettingsWindow {
 
         let warnings = v_flex()
             .gap_1()
-            .child(Button::new("manage-warnings").small().label("Manage Warnings…").disabled(true))
+            .child(
+                Button::new("manage-warnings")
+                    .small()
+                    .label("Manage Warnings…")
+                    .disabled(true),
+            )
             .child(note(
                 "Not implemented yet. CotEditor lets you switch off each dialog it can show; \
                  SubText shows no such dialogs.",
@@ -402,7 +417,10 @@ impl SettingsWindow {
             .gap_6()
             .child(section("On startup", startup))
             .child(section("Document save", saving))
-            .child(section("When a file is modified by another application", conflicts))
+            .child(section(
+                "When a file is modified by another application",
+                conflicts,
+            ))
             .child(section("Settings import & export", transfers))
             .child(section("Dialog warnings", warnings))
             .child(section("Software update", updates))
@@ -459,7 +477,9 @@ impl SettingsWindow {
                 .unwrap_or(0),
             cx.listener(|this, index: &usize, _, cx| {
                 let mode = DocumentAppearance::ALL[*index];
-                this.edit(cx, move |settings| settings.appearance.document_appearance = mode);
+                this.edit(cx, move |settings| {
+                    settings.appearance.document_appearance = mode
+                });
             }),
         );
 
@@ -505,7 +525,10 @@ impl SettingsWindow {
             .theme
             .clone()
             .and_then(|name| themes.iter().position(|theme| *theme == name));
-        let theme_items = themes.into_iter().map(SharedString::from).collect::<Vec<_>>();
+        let theme_items = themes
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>();
         let theme_list = pick_list(
             "theme-list",
             theme_items,
@@ -514,7 +537,9 @@ impl SettingsWindow {
             cx.listener(|this, index: &usize, _, cx| {
                 let name = this
                     .workspace
-                    .read_with(cx, |workspace, _| workspace.theme_names().get(*index).cloned())
+                    .read_with(cx, |workspace, _| {
+                        workspace.theme_names().get(*index).cloned()
+                    })
                     .ok()
                     .flatten();
                 if let Some(name) = name {
@@ -529,7 +554,14 @@ impl SettingsWindow {
             .gap_5()
             .child(field("Standard font:", standard))
             .child(field("Monospaced font:", monospaced))
-            .child(field("Line height:", h_flex().gap_2().items_center().child(line_height).child(note("times", cx))))
+            .child(field(
+                "Line height:",
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(line_height)
+                    .child(note("times", cx)),
+            ))
             .child(field("Appearance:", appearance_mode))
             .child(field("Status bar:", status_bar))
             .child(field("Editor opacity:", opacity))
@@ -555,9 +587,18 @@ impl SettingsWindow {
                 h_flex()
                     .gap_3()
                     .items_center()
-                    .child(div().text_sm().text_color(cx.theme().muted_foreground).child(shown))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(shown),
+                    )
                     .child(stepper(
-                        if key == "standard" { "standard-font-size" } else { "monospaced-font-size" },
+                        if key == "standard" {
+                            "standard-font-size"
+                        } else {
+                            "monospaced-font-size"
+                        },
                         format!("{size:.0} pt"),
                         cx,
                         |this, cx| {
@@ -573,36 +614,40 @@ impl SettingsWindow {
                     )),
             )
             .child(
-                Checkbox::new(ElementId::Name(SharedString::from(format!("{key}-antialias"))))
-                    .checked(antialias)
-                    .label("Antialias text")
-                    .on_click(cx.listener(move |this, checked, _, cx| {
-                        let checked = *checked;
-                        this.edit(cx, move |settings| {
-                            if key == "standard" {
-                                settings.appearance.standard_antialias = checked;
-                            } else {
-                                settings.appearance.monospaced_antialias = checked;
-                            }
-                            settings.editor.antialias = checked;
-                        });
-                    })),
+                Checkbox::new(ElementId::Name(SharedString::from(format!(
+                    "{key}-antialias"
+                ))))
+                .checked(antialias)
+                .label("Antialias text")
+                .on_click(cx.listener(move |this, checked, _, cx| {
+                    let checked = *checked;
+                    this.edit(cx, move |settings| {
+                        if key == "standard" {
+                            settings.appearance.standard_antialias = checked;
+                        } else {
+                            settings.appearance.monospaced_antialias = checked;
+                        }
+                        settings.editor.antialias = checked;
+                    });
+                })),
             )
             .child(
-                Checkbox::new(ElementId::Name(SharedString::from(format!("{key}-ligature"))))
-                    .checked(ligature)
-                    .label("Use ligatures")
-                    .on_click(cx.listener(move |this, checked, _, cx| {
-                        let checked = *checked;
-                        this.edit(cx, move |settings| {
-                            if key == "standard" {
-                                settings.appearance.standard_ligature = checked;
-                            } else {
-                                settings.appearance.monospaced_ligature = checked;
-                            }
-                            settings.editor.ligatures = checked;
-                        });
-                    })),
+                Checkbox::new(ElementId::Name(SharedString::from(format!(
+                    "{key}-ligature"
+                ))))
+                .checked(ligature)
+                .label("Use ligatures")
+                .on_click(cx.listener(move |this, checked, _, cx| {
+                    let checked = *checked;
+                    this.edit(cx, move |settings| {
+                        if key == "standard" {
+                            settings.appearance.standard_ligature = checked;
+                        } else {
+                            settings.appearance.monospaced_ligature = checked;
+                        }
+                        settings.editor.ligatures = checked;
+                    });
+                })),
             )
             .into_any_element()
     }
@@ -627,26 +672,36 @@ impl SettingsWindow {
             }),
         );
 
-        let size = v_flex()
-            .gap_1()
-            .child(
-                h_flex()
-                    .gap_6()
-                    .items_start()
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .child(div().text_sm().child(format!("{} px", window_size_label(window.window_width))))
-                            .child(note("Width", cx)),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .child(div().text_sm().child(format!("{} px", window_size_label(window.window_height))))
-                            .child(note("Height", cx)),
-                    ),
-            )
-            .child(note("“Auto” means the window sizes itself to its content.", cx));
+        let size =
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_6()
+                        .items_start()
+                        .child(
+                            v_flex()
+                                .gap_0p5()
+                                .child(div().text_sm().child(format!(
+                                    "{} px",
+                                    window_size_label(window.window_width)
+                                )))
+                                .child(note("Width", cx)),
+                        )
+                        .child(
+                            v_flex()
+                                .gap_0p5()
+                                .child(div().text_sm().child(format!(
+                                    "{} px",
+                                    window_size_label(window.window_height)
+                                )))
+                                .child(note("Height", cx)),
+                        ),
+                )
+                .child(note(
+                    "“Auto” means the window sizes itself to its content.",
+                    cx,
+                ));
 
         let show = v_flex()
             .gap_1()
@@ -668,11 +723,46 @@ impl SettingsWindow {
                 v_flex()
                     .gap_1()
                     .pl_4()
-                    .child(child_switch("show-invisible-new-line", "Line ending", editor.show_invisible_new_line, editor.show_invisibles, cx, |settings, checked| settings.editor.show_invisible_new_line = checked))
-                    .child(child_switch("show-invisible-tab", "Tab", editor.show_invisible_tab, editor.show_invisibles, cx, |settings, checked| settings.editor.show_invisible_tab = checked))
-                    .child(child_switch("show-invisible-space", "Space", editor.show_invisible_space, editor.show_invisibles, cx, |settings, checked| settings.editor.show_invisible_space = checked))
-                    .child(child_switch("show-invisible-whitespaces", "Other whitespace", editor.show_invisible_whitespaces, editor.show_invisibles, cx, |settings, checked| settings.editor.show_invisible_whitespaces = checked))
-                    .child(child_switch("show-invisible-control", "Other control characters", editor.show_invisible_control, editor.show_invisibles, cx, |settings, checked| settings.editor.show_invisible_control = checked)),
+                    .child(child_switch(
+                        "show-invisible-new-line",
+                        "Line ending",
+                        editor.show_invisible_new_line,
+                        editor.show_invisibles,
+                        cx,
+                        |settings, checked| settings.editor.show_invisible_new_line = checked,
+                    ))
+                    .child(child_switch(
+                        "show-invisible-tab",
+                        "Tab",
+                        editor.show_invisible_tab,
+                        editor.show_invisibles,
+                        cx,
+                        |settings, checked| settings.editor.show_invisible_tab = checked,
+                    ))
+                    .child(child_switch(
+                        "show-invisible-space",
+                        "Space",
+                        editor.show_invisible_space,
+                        editor.show_invisibles,
+                        cx,
+                        |settings, checked| settings.editor.show_invisible_space = checked,
+                    ))
+                    .child(child_switch(
+                        "show-invisible-whitespaces",
+                        "Other whitespace",
+                        editor.show_invisible_whitespaces,
+                        editor.show_invisibles,
+                        cx,
+                        |settings, checked| settings.editor.show_invisible_whitespaces = checked,
+                    ))
+                    .child(child_switch(
+                        "show-invisible-control",
+                        "Other control characters",
+                        editor.show_invisible_control,
+                        editor.show_invisibles,
+                        cx,
+                        |settings, checked| settings.editor.show_invisible_control = checked,
+                    )),
             )
             .child(edit_switch(
                 "show-indent-guides",
@@ -761,7 +851,9 @@ impl SettingsWindow {
                 } else {
                     WritingDirection::LeftToRight
                 };
-                this.edit(cx, move |settings| settings.window.writing_direction = direction);
+                this.edit(cx, move |settings| {
+                    settings.window.writing_direction = direction
+                });
             }),
         );
 
@@ -771,16 +863,52 @@ impl SettingsWindow {
             .child(
                 v_flex()
                     .gap_1()
-                    .child(edit_switch("status-lines", "Line count", window.show_status_bar_lines, cx, |settings, checked| settings.window.show_status_bar_lines = checked))
-                    .child(edit_switch("status-chars", "Character count", window.show_status_bar_chars, cx, |settings, checked| settings.window.show_status_bar_chars = checked))
-                    .child(edit_switch("status-words", "Word count", window.show_status_bar_words, cx, |settings, checked| settings.window.show_status_bar_words = checked)),
+                    .child(edit_switch(
+                        "status-lines",
+                        "Line count",
+                        window.show_status_bar_lines,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_lines = checked,
+                    ))
+                    .child(edit_switch(
+                        "status-chars",
+                        "Character count",
+                        window.show_status_bar_chars,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_chars = checked,
+                    ))
+                    .child(edit_switch(
+                        "status-words",
+                        "Word count",
+                        window.show_status_bar_words,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_words = checked,
+                    )),
             )
             .child(
                 v_flex()
                     .gap_1()
-                    .child(edit_switch("status-location", "Location", window.show_status_bar_location, cx, |settings, checked| settings.window.show_status_bar_location = checked))
-                    .child(edit_switch("status-line", "Current line", window.show_status_bar_line, cx, |settings, checked| settings.window.show_status_bar_line = checked))
-                    .child(edit_switch("status-column", "Current column", window.show_status_bar_column, cx, |settings, checked| settings.window.show_status_bar_column = checked)),
+                    .child(edit_switch(
+                        "status-location",
+                        "Location",
+                        window.show_status_bar_location,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_location = checked,
+                    ))
+                    .child(edit_switch(
+                        "status-line",
+                        "Current line",
+                        window.show_status_bar_line,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_line = checked,
+                    ))
+                    .child(edit_switch(
+                        "status-column",
+                        "Current column",
+                        window.show_status_bar_column,
+                        cx,
+                        |settings, checked| settings.window.show_status_bar_column = checked,
+                    )),
             );
 
         v_flex()
@@ -791,7 +919,13 @@ impl SettingsWindow {
             .child(field("Show:", show))
             .child(field(
                 "Current line:",
-                edit_switch("highlight-current-line", "Change background color", editor.highlight_current_line, cx, |settings, checked| settings.editor.highlight_current_line = checked),
+                edit_switch(
+                    "highlight-current-line",
+                    "Change background color",
+                    editor.highlight_current_line,
+                    cx,
+                    |settings, checked| settings.editor.highlight_current_line = checked,
+                ),
             ))
             .child(divider(cx))
             .child(field("Line wrapping:", wrapping))
@@ -850,34 +984,86 @@ impl SettingsWindow {
                     ))
                     .child(note("spaces", cx)),
             )
-            .child(edit_switch("detects-indent-style", "Detect indent style on document opening", edit.detects_indent_style, cx, |settings, checked| settings.edit.detects_indent_style = checked))
-            .child(edit_switch("auto-indent", "Automatically indent while typing", edit.auto_indent, cx, |settings, checked| settings.edit.auto_indent = checked))
-            .child(edit_switch("indent-with-tab-key", "Indent selection with Tab key", edit.indent_with_tab_key, cx, |settings, checked| settings.edit.indent_with_tab_key = checked));
+            .child(edit_switch(
+                "detects-indent-style",
+                "Detect indent style on document opening",
+                edit.detects_indent_style,
+                cx,
+                |settings, checked| settings.edit.detects_indent_style = checked,
+            ))
+            .child(edit_switch(
+                "auto-indent",
+                "Automatically indent while typing",
+                edit.auto_indent,
+                cx,
+                |settings, checked| settings.edit.auto_indent = checked,
+            ))
+            .child(edit_switch(
+                "indent-with-tab-key",
+                "Indent selection with Tab key",
+                edit.indent_with_tab_key,
+                cx,
+                |settings, checked| settings.edit.indent_with_tab_key = checked,
+            ));
 
         let whitespace = v_flex()
             .gap_1()
-            .child(edit_switch("trim-trailing-whitespace", "Automatically trim trailing whitespace", edit.auto_trims_trailing_whitespace, cx, |settings, checked| settings.edit.auto_trims_trailing_whitespace = checked))
-            .child(
-                v_flex().pl_4().child(child_switch(
-                    "trim-whitespace-only-lines",
-                    "Including whitespace-only lines",
-                    edit.trims_whitespace_only_lines,
-                    edit.auto_trims_trailing_whitespace,
-                    cx,
-                    |settings, checked| settings.edit.trims_whitespace_only_lines = checked,
-                )),
-            );
+            .child(edit_switch(
+                "trim-trailing-whitespace",
+                "Automatically trim trailing whitespace",
+                edit.auto_trims_trailing_whitespace,
+                cx,
+                |settings, checked| settings.edit.auto_trims_trailing_whitespace = checked,
+            ))
+            .child(v_flex().pl_4().child(child_switch(
+                "trim-whitespace-only-lines",
+                "Including whitespace-only lines",
+                edit.trims_whitespace_only_lines,
+                edit.auto_trims_trailing_whitespace,
+                cx,
+                |settings, checked| settings.edit.trims_whitespace_only_lines = checked,
+            )));
 
         let comment = v_flex()
             .gap_1()
-            .child(edit_switch("comment-delimiters-after-indent", "Insert comment delimiters after indent", edit.inserts_comment_delimiters_after_indent, cx, |settings, checked| settings.edit.inserts_comment_delimiters_after_indent = checked))
-            .child(edit_switch("comment-spacer", "Add a space to comment delimiters", edit.appends_comment_spacer, cx, |settings, checked| settings.edit.appends_comment_spacer = checked));
+            .child(edit_switch(
+                "comment-delimiters-after-indent",
+                "Insert comment delimiters after indent",
+                edit.inserts_comment_delimiters_after_indent,
+                cx,
+                |settings, checked| settings.edit.inserts_comment_delimiters_after_indent = checked,
+            ))
+            .child(edit_switch(
+                "comment-spacer",
+                "Add a space to comment delimiters",
+                edit.appends_comment_spacer,
+                cx,
+                |settings, checked| settings.edit.appends_comment_spacer = checked,
+            ));
 
         let content_parse = v_flex()
             .gap_1()
-            .child(edit_switch("auto-link-detection", "Link URLs in document", edit.auto_link_detection, cx, |settings, checked| settings.edit.auto_link_detection = checked))
-            .child(edit_switch("highlight-braces", "Highlight matching braces", edit.highlight_braces, cx, |settings, checked| settings.edit.highlight_braces = checked))
-            .child(edit_switch("highlight-selection-instance", "Highlight instances of selected text", edit.highlight_selection_instance, cx, |settings, checked| settings.edit.highlight_selection_instance = checked))
+            .child(edit_switch(
+                "auto-link-detection",
+                "Link URLs in document",
+                edit.auto_link_detection,
+                cx,
+                |settings, checked| settings.edit.auto_link_detection = checked,
+            ))
+            .child(edit_switch(
+                "highlight-braces",
+                "Highlight matching braces",
+                edit.highlight_braces,
+                cx,
+                |settings, checked| settings.edit.highlight_braces = checked,
+            ))
+            .child(edit_switch(
+                "highlight-selection-instance",
+                "Highlight instances of selected text",
+                edit.highlight_selection_instance,
+                cx,
+                |settings, checked| settings.edit.highlight_selection_instance = checked,
+            ))
             .child(
                 h_flex()
                     .gap_2()
@@ -890,14 +1076,20 @@ impl SettingsWindow {
                         cx,
                         |this, cx| {
                             this.edit(cx, |settings| {
-                                let value = (settings.edit.selection_instance_highlight_delay - 0.25).max(0.0);
-                                settings.edit.selection_instance_highlight_delay = (value * 100.0).round() / 100.0;
+                                let value = (settings.edit.selection_instance_highlight_delay
+                                    - 0.25)
+                                    .max(0.0);
+                                settings.edit.selection_instance_highlight_delay =
+                                    (value * 100.0).round() / 100.0;
                             })
                         },
                         |this, cx| {
                             this.edit(cx, |settings| {
-                                let value = (settings.edit.selection_instance_highlight_delay + 0.25).min(10.0);
-                                settings.edit.selection_instance_highlight_delay = (value * 100.0).round() / 100.0;
+                                let value = (settings.edit.selection_instance_highlight_delay
+                                    + 0.25)
+                                    .min(10.0);
+                                settings.edit.selection_instance_highlight_delay =
+                                    (value * 100.0).round() / 100.0;
                             })
                         },
                     ))
@@ -933,7 +1125,11 @@ impl SettingsWindow {
                     &["Standard", "Monospaced"],
                     usize::from(mode.font_type == FontType::Monospaced),
                     cx.listener(|this, index: &usize, _, cx| {
-                        let font = if *index == 1 { FontType::Monospaced } else { FontType::Standard };
+                        let font = if *index == 1 {
+                            FontType::Monospaced
+                        } else {
+                            FontType::Standard
+                        };
                         this.edit(cx, move |settings| settings.mode.font_type = font);
                     }),
                 ),
@@ -942,20 +1138,83 @@ impl SettingsWindow {
                 "Substitution:",
                 v_flex()
                     .gap_1()
-                    .child(mode_switch("smart-insert-delete", "Smart copy/paste", mode.smart_insert_delete, false, cx, |settings, checked| settings.mode.smart_insert_delete = checked))
-                    .child(mode_switch("smart-quotes", "Smart quotes", mode.automatic_quote_substitution, true, cx, |settings, checked| settings.mode.automatic_quote_substitution = checked))
-                    .child(mode_switch("smart-dashes", "Smart dashes", mode.automatic_dash_substitution, true, cx, |settings, checked| settings.mode.automatic_dash_substitution = checked))
-                    .child(mode_switch("text-replacement", "Text replacement", mode.automatic_text_replacement, true, cx, |settings, checked| settings.mode.automatic_text_replacement = checked))
-                    .child(mode_switch("period-substitution", "Add period with double-space", mode.automatic_period_substitution, true, cx, |settings, checked| settings.mode.automatic_period_substitution = checked))
-                    .child(mode_switch("symbol-balancing", "Automatically insert closing brackets and quotes", mode.automatic_symbol_balancing, false, cx, |settings, checked| settings.mode.automatic_symbol_balancing = checked)),
+                    .child(mode_switch(
+                        "smart-insert-delete",
+                        "Smart copy/paste",
+                        mode.smart_insert_delete,
+                        false,
+                        cx,
+                        |settings, checked| settings.mode.smart_insert_delete = checked,
+                    ))
+                    .child(mode_switch(
+                        "smart-quotes",
+                        "Smart quotes",
+                        mode.automatic_quote_substitution,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.automatic_quote_substitution = checked,
+                    ))
+                    .child(mode_switch(
+                        "smart-dashes",
+                        "Smart dashes",
+                        mode.automatic_dash_substitution,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.automatic_dash_substitution = checked,
+                    ))
+                    .child(mode_switch(
+                        "text-replacement",
+                        "Text replacement",
+                        mode.automatic_text_replacement,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.automatic_text_replacement = checked,
+                    ))
+                    .child(mode_switch(
+                        "period-substitution",
+                        "Add period with double-space",
+                        mode.automatic_period_substitution,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.automatic_period_substitution = checked,
+                    ))
+                    .child(mode_switch(
+                        "symbol-balancing",
+                        "Automatically insert closing brackets and quotes",
+                        mode.automatic_symbol_balancing,
+                        false,
+                        cx,
+                        |settings, checked| settings.mode.automatic_symbol_balancing = checked,
+                    )),
             ))
             .child(field(
                 "Spelling:",
                 v_flex()
                     .gap_1()
-                    .child(mode_switch("spell-checking", "Check spelling while typing", mode.continuous_spell_checking, true, cx, |settings, checked| settings.mode.continuous_spell_checking = checked))
-                    .child(mode_switch("grammar-checking", "Check grammar with spelling", mode.grammar_checking, true, cx, |settings, checked| settings.mode.grammar_checking = checked))
-                    .child(mode_switch("spelling-correction", "Correct spelling automatically", mode.automatic_spelling_correction, true, cx, |settings, checked| settings.mode.automatic_spelling_correction = checked)),
+                    .child(mode_switch(
+                        "spell-checking",
+                        "Check spelling while typing",
+                        mode.continuous_spell_checking,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.continuous_spell_checking = checked,
+                    ))
+                    .child(mode_switch(
+                        "grammar-checking",
+                        "Check grammar with spelling",
+                        mode.grammar_checking,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.grammar_checking = checked,
+                    ))
+                    .child(mode_switch(
+                        "spelling-correction",
+                        "Correct spelling automatically",
+                        mode.automatic_spelling_correction,
+                        true,
+                        cx,
+                        |settings, checked| settings.mode.automatic_spelling_correction = checked,
+                    )),
             ))
             .child(field(
                 "Completion:",
@@ -966,11 +1225,43 @@ impl SettingsWindow {
                         v_flex()
                             .gap_1()
                             .pl_4()
-                            .child(mode_switch("completion-standard", "Standard words", mode.completion_standard_words, true, cx, |settings, checked| settings.mode.completion_standard_words = checked))
-                            .child(mode_switch("completion-document", "Words in document", mode.completion_document_words, false, cx, |settings, checked| settings.mode.completion_document_words = checked))
-                            .child(mode_switch("completion-syntax", "Words defined in syntax", mode.completion_syntax_words, false, cx, |settings, checked| settings.mode.completion_syntax_words = checked)),
+                            .child(mode_switch(
+                                "completion-standard",
+                                "Standard words",
+                                mode.completion_standard_words,
+                                true,
+                                cx,
+                                |settings, checked| {
+                                    settings.mode.completion_standard_words = checked
+                                },
+                            ))
+                            .child(mode_switch(
+                                "completion-document",
+                                "Words in document",
+                                mode.completion_document_words,
+                                false,
+                                cx,
+                                |settings, checked| {
+                                    settings.mode.completion_document_words = checked
+                                },
+                            ))
+                            .child(mode_switch(
+                                "completion-syntax",
+                                "Words defined in syntax",
+                                mode.completion_syntax_words,
+                                false,
+                                cx,
+                                |settings, checked| settings.mode.completion_syntax_words = checked,
+                            )),
                     )
-                    .child(mode_switch("automatic-completion", "Suggest completions while typing", mode.automatic_completion, false, cx, |settings, checked| settings.mode.automatic_completion = checked)),
+                    .child(mode_switch(
+                        "automatic-completion",
+                        "Suggest completions while typing",
+                        mode.automatic_completion,
+                        false,
+                        cx,
+                        |settings, checked| settings.mode.automatic_completion = checked,
+                    )),
             ));
 
         let modes = v_flex()
@@ -1010,7 +1301,13 @@ impl SettingsWindow {
                  from the same file CotEditor writes and arrive with the syntax editor.",
                 cx,
             ))
-            .child(h_flex().gap_4().items_start().child(modes).child(div().flex_1().min_w_0().child(options)))
+            .child(
+                h_flex()
+                    .gap_4()
+                    .items_start()
+                    .child(modes)
+                    .child(div().flex_1().min_w_0().child(options)),
+            )
             .into_any_element()
     }
 
@@ -1061,9 +1358,8 @@ impl SettingsWindow {
                         // to dispatch it by hand, which is what `DialogAction`
                         // is for.
                         .child(
-                            DialogAction::new().child(
-                                Button::new("encoding-list-ok").label("OK").primary(),
-                            ),
+                            DialogAction::new()
+                                .child(Button::new("encoding-list-ok").label("OK").primary()),
                         ),
                 )
                 .on_ok(move |_, _, cx| {
@@ -1138,7 +1434,9 @@ impl SettingsWindow {
                     // One door for both halves: *Unicode (UTF-8) with BOM* sets
                     // the codec and the mark together, which is what makes a new
                     // document come out with the mark on it.
-                    this.edit(cx, move |settings| settings.set_default_file_encoding(picked));
+                    this.edit(cx, move |settings| {
+                        settings.set_default_file_encoding(picked)
+                    });
                 }
             }),
         );
@@ -1149,7 +1447,9 @@ impl SettingsWindow {
                 Button::new("encoding-priorities")
                     .small()
                     .label("Edit List…")
-                    .on_click(cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx)),
+                    ),
             )
             .child(
                 Checkbox::new("refer-to-encoding-tag")
@@ -1170,7 +1470,12 @@ impl SettingsWindow {
         let current_syntax = settings
             .default_syntax
             .as_ref()
-            .and_then(|name| syntaxes.iter().position(|syntax| syntax == name).map(|index| index + 1))
+            .and_then(|name| {
+                syntaxes
+                    .iter()
+                    .position(|syntax| syntax == name)
+                    .map(|index| index + 1)
+            })
             .or(Some(0));
         let default_syntax = pick_list(
             "default-syntax",
@@ -1181,7 +1486,10 @@ impl SettingsWindow {
                 let name = this
                     .workspace
                     .read_with(cx, |workspace, _| {
-                        workspace.syntax_names().get(index.saturating_sub(1)).cloned()
+                        workspace
+                            .syntax_names()
+                            .get(index.saturating_sub(1))
+                            .cloned()
                     })
                     .ok()
                     .flatten();
@@ -1204,7 +1512,10 @@ impl SettingsWindow {
             .child(section("Default text encoding", default_encoding))
             .child(section("Encoding priorities", priorities))
             .child(section("Default syntax", default_syntax))
-            .child(section(format!("Available syntaxes ({})", syntaxes.len()), available))
+            .child(section(
+                format!("Available syntaxes ({})", syntaxes.len()),
+                available,
+            ))
             .into_any_element()
     }
 
@@ -1221,7 +1532,11 @@ impl SettingsWindow {
     fn render_snippets(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.sync_format_editor(window, cx);
 
-        let tab = if self.snippet_tab == 0 { SnippetTab::Command } else { SnippetTab::FileDrop };
+        let tab = if self.snippet_tab == 0 {
+            SnippetTab::Command
+        } else {
+            SnippetTab::FileDrop
+        };
 
         let tabs = [SnippetTab::Command, SnippetTab::FileDrop]
             .into_iter()
@@ -1240,13 +1555,19 @@ impl SettingsWindow {
 
         let (rows, selection, empty): (Vec<AnyElement>, Option<u64>, &str) = match tab {
             SnippetTab::Command => (
-                self.snippets.iter().map(|row| row.clone().into_any_element()).collect(),
+                self.snippets
+                    .iter()
+                    .map(|row| row.clone().into_any_element())
+                    .collect(),
                 self.snippet_selection,
                 "No snippets yet. Add one to insert its text from the Insert Snippet submenu \
                  or from a key equivalent.",
             ),
             SnippetTab::FileDrop => (
-                self.file_drop.iter().map(|row| row.clone().into_any_element()).collect(),
+                self.file_drop
+                    .iter()
+                    .map(|row| row.clone().into_any_element())
+                    .collect(),
                 self.file_drop_selection,
                 "No file-drop settings yet. Add one to describe what dropping a file onto \
                  the editor inserts.",
@@ -1255,12 +1576,16 @@ impl SettingsWindow {
 
         let header = match tab {
             SnippetTab::Command => header(
-                CommandColumn::ALL.iter().map(|column| (column.label(), column.width())),
+                CommandColumn::ALL
+                    .iter()
+                    .map(|column| (column.label(), column.width())),
                 cx,
             )
             .into_any_element(),
             SnippetTab::FileDrop => header(
-                FileDropColumn::ALL.iter().map(|column| (column.label(), column.width())),
+                FileDropColumn::ALL
+                    .iter()
+                    .map(|column| (column.label(), column.width())),
                 cx,
             )
             .into_any_element(),
@@ -1283,7 +1608,9 @@ impl SettingsWindow {
                     .min_h(rems(0.))
                     .overflow_y_scroll()
                     .py_1()
-                    .when(rows.is_empty(), |this| this.child(div().px_2().child(note(empty, cx))))
+                    .when(rows.is_empty(), |this| {
+                        this.child(div().px_2().child(note(empty, cx)))
+                    })
                     .children(rows),
             );
 
@@ -1324,23 +1651,27 @@ impl SettingsWindow {
             .gap_2()
             .items_center()
             .child(
-                Button::new(ElementId::Name(SharedString::from(format!("snippet-add-{tab:?}"))))
-                    .ghost()
-                    .small()
-                    .icon(gpui_kit::assets::IconName::Plus)
-                    .accessibility_label("Add")
-                    .tooltip("Add new item")
-                    .on_click(add),
+                Button::new(ElementId::Name(SharedString::from(format!(
+                    "snippet-add-{tab:?}"
+                ))))
+                .ghost()
+                .small()
+                .icon(gpui_kit::assets::IconName::Plus)
+                .accessibility_label("Add")
+                .tooltip("Add new item")
+                .on_click(add),
             )
             .child(
-                Button::new(ElementId::Name(SharedString::from(format!("snippet-delete-{tab:?}"))))
-                    .ghost()
-                    .small()
-                    .icon(gpui_kit::assets::IconName::Minus)
-                    .accessibility_label("Delete")
-                    .tooltip("Delete selected items")
-                    .disabled(selection.is_none())
-                    .on_click(remove),
+                Button::new(ElementId::Name(SharedString::from(format!(
+                    "snippet-delete-{tab:?}"
+                ))))
+                .ghost()
+                .small()
+                .icon(gpui_kit::assets::IconName::Minus)
+                .accessibility_label("Delete")
+                .tooltip("Delete selected items")
+                .disabled(selection.is_none())
+                .on_click(remove),
             )
             .child(div().flex_1())
             .when(tab == SnippetTab::Command, |this| {
@@ -1355,7 +1686,9 @@ impl SettingsWindow {
                         .label("Restore Defaults")
                         .tooltip("Put the file-drop settings back to the ones CotEditor ships.")
                         .disabled(!self.can_restore_file_drop(cx))
-                        .on_click(cx.listener(|this, _, window, cx| this.restore_file_drop(window, cx))),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.restore_file_drop(window, cx)),
+                        ),
                 )
             })
             .into_any_element()
@@ -1422,7 +1755,12 @@ impl SettingsWindow {
                 )
             });
 
-        v_flex().w_full().gap_2().child(header).child(body).into_any_element()
+        v_flex()
+            .w_full()
+            .gap_2()
+            .child(header)
+            .child(body)
+            .into_any_element()
     }
 
     /// The *Insert Variable* menu, which inserts a token at the caret.
@@ -1444,17 +1782,44 @@ impl SettingsWindow {
         };
         let pane = cx.entity().downgrade();
 
-        Button::new(ElementId::Name(SharedString::from(format!("insert-variable-{tab:?}"))))
-            .ghost()
-            .small()
-            .label("Insert Variable")
-            .tooltip("Insert a variable into the insertion format.")
-            .disabled(disabled)
-            .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
-                let mut menu = menu;
-                match tab {
-                    SnippetTab::Command => {
-                        for variable in subtext_core::snippets::Variable::ALL {
+        Button::new(ElementId::Name(SharedString::from(format!(
+            "insert-variable-{tab:?}"
+        ))))
+        .ghost()
+        .small()
+        .label("Insert Variable")
+        .tooltip("Insert a variable into the insertion format.")
+        .disabled(disabled)
+        .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
+            let mut menu = menu;
+            match tab {
+                SnippetTab::Command => {
+                    for variable in subtext_core::snippets::Variable::ALL {
+                        menu = menu.item(variable_item(
+                            variable.name(),
+                            variable.description(),
+                            variable.token(),
+                            &editor,
+                            &pane,
+                        ));
+                    }
+                }
+                SnippetTab::FileDrop => {
+                    for (heading, group) in [
+                        (None, subtext_core::filedrop::Variable::PATH.as_slice()),
+                        (
+                            Some("Text File"),
+                            subtext_core::filedrop::Variable::TEXT.as_slice(),
+                        ),
+                        (
+                            Some("Image File"),
+                            subtext_core::filedrop::Variable::IMAGE.as_slice(),
+                        ),
+                    ] {
+                        if let Some(heading) = heading {
+                            menu = menu.separator().label(heading);
+                        }
+                        for variable in group {
                             menu = menu.item(variable_item(
                                 variable.name(),
                                 variable.description(),
@@ -1464,30 +1829,11 @@ impl SettingsWindow {
                             ));
                         }
                     }
-                    SnippetTab::FileDrop => {
-                        for (heading, group) in [
-                            (None, subtext_core::filedrop::Variable::PATH.as_slice()),
-                            (Some("Text File"), subtext_core::filedrop::Variable::TEXT.as_slice()),
-                            (Some("Image File"), subtext_core::filedrop::Variable::IMAGE.as_slice()),
-                        ] {
-                            if let Some(heading) = heading {
-                                menu = menu.separator().label(heading);
-                            }
-                            for variable in group {
-                                menu = menu.item(variable_item(
-                                    variable.name(),
-                                    variable.description(),
-                                    variable.token(),
-                                    &editor,
-                                    &pane,
-                                ));
-                            }
-                        }
-                    }
                 }
-                menu
-            })
-            .into_any_element()
+            }
+            menu
+        })
+        .into_any_element()
     }
 
     // ---- the snippet tables ----------------------------------------------
@@ -1511,7 +1857,8 @@ impl SettingsWindow {
         let syntaxes = Rc::new(self.syntax_names(cx));
         for row in &self.snippets {
             let id = row.read(cx).id();
-            let state = crate::snippet_pane::row_state(&syntaxes, self.snippet_selection == Some(id));
+            let state =
+                crate::snippet_pane::row_state(&syntaxes, self.snippet_selection == Some(id));
             row.update(cx, |row, cx| row.sync(state, cx));
         }
         for row in &self.file_drop {
@@ -1544,8 +1891,10 @@ impl SettingsWindow {
     /// was loaded from a hand-edited settings file with a conflicting shortcut
     /// shows it as soon as the pane opens.
     pub fn snippets_edited(&mut self, cx: &mut Context<Self>) {
-        self.snippet_error =
-            self.snippets.iter().find_map(|row| row.read(cx).error().map(str::to_string));
+        self.snippet_error = self
+            .snippets
+            .iter()
+            .find_map(|row| row.read(cx).error().map(str::to_string));
         self.commit_snippets(cx);
     }
 
@@ -1595,7 +1944,11 @@ impl SettingsWindow {
     /// free. The row goes after the last selected one, or at the end when
     /// nothing is selected — upstream's own placement.
     fn add_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let taken: Vec<String> = self.snippets.iter().map(|row| row.read(cx).name(cx)).collect();
+        let taken: Vec<String> = self
+            .snippets
+            .iter()
+            .map(|row| row.read(cx).name(cx))
+            .collect();
         let id = self.take_row_id();
         let snippet = Snippet::new(id, unique_name("Untitled", &taken));
         let pane = cx.weak_entity();
@@ -1604,7 +1957,9 @@ impl SettingsWindow {
         let at = self
             .snippet_selection
             .and_then(|selected| {
-                self.snippets.iter().position(|row| row.read(cx).id() == selected)
+                self.snippets
+                    .iter()
+                    .position(|row| row.read(cx).id() == selected)
             })
             .map_or(self.snippets.len(), |index| index + 1);
         self.snippets.insert(at, row.clone());
@@ -1645,7 +2000,9 @@ impl SettingsWindow {
         let at = self
             .file_drop_selection
             .and_then(|selected| {
-                self.file_drop.iter().position(|row| row.read(cx).id() == selected)
+                self.file_drop
+                    .iter()
+                    .position(|row| row.read(cx).id() == selected)
             })
             .map_or(self.file_drop.len(), |index| index + 1);
         self.file_drop.insert(at, row);
@@ -1713,8 +2070,11 @@ impl SettingsWindow {
     }
 
     fn commit_snippets(&self, cx: &mut Context<Self>) {
-        let snippets: Vec<Snippet> =
-            self.snippets.iter().map(|row| row.read(cx).snippet(cx)).collect();
+        let snippets: Vec<Snippet> = self
+            .snippets
+            .iter()
+            .map(|row| row.read(cx).snippet(cx))
+            .collect();
         self.edit_snippets(cx, move |settings| settings.snippets = snippets);
     }
 
@@ -1792,15 +2152,22 @@ impl SettingsWindow {
         let text = self.format_editor().read(cx).value().to_string();
         match self.snippet_tab {
             0 => {
-                if let Some(row) = self.snippets.iter().find(|row| row.read(cx).id() == owner).cloned()
+                if let Some(row) = self
+                    .snippets
+                    .iter()
+                    .find(|row| row.read(cx).id() == owner)
+                    .cloned()
                 {
                     row.update(cx, |row, cx| row.set_format(text, cx));
                 }
                 self.commit_snippets(cx);
             }
             _ => {
-                if let Some(row) =
-                    self.file_drop.iter().find(|row| row.read(cx).id() == owner).cloned()
+                if let Some(row) = self
+                    .file_drop
+                    .iter()
+                    .find(|row| row.read(cx).id() == owner)
+                    .cloned()
                 {
                     row.update(cx, |row, cx| row.set_format(text, cx));
                 }
@@ -1882,7 +2249,10 @@ impl SettingsWindow {
                             .tooltip("Nothing has been customised yet"),
                     )
                     .child(note(
-                        format!("{} shortcuts, all at their CotEditor defaults", keymap::SHORTCUTS.len()),
+                        format!(
+                            "{} shortcuts, all at their CotEditor defaults",
+                            keymap::SHORTCUTS.len()
+                        ),
                         cx,
                     )),
             )
@@ -1895,7 +2265,12 @@ impl SettingsWindow {
     fn render_integration(&self, settings: &Settings, cx: &mut Context<Self>) -> AnyElement {
         let command_line = v_flex()
             .gap_1()
-            .child(Button::new("learn-more-cli").small().label("Learn More…").disabled(true))
+            .child(
+                Button::new("learn-more-cli")
+                    .small()
+                    .label("Learn More…")
+                    .disabled(true),
+            )
             .child(note(
                 "With the `cot` command-line tool you can open files in CotEditor from a \
                  terminal. SubText installs `subtext` for the same purpose: put it on your \
@@ -1911,7 +2286,9 @@ impl SettingsWindow {
                     .label("Accept rmate connections")
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
-                        this.edit(cx, move |settings| settings.enables_remote_editing = checked);
+                        this.edit(cx, move |settings| {
+                            settings.enables_remote_editing = checked
+                        });
                     })),
             )
             .child(
@@ -1967,10 +2344,12 @@ fn variable_item(
     let pane = pane.clone();
 
     PopupMenuItem::element(move |_, cx| {
-        v_flex()
-            .gap_0p5()
-            .child(div().text_sm().child(name))
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(description))
+        v_flex().gap_0p5().child(div().text_sm().child(name)).child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(description),
+        )
     })
     .on_click(move |_, window, cx| {
         editor.update(cx, |state, cx| state.insert(token.clone(), window, cx));
@@ -2049,19 +2428,23 @@ fn stepper(
         .gap_1()
         .items_center()
         .child(
-            Button::new(ElementId::Name(SharedString::from(format!("{id}-decrement"))))
-                .small()
-                .label("−")
-                .accessibility_label("Decrease")
-                .on_click(minus),
+            Button::new(ElementId::Name(SharedString::from(format!(
+                "{id}-decrement"
+            ))))
+            .small()
+            .label("−")
+            .accessibility_label("Decrease")
+            .on_click(minus),
         )
         .child(div().min_w(rems(4.)).text_sm().text_center().child(value))
         .child(
-            Button::new(ElementId::Name(SharedString::from(format!("{id}-increment"))))
-                .small()
-                .label("+")
-                .accessibility_label("Increase")
-                .on_click(plus),
+            Button::new(ElementId::Name(SharedString::from(format!(
+                "{id}-increment"
+            ))))
+            .small()
+            .label("+")
+            .accessibility_label("Increase")
+            .on_click(plus),
         )
         .into_any_element()
 }
@@ -2098,7 +2481,13 @@ fn pick_list(
     cx: &App,
     on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
-    pick_list_with_gaps(id, items.into_iter().map(Some).collect(), selected, cx, on_click)
+    pick_list_with_gaps(
+        id,
+        items.into_iter().map(Some).collect(),
+        selected,
+        cx,
+        on_click,
+    )
 }
 
 /// The same list, with a rule where the caller passes `None`.
@@ -2130,13 +2519,16 @@ fn pick_list_with_gaps(
         rows = rows.child(
             // The list is not reorderable, so the index is a stable identity
             // for the row; the name keeps it from colliding with other lists.
-            Button::new(ElementId::NamedInteger(SharedString::from(id), index as u64))
-                .ghost()
-                .small()
-                .w_full()
-                .selected(selected == Some(index))
-                .label(label)
-                .on_click(move |_, window, cx| on_click(&index, window, cx)),
+            Button::new(ElementId::NamedInteger(
+                SharedString::from(id),
+                index as u64,
+            ))
+            .ghost()
+            .small()
+            .w_full()
+            .selected(selected == Some(index))
+            .label(label)
+            .on_click(move |_, window, cx| on_click(&index, window, cx)),
         );
     }
 

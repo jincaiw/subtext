@@ -23,7 +23,11 @@ pub fn read(path: &Path) -> Option<(u32, u32)> {
 /// The formats are tried in turn rather than by extension: the bytes are what
 /// decides, and a file named `.png` that is not one should not be read as one.
 pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    png(bytes).or_else(|| gif(bytes)).or_else(|| bmp(bytes)).or_else(|| webp(bytes)).or_else(|| jpeg(bytes))
+    png(bytes)
+        .or_else(|| gif(bytes))
+        .or_else(|| bmp(bytes))
+        .or_else(|| webp(bytes))
+        .or_else(|| jpeg(bytes))
 }
 
 // ---- the formats ---------------------------------------------------------
@@ -127,8 +131,7 @@ fn jpeg(bytes: &[u8]) -> Option<(u32, u32)> {
         // `SOF0`–`SOF15` are the frame headers, except `DHT`, `JPG` and `DAC`,
         // which share the range without being one. The dimensions follow one
         // byte of sample precision.
-        let is_frame = (0xC0..=0xCF).contains(&marker)
-            && !matches!(marker, 0xC4 | 0xC8 | 0xCC);
+        let is_frame = (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC);
         if is_frame {
             return Some((
                 u32::from(be_u16(bytes, index + 7)?),
@@ -143,23 +146,33 @@ fn jpeg(bytes: &[u8]) -> Option<(u32, u32)> {
 // ---- reading numbers -----------------------------------------------------
 
 fn be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_be_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+    Some(u16::from_be_bytes(
+        bytes.get(offset..offset + 2)?.try_into().ok()?,
+    ))
 }
 
 fn be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_be_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(u32::from_be_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 fn le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+    Some(u16::from_le_bytes(
+        bytes.get(offset..offset + 2)?.try_into().ok()?,
+    ))
 }
 
 fn le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 fn le_i32(bytes: &[u8], offset: usize) -> Option<i32> {
-    Some(i32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(i32::from_le_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 fn le_u24(bytes: &[u8], offset: usize) -> Option<u32> {
@@ -299,7 +312,11 @@ mod tests {
             assert_eq!(dimensions(&jpeg_bytes()[..length]), None, "{length} bytes");
         }
         for length in 0..webp_lossy_bytes().len() {
-            assert_eq!(dimensions(&webp_lossy_bytes()[..length]), None, "{length} bytes");
+            assert_eq!(
+                dimensions(&webp_lossy_bytes()[..length]),
+                None,
+                "{length} bytes"
+            );
         }
     }
 
@@ -327,6 +344,9 @@ mod tests {
         assert_eq!(read(&path), Some((640, 480)));
         std::fs::remove_file(&path).ok();
 
-        assert_eq!(read(&std::env::temp_dir().join("subtext-no-such-image.png")), None);
+        assert_eq!(
+            read(&std::env::temp_dir().join("subtext-no-such-image.png")),
+            None
+        );
     }
 }

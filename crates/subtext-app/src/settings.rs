@@ -909,8 +909,8 @@ impl Settings {
     /// `withBOM = (availableEncoding == .utf8) && saveUTF8BOM`, so a stored
     /// flag cannot leak onto an encoding that has no such mark.
     pub fn default_file_encoding(&self) -> FileEncoding {
-        let encoding = TextEncoding::from_identifier(&self.default_encoding)
-            .unwrap_or(TextEncoding::UTF8);
+        let encoding =
+            TextEncoding::from_identifier(&self.default_encoding).unwrap_or(TextEncoding::UTF8);
         FileEncoding {
             encoding,
             with_utf8_bom: encoding == TextEncoding::UTF8 && self.edit.save_utf8_bom,
@@ -963,10 +963,7 @@ impl Settings {
     /// because they are the two things upstream's `DetectionOptions` carries
     /// that SubText has settings for. The lifetime is the candidates' rather
     /// than the settings', so the borrow ends where the vector does.
-    pub fn detection_options<'a>(
-        &self,
-        candidates: &'a [TextEncoding],
-    ) -> DetectionOptions<'a> {
+    pub fn detection_options<'a>(&self, candidates: &'a [TextEncoding]) -> DetectionOptions<'a> {
         DetectionOptions {
             candidates,
             respects_declaration: self.refer_to_encoding_tag,
@@ -1080,15 +1077,17 @@ mod tests {
         let settings: Settings = serde_json::from_slice(json).expect("a partial file must parse");
 
         assert!(settings.window.show_sidebar, "the named field was dropped");
-        assert_eq!(settings.font_size, 18.0, "a sibling top-level field was dropped");
+        assert_eq!(
+            settings.font_size, 18.0,
+            "a sibling top-level field was dropped"
+        );
         assert_eq!(
             settings.window.show_toolbar,
             WindowOptions::default().show_toolbar,
             "an unnamed field in the same object did not take its default"
         );
         assert_eq!(
-            settings.window.sidebar_width,
-            SIDEBAR_DEFAULT_WIDTH,
+            settings.window.sidebar_width, SIDEBAR_DEFAULT_WIDTH,
             "a field this build added has no default"
         );
         assert_eq!(
@@ -1116,18 +1115,30 @@ mod tests {
     #[test]
     fn the_default_file_encoding_pairs_the_codec_with_its_mark() {
         let mut settings = Settings::default();
-        assert_eq!(settings.default_file_encoding(), FileEncoding::of(TextEncoding::UTF8));
+        assert_eq!(
+            settings.default_file_encoding(),
+            FileEncoding::of(TextEncoding::UTF8)
+        );
 
         settings.set_default_file_encoding(FileEncoding::utf8_with_bom());
-        assert_eq!(settings.default_file_encoding(), FileEncoding::utf8_with_bom());
+        assert_eq!(
+            settings.default_file_encoding(),
+            FileEncoding::utf8_with_bom()
+        );
         assert!(settings.edit.save_utf8_bom, "the mark half was not written");
         assert_eq!(settings.encoding(), TextEncoding::UTF8);
 
         // Picking another codec clears the mark: only UTF-8 has this one.
         let shift_jis = TextEncoding::from_identifier("shift_jis").expect("registered");
         settings.set_default_file_encoding(FileEncoding::of(shift_jis));
-        assert!(!settings.edit.save_utf8_bom, "the mark leaked onto another codec");
-        assert_eq!(settings.default_file_encoding(), FileEncoding::of(shift_jis));
+        assert!(
+            !settings.edit.save_utf8_bom,
+            "the mark leaked onto another codec"
+        );
+        assert_eq!(
+            settings.default_file_encoding(),
+            FileEncoding::of(shift_jis)
+        );
 
         // …and a file that claims otherwise anyway is read with the mark
         // dropped, which is upstream's `withBOM = (availableEncoding == .utf8)
@@ -1205,7 +1216,10 @@ mod tests {
         assert_eq!(settings.editor.page_guide_column, 80);
         assert_eq!(settings.appearance.line_height, 1.0);
         assert_eq!(settings.appearance.window_alpha, 1.0);
-        assert_eq!(settings.general.no_document_on_launch_option, NoDocumentOnLaunchOption::CreateNewDocument);
+        assert_eq!(
+            settings.general.no_document_on_launch_option,
+            NoDocumentOnLaunchOption::CreateNewDocument
+        );
         assert_eq!(settings.window.window_tabbing, WindowTabbing::RespectSystem);
     }
 
@@ -1238,7 +1252,10 @@ mod tests {
 
     #[test]
     fn settings_round_trip_through_json() {
-        let mut settings = Settings { font_size: 15.5, ..Settings::default() };
+        let mut settings = Settings {
+            font_size: 15.5,
+            ..Settings::default()
+        };
         settings.window.show_sidebar = true;
         settings.appearance.line_height = 1.4;
         settings.recent_documents.push(PathBuf::from("/tmp/a.txt"));

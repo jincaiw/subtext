@@ -482,8 +482,7 @@ impl FolderFindPane {
         let scope = self.scope.clone();
         let name = self.scope_name.clone();
         let saved = self.saved_scopes.clone();
-        let sheet =
-            cx.new(|cx| FileScopeSheet::new(pane, scope, name, saved, false, window, cx));
+        let sheet = cx.new(|cx| FileScopeSheet::new(pane, scope, name, saved, false, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .title("File Scope")
@@ -661,13 +660,7 @@ impl FolderFindPane {
                     .gap_0p5()
                     .child(div().text_sm().truncate().child(label))
                     .when(!detail.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .truncate()
-                                .child(detail),
-                        )
+                        this.child(div().text_xs().text_color(muted).truncate().child(detail))
                     }),
             )
             .when(is_chosen, |this| {
@@ -734,10 +727,11 @@ impl FolderFindPane {
                     .small()
                     .icon(gpui_kit::assets::IconName::TextSearch)
                     .label(trigger_label)
-                    .custom(
-                        ButtonCustomVariant::new(cx)
-                            .foreground(if has_scope { accent } else { muted }),
-                    ),
+                    .custom(ButtonCustomVariant::new(cx).foreground(if has_scope {
+                        accent
+                    } else {
+                        muted
+                    })),
             )
             .content({
                 let pane = pane.clone();
@@ -745,7 +739,12 @@ impl FolderFindPane {
                     let mut content = v_flex().w(rems(15.)).gap_0p5();
 
                     for (id, label, checked, hidden) in [
-                        ("scope-hidden", "Include Hidden Files", includes_hidden, true),
+                        (
+                            "scope-hidden",
+                            "Include Hidden Files",
+                            includes_hidden,
+                            true,
+                        ),
                         (
                             "scope-other",
                             "Include Other File Types",
@@ -753,26 +752,23 @@ impl FolderFindPane {
                             false,
                         ),
                     ] {
-                        content = content.child(
-                            menu_row(id, label, checked, cx).on_click({
-                                let pane = pane.clone();
-                                move |_, _, cx| {
-                                    pane.update(cx, |pane, cx| {
-                                        if hidden {
-                                            pane.includes_hidden_files =
-                                                !pane.includes_hidden_files;
-                                        } else {
-                                            pane.includes_other_file_types =
-                                                !pane.includes_other_file_types;
-                                        }
-                                        pane.set_menu_open("scope", false);
-                                        pane.persist(cx);
-                                        cx.notify();
-                                    })
-                                    .ok();
-                                }
-                            }),
-                        );
+                        content = content.child(menu_row(id, label, checked, cx).on_click({
+                            let pane = pane.clone();
+                            move |_, _, cx| {
+                                pane.update(cx, |pane, cx| {
+                                    if hidden {
+                                        pane.includes_hidden_files = !pane.includes_hidden_files;
+                                    } else {
+                                        pane.includes_other_file_types =
+                                            !pane.includes_other_file_types;
+                                    }
+                                    pane.set_menu_open("scope", false);
+                                    pane.persist(cx);
+                                    cx.notify();
+                                })
+                                .ok();
+                            }
+                        }));
                     }
 
                     content = content.child(
@@ -953,7 +949,8 @@ impl FolderFindPane {
             let key = file.path.display().to_string();
             let is_collapsed = self.collapsed.contains(&key);
             let is_selected = self.selected.as_deref() == Some(key.as_str());
-            list = list.child(self.render_file_row(file, &key, is_collapsed, is_selected, &pane, cx));
+            list =
+                list.child(self.render_file_row(file, &key, is_collapsed, is_selected, &pane, cx));
         }
 
         if summary.metrics.has_unsearched_files {
@@ -1038,7 +1035,14 @@ impl FolderFindPane {
                             .xsmall()
                             .flex_shrink_0(),
                     )
-                    .child(div().flex_1().min_w_0().text_sm().truncate().child(filename))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .truncate()
+                            .child(filename),
+                    )
                     .when(!directory.is_empty(), |this| {
                         this.child(
                             div()
@@ -1114,16 +1118,9 @@ impl FolderFindPane {
                 column = column.child(render_match_row(matched, primary, muted));
             }
             if file.is_truncated {
-                column = column.child(
-                    div()
-                        .pl(rems(2.))
-                        .text_xs()
-                        .text_color(muted)
-                        .child(format!(
-                            "Only the first {} matches were found.",
-                            file.matches.len()
-                        )),
-                );
+                column = column.child(div().pl(rems(2.)).text_xs().text_color(muted).child(
+                    format!("Only the first {} matches were found.", file.matches.len()),
+                ));
             }
         }
 
@@ -1575,8 +1572,16 @@ pub struct SavedScopesSheet {
 }
 
 impl SavedScopesSheet {
-    fn new(pane: WeakEntity<FolderFindPane>, scopes: BTreeMap<String, FileScope>, _cx: &mut Context<Self>) -> Self {
-        Self { pane, scopes, renaming: None }
+    fn new(
+        pane: WeakEntity<FolderFindPane>,
+        scopes: BTreeMap<String, FileScope>,
+        _cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            pane,
+            scopes,
+            renaming: None,
+        }
     }
 
     fn names(&self) -> Vec<String> {
@@ -1623,8 +1628,9 @@ impl SavedScopesSheet {
     fn add_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pane = self.pane.clone();
         let saved = self.scopes.clone();
-        let sheet =
-            cx.new(|cx| FileScopeSheet::new(pane, FileScope::default(), None, saved, true, window, cx));
+        let sheet = cx.new(|cx| {
+            FileScopeSheet::new(pane, FileScope::default(), None, saved, true, window, cx)
+        });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .title("New Saved Scope")
@@ -1712,7 +1718,14 @@ impl Render for SavedScopesSheet {
                             .xsmall()
                             .flex_shrink_0(),
                     )
-                    .child(div().flex_1().min_w_0().text_sm().truncate().child(name.clone()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .truncate()
+                            .child(name.clone()),
+                    )
                     .child(
                         Button::new(ElementId::Name(SharedString::from(format!(
                             "saved-scope-rename:{name}"
@@ -1801,19 +1814,19 @@ fn mode_menu(
                 .small()
                 .icon(gpui_kit::assets::IconName::Regex)
                 .label(label)
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .foreground(if is_pattern { accent } else { foreground }),
-                ),
+                .custom(ButtonCustomVariant::new(cx).foreground(if is_pattern {
+                    accent
+                } else {
+                    foreground
+                })),
         )
         .content({
             let pane = pane.clone();
             move |_, _, cx| {
                 let mut content = v_flex().w(rems(11.)).gap_0p5();
-                for (index, (option, pattern)) in
-                    [("Text", false), ("Regular Expression", true)]
-                        .into_iter()
-                        .enumerate()
+                for (index, (option, pattern)) in [("Text", false), ("Regular Expression", true)]
+                    .into_iter()
+                    .enumerate()
                 {
                     content = content.child(
                         menu_row(
@@ -2052,13 +2065,19 @@ mod tests {
     #[test]
     fn a_short_line_is_shown_whole() {
         let (head, hit, tail) = split_display_line(&matched("foo bar baz", 4..7));
-        assert_eq!((head.as_str(), hit.as_str(), tail.as_str()), ("foo ", "bar", " baz"));
+        assert_eq!(
+            (head.as_str(), hit.as_str(), tail.as_str()),
+            ("foo ", "bar", " baz")
+        );
     }
 
     #[test]
     fn the_indentation_goes_when_the_hit_sits_past_it() {
         let (head, hit, tail) = split_display_line(&matched("    let x = 1;", 8..9));
-        assert_eq!((head.as_str(), hit.as_str(), tail.as_str()), ("let ", "x", " = 1;"));
+        assert_eq!(
+            (head.as_str(), hit.as_str(), tail.as_str()),
+            ("let ", "x", " = 1;")
+        );
     }
 
     #[test]
@@ -2144,10 +2163,15 @@ mod tests {
 
         let mut extensions = HashSet::new();
         extensions.insert("custom".to_string());
-        let widened = Search::new(root.path(), &query, options, Some(syntax_predicate(extensions)))
-            .expect("the query compiles")
-            .run(None, None)
-            .expect("the walk completes");
+        let widened = Search::new(
+            root.path(),
+            &query,
+            options,
+            Some(syntax_predicate(extensions)),
+        )
+        .expect("the query compiles")
+        .run(None, None)
+        .expect("the walk completes");
         assert_eq!(widened.metrics.matched_file_count, 2);
         assert!(
             widened
@@ -2168,7 +2192,11 @@ mod tests {
         let query = Query::new("needle", Mode::default());
         let scope = FileScope::new(
             subtext_core::folderfind::Conjunction::Any,
-            vec![Rule::new(Target::FileExtension, Comparison::IsEqualTo, "md")],
+            vec![Rule::new(
+                Target::FileExtension,
+                Comparison::IsEqualTo,
+                "md",
+            )],
         );
         let summary = Search::new(
             root.path(),

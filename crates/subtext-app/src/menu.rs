@@ -56,9 +56,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::action("Open…", actions::file::OpenDocument),
                 MenuItem::submenu(Menu {
                     name: "Open Recent".into(),
-                    items: vec![
-                        MenuItem::action("Clear Menu", actions::file::ClearRecentDocuments),
-                    ],
+                    items: vec![MenuItem::action(
+                        "Clear Menu",
+                        actions::file::ClearRecentDocuments,
+                    )],
                     disabled: false,
                 }),
                 MenuItem::separator(),
@@ -94,12 +95,18 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                         MenuItem::action("Select All", actions::edit::SelectAll),
                         MenuItem::action("Select Line", actions::edit::SelectParagraph),
                         MenuItem::action("Select Word", actions::edit::SelectWord),
-                        MenuItem::action("Select Enclosing Symbols", actions::edit::SelectEnclosingSymbols),
+                        MenuItem::action(
+                            "Select Enclosing Symbols",
+                            actions::edit::SelectEnclosingSymbols,
+                        ),
                         MenuItem::separator(),
                         MenuItem::action("Select Column Up", actions::edit::SelectColumnUp),
                         MenuItem::action("Select Column Down", actions::edit::SelectColumnDown),
                         MenuItem::separator(),
-                        MenuItem::action("Split Selection by Lines", actions::edit::SplitSelectionByLines),
+                        MenuItem::action(
+                            "Split Selection by Lines",
+                            actions::edit::SplitSelectionByLines,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -108,35 +115,75 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("Insert Backslash", actions::edit::InputBackSlash),
                 MenuItem::action("Insert Yen Mark", actions::edit::InputYenMark),
-                MenuItem::action("Insert by Unicode Code Point…", actions::edit::ShowUnicodeInputPanel),
+                MenuItem::action(
+                    "Insert by Unicode Code Point…",
+                    actions::edit::ShowUnicodeInputPanel,
+                ),
                 MenuItem::action("Insert from iPhone or iPad", actions::app::NoOp).disabled(true),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu {
                     name: "Spelling and Grammar".into(),
                     items: vec![
-                        MenuItem::action("Show Spelling and Grammar", actions::spelling::ShowGuessPanel),
+                        MenuItem::action(
+                            "Show Spelling and Grammar",
+                            actions::spelling::ShowGuessPanel,
+                        ),
                         MenuItem::action("Check Document Now", actions::spelling::CheckSpelling),
                         MenuItem::separator(),
-                        MenuItem::action("Check Spelling While Typing", actions::spelling::ToggleContinuousSpellChecking),
-                        MenuItem::action("Check Grammar With Spelling", actions::spelling::ToggleGrammarChecking),
-                        MenuItem::action("Correct Spelling Automatically", actions::spelling::ToggleAutomaticSpellingCorrection),
+                        MenuItem::action(
+                            "Check Spelling While Typing",
+                            actions::spelling::ToggleContinuousSpellChecking,
+                        ),
+                        MenuItem::action(
+                            "Check Grammar With Spelling",
+                            actions::spelling::ToggleGrammarChecking,
+                        ),
+                        MenuItem::action(
+                            "Correct Spelling Automatically",
+                            actions::spelling::ToggleAutomaticSpellingCorrection,
+                        ),
                     ],
                     disabled: false,
                 }),
                 MenuItem::submenu(Menu {
                     name: "Substitutions".into(),
                     items: vec![
-                        MenuItem::action("Replace Quotes", actions::spelling::ReplaceQuotesInSelection),
-                        MenuItem::action("Straighten Quotes", actions::spelling::StraightenQuotesInSelection).disabled(state.selection_empty),
-                        MenuItem::action("Replace Dashes", actions::spelling::ReplaceDashesInSelection),
+                        MenuItem::action(
+                            "Replace Quotes",
+                            actions::spelling::ReplaceQuotesInSelection,
+                        ),
+                        MenuItem::action(
+                            "Straighten Quotes",
+                            actions::spelling::StraightenQuotesInSelection,
+                        )
+                        .disabled(state.selection_empty),
+                        MenuItem::action(
+                            "Replace Dashes",
+                            actions::spelling::ReplaceDashesInSelection,
+                        ),
                         MenuItem::action("Replace Text", actions::spelling::ReplaceTextInSelection),
                         MenuItem::separator(),
-                        MenuItem::action("Show Substitutions", actions::spelling::OrderFrontSubstitutionsPanel),
+                        MenuItem::action(
+                            "Show Substitutions",
+                            actions::spelling::OrderFrontSubstitutionsPanel,
+                        ),
                         MenuItem::separator(),
-                        MenuItem::action("Smart Copy/Paste", actions::spelling::ToggleSmartInsertDelete),
-                        MenuItem::action("Smart Quotes", actions::spelling::ToggleAutomaticQuoteSubstitution),
-                        MenuItem::action("Smart Dashes", actions::spelling::ToggleAutomaticDashSubstitution),
-                        MenuItem::action("Text Replacement", actions::spelling::ToggleAutomaticTextReplacement),
+                        MenuItem::action(
+                            "Smart Copy/Paste",
+                            actions::spelling::ToggleSmartInsertDelete,
+                        ),
+                        MenuItem::action(
+                            "Smart Quotes",
+                            actions::spelling::ToggleAutomaticQuoteSubstitution,
+                        ),
+                        MenuItem::action(
+                            "Smart Dashes",
+                            actions::spelling::ToggleAutomaticDashSubstitution,
+                        ),
+                        MenuItem::action(
+                            "Text Replacement",
+                            actions::spelling::ToggleAutomaticTextReplacement,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -203,7 +250,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                         MenuItem::action("8", actions::format::ChangeTabWidth),
                         MenuItem::action("Custom…", actions::format::CustomizeTabWidth),
                         MenuItem::separator(),
-                        MenuItem::action("Use Spaces for Indentation", actions::format::ToggleAutoTabExpand),
+                        MenuItem::action(
+                            "Use Spaces for Indentation",
+                            actions::format::ToggleAutoTabExpand,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -215,12 +265,24 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                     name: "Writing Direction".into(),
                     items: vec![
                         MenuItem::action("Orientation", actions::app::NoOp).disabled(true),
-                        MenuItem::action("Horizontal", actions::format::MakeLayoutOrientationHorizontal),
-                        MenuItem::action("Vertical", actions::format::MakeLayoutOrientationVertical),
+                        MenuItem::action(
+                            "Horizontal",
+                            actions::format::MakeLayoutOrientationHorizontal,
+                        ),
+                        MenuItem::action(
+                            "Vertical",
+                            actions::format::MakeLayoutOrientationVertical,
+                        ),
                         MenuItem::separator(),
                         MenuItem::action("Direction", actions::app::NoOp).disabled(true),
-                        MenuItem::action("Left to Right", actions::format::MakeWritingDirectionLeftToRight),
-                        MenuItem::action("Right to Left", actions::format::MakeWritingDirectionRightToLeft),
+                        MenuItem::action(
+                            "Left to Right",
+                            actions::format::MakeWritingDirectionLeftToRight,
+                        ),
+                        MenuItem::action(
+                            "Right to Left",
+                            actions::format::MakeWritingDirectionRightToLeft,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -235,7 +297,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
             items: vec![
                 MenuItem::action("Show Tab Bar", actions::view::ToggleTabBar),
                 MenuItem::action("Hide Toolbar", actions::view::ToggleToolbarShown),
-                MenuItem::action("Customize Toolbar…", actions::view::RunToolbarCustomizationPalette),
+                MenuItem::action(
+                    "Customize Toolbar…",
+                    actions::view::RunToolbarCustomizationPalette,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Show Quick Actions…", actions::view::ShowQuickActions),
                 MenuItem::separator(),
@@ -252,7 +317,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::submenu(Menu {
                     name: "Inspector".into(),
                     items: vec![
-                        MenuItem::action("Document Inspector", actions::view::ShowDocumentInspector),
+                        MenuItem::action(
+                            "Document Inspector",
+                            actions::view::ShowDocumentInspector,
+                        ),
                         MenuItem::action("Outline", actions::view::ShowOutlineInspector),
                         MenuItem::action("Warnings", actions::view::ShowWarningsInspector),
                         MenuItem::separator(),
@@ -266,10 +334,16 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::action("Show Status Bar", actions::view::ToggleStatusBar),
                 MenuItem::separator(),
                 MenuItem::action("Move Focus to Next Editor", actions::view::FocusNextEditor),
-                MenuItem::action("Move Focus to Previous Editor", actions::view::FocusPreviousEditor),
+                MenuItem::action(
+                    "Move Focus to Previous Editor",
+                    actions::view::FocusPreviousEditor,
+                ),
                 MenuItem::action("Split Editor", actions::view::OpenSplitTextView),
                 MenuItem::action("Close Split Editor", actions::view::CloseSplitTextView),
-                MenuItem::action("Stack Editors Vertically", actions::view::ToggleSplitOrientation),
+                MenuItem::action(
+                    "Stack Editors Vertically",
+                    actions::view::ToggleSplitOrientation,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Enter Full Screen", actions::view::ToggleFullScreen),
             ],
@@ -280,9 +354,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
             items: vec![
                 MenuItem::submenu(Menu {
                     name: "Insert Snippet".into(),
-                    items: vec![
-                        MenuItem::action("Edit Snippets…", actions::text::ShowSnippetEditor),
-                    ],
+                    items: vec![MenuItem::action(
+                        "Edit Snippets…",
+                        actions::text::ShowSnippetEditor,
+                    )],
                     disabled: false,
                 }),
                 MenuItem::submenu(Menu {
@@ -302,25 +377,46 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                         MenuItem::action("Shift Right", actions::text::ShiftRight),
                         MenuItem::action("Shift Left", actions::text::ShiftLeft),
                         MenuItem::separator(),
-                        MenuItem::action("Convert Indentation to Spaces", actions::text::ConvertIndentationToSpaces),
-                        MenuItem::action("Convert Indentation to Tabs", actions::text::ConvertIndentationToTabs),
+                        MenuItem::action(
+                            "Convert Indentation to Spaces",
+                            actions::text::ConvertIndentationToSpaces,
+                        ),
+                        MenuItem::action(
+                            "Convert Indentation to Tabs",
+                            actions::text::ConvertIndentationToTabs,
+                        ),
                     ],
                     disabled: false,
                 }),
                 MenuItem::submenu(Menu {
                     name: "Surround Selection With".into(),
                     items: vec![
-                        MenuItem::action("Single Quotes", actions::text::SurroundSelectionWithSingleQuotes),
-                        MenuItem::action("Double Quotes", actions::text::SurroundSelectionWithDoubleQuotes),
-                        MenuItem::action("Parentheses", actions::text::SurroundSelectionWithParentheses),
+                        MenuItem::action(
+                            "Single Quotes",
+                            actions::text::SurroundSelectionWithSingleQuotes,
+                        ),
+                        MenuItem::action(
+                            "Double Quotes",
+                            actions::text::SurroundSelectionWithDoubleQuotes,
+                        ),
+                        MenuItem::action(
+                            "Parentheses",
+                            actions::text::SurroundSelectionWithParentheses,
+                        ),
                         MenuItem::action("Braces", actions::text::SurroundSelectionWithBraces),
-                        MenuItem::action("Brackets", actions::text::SurroundSelectionWithSquareBrackets),
+                        MenuItem::action(
+                            "Brackets",
+                            actions::text::SurroundSelectionWithSquareBrackets,
+                        ),
                         MenuItem::separator(),
                         MenuItem::action("Custom…", actions::text::SurroundSelection),
                     ],
                     disabled: false,
                 }),
-                MenuItem::action("Trim Trailing Whitespace", actions::text::TrimTrailingWhitespace),
+                MenuItem::action(
+                    "Trim Trailing Whitespace",
+                    actions::text::TrimTrailingWhitespace,
+                ),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu {
                     name: "Lines".into(),
@@ -349,8 +445,14 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                         MenuItem::action("Capitalize", actions::text::CapitalizeWord),
                         MenuItem::action("Convert to Full Width", actions::text::ExchangeFullwidth),
                         MenuItem::action("Convert to Half Width", actions::text::ExchangeHalfwidth),
-                        MenuItem::action("Convert Alphanumeric Text to Full Width", actions::text::ExchangeFullwidthRoman),
-                        MenuItem::action("Convert Alphanumeric Text to Half Width", actions::text::ExchangeHalfwidthRoman),
+                        MenuItem::action(
+                            "Convert Alphanumeric Text to Full Width",
+                            actions::text::ExchangeFullwidthRoman,
+                        ),
+                        MenuItem::action(
+                            "Convert Alphanumeric Text to Half Width",
+                            actions::text::ExchangeHalfwidthRoman,
+                        ),
                         MenuItem::separator(),
                         MenuItem::action("URL Encode", actions::text::EncodeUrl),
                         MenuItem::action("URL Decode", actions::text::DecodeUrl),
@@ -364,7 +466,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 }),
                 MenuItem::separator(),
                 MenuItem::action("Inspect Character", actions::text::ShowSelectionInfo),
-                MenuItem::action("Advanced Character Count…", actions::text::ToggleAdvancedCounter),
+                MenuItem::action(
+                    "Advanced Character Count…",
+                    actions::text::ToggleAdvancedCounter,
+                ),
                 MenuItem::action("Edit Color Code…", actions::text::EditColorCode),
             ],
             disabled: false,
@@ -376,11 +481,20 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::action("Find Next", actions::find::FindNext),
                 MenuItem::action("Find Previous", actions::find::FindPrevious),
                 MenuItem::action("Find All", actions::find::FindAll),
-                MenuItem::action("Select All Find Matches", actions::find::SelectAllFindMatches),
+                MenuItem::action(
+                    "Select All Find Matches",
+                    actions::find::SelectAllFindMatches,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Use Selection for Find", actions::find::UseSelectionForFind),
-                MenuItem::action("Use Selection for Replace", actions::find::UseSelectionForReplace),
-                MenuItem::action("Jump to Selection", actions::find::CenterSelectionInVisibleArea),
+                MenuItem::action(
+                    "Use Selection for Replace",
+                    actions::find::UseSelectionForReplace,
+                ),
+                MenuItem::action(
+                    "Jump to Selection",
+                    actions::find::CenterSelectionInVisibleArea,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Replace", actions::find::ShowReplaceInterface),
                 MenuItem::action("Replace and Find Next", actions::find::ReplaceAndFindNext),
@@ -389,7 +503,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                     name: "Multiple Replace".into(),
                     items: vec![
                         MenuItem::separator(),
-                        MenuItem::action("Manage Multiple Replace…", actions::find::ShowMultipleReplace),
+                        MenuItem::action(
+                            "Manage Multiple Replace…",
+                            actions::find::ShowMultipleReplace,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -398,8 +515,14 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::action("Remove Highlights", actions::find::RemoveHighlights),
                 MenuItem::separator(),
                 MenuItem::action("Open Outline Menu", actions::find::OpenOutlineMenu),
-                MenuItem::action("Select Previous Outline Item", actions::find::SelectPrevItemOfOutlineMenu),
-                MenuItem::action("Select Next Outline Item", actions::find::SelectNextItemOfOutlineMenu),
+                MenuItem::action(
+                    "Select Previous Outline Item",
+                    actions::find::SelectPrevItemOfOutlineMenu,
+                ),
+                MenuItem::action(
+                    "Select Next Outline Item",
+                    actions::find::SelectNextItemOfOutlineMenu,
+                ),
                 MenuItem::separator(),
                 MenuItem::action("Go to Line…", actions::find::GotoLocation),
             ],
@@ -420,8 +543,7 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
         },
         Menu {
             name: "Script".into(),
-            items: vec![
-            ],
+            items: vec![],
             disabled: true,
         },
         Menu {
@@ -432,7 +554,10 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                     name: "CotEditor Scripting Guide".into(),
                     items: vec![
                         MenuItem::action("About Scripting", actions::help::OpenHelpAnchor),
-                        MenuItem::action("AppleScript Dictionary", actions::help::OpenAppleScriptDictionary),
+                        MenuItem::action(
+                            "AppleScript Dictionary",
+                            actions::help::OpenAppleScriptDictionary,
+                        ),
                     ],
                     disabled: false,
                 }),
@@ -487,51 +612,174 @@ pub const APP_MENU_TITLE: &str = "SubText";
 /// that one is [`crate::menus::commands`], and the two are held together
 /// by a test.
 pub const COMMANDS: &[Command] = &[
-    Command { path: "CotEditor > About CotEditor", action: "ShowAboutPanel" },
-    Command { path: "CotEditor > Donate to CotEditor…", action: "ShowDonationWindow" },
-    Command { path: "CotEditor > Settings…", action: "ShowSettingsWindow" },
-    Command { path: "CotEditor > Hide CotEditor", action: "Hide" },
-    Command { path: "CotEditor > Hide Others", action: "HideOtherApplications" },
-    Command { path: "CotEditor > Show All", action: "UnhideAllApplications" },
-    Command { path: "CotEditor > Quit CotEditor", action: "Terminate" },
-    Command { path: "File > New", action: "NewDocument" },
-    Command { path: "File > New Window", action: "NewDocumentAsWindow" },
-    Command { path: "File > New Tab", action: "NewDocumentAsTab" },
-    Command { path: "File > Open…", action: "OpenDocument" },
-    Command { path: "File > Open Recent > Clear Menu", action: "ClearRecentDocuments" },
-    Command { path: "File > Close", action: "PerformClose" },
-    Command { path: "File > Save", action: "SaveDocument" },
-    Command { path: "File > Save As…", action: "SaveDocumentAs" },
-    Command { path: "File > Revert to Saved", action: "RevertDocumentToSaved" },
-    Command { path: "File > Show in Finder", action: "ShowInFinder" },
-    Command { path: "File > Copy File Path", action: "CopyPath" },
-    Command { path: "File > Share…", action: "ShareDocument" },
-    Command { path: "File > Page Setup…", action: "RunPageLayout" },
-    Command { path: "File > Print…", action: "PrintDocument" },
-    Command { path: "Edit > Undo", action: "Undo" },
-    Command { path: "Edit > Redo", action: "Redo" },
-    Command { path: "Edit > Cut", action: "Cut" },
-    Command { path: "Edit > Copy", action: "Copy" },
-    Command { path: "Edit > Copy as Rich Text", action: "CopyWithStyle" },
-    Command { path: "Edit > Paste", action: "Paste" },
-    Command { path: "Edit > Paste Exactly", action: "PasteAsIs" },
-    Command { path: "Edit > Delete", action: "Delete" },
-    Command { path: "Edit > Select > Select All", action: "SelectAll" },
-    Command { path: "Edit > Select > Select Line", action: "SelectParagraph" },
-    Command { path: "Edit > Select > Select Word", action: "SelectWord" },
-    Command { path: "Edit > Select > Select Enclosing Symbols", action: "SelectEnclosingSymbols" },
-    Command { path: "Edit > Select > Select Column Up", action: "SelectColumnUp" },
-    Command { path: "Edit > Select > Select Column Down", action: "SelectColumnDown" },
-    Command { path: "Edit > Select > Split Selection by Lines", action: "SplitSelectionByLines" },
-    Command { path: "Edit > Complete", action: "Complete" },
-    Command { path: "Edit > Insert Backslash", action: "InputBackSlash" },
-    Command { path: "Edit > Insert Yen Mark", action: "InputYenMark" },
-    Command { path: "Edit > Insert by Unicode Code Point…", action: "ShowUnicodeInputPanel" },
+    Command {
+        path: "CotEditor > About CotEditor",
+        action: "ShowAboutPanel",
+    },
+    Command {
+        path: "CotEditor > Donate to CotEditor…",
+        action: "ShowDonationWindow",
+    },
+    Command {
+        path: "CotEditor > Settings…",
+        action: "ShowSettingsWindow",
+    },
+    Command {
+        path: "CotEditor > Hide CotEditor",
+        action: "Hide",
+    },
+    Command {
+        path: "CotEditor > Hide Others",
+        action: "HideOtherApplications",
+    },
+    Command {
+        path: "CotEditor > Show All",
+        action: "UnhideAllApplications",
+    },
+    Command {
+        path: "CotEditor > Quit CotEditor",
+        action: "Terminate",
+    },
+    Command {
+        path: "File > New",
+        action: "NewDocument",
+    },
+    Command {
+        path: "File > New Window",
+        action: "NewDocumentAsWindow",
+    },
+    Command {
+        path: "File > New Tab",
+        action: "NewDocumentAsTab",
+    },
+    Command {
+        path: "File > Open…",
+        action: "OpenDocument",
+    },
+    Command {
+        path: "File > Open Recent > Clear Menu",
+        action: "ClearRecentDocuments",
+    },
+    Command {
+        path: "File > Close",
+        action: "PerformClose",
+    },
+    Command {
+        path: "File > Save",
+        action: "SaveDocument",
+    },
+    Command {
+        path: "File > Save As…",
+        action: "SaveDocumentAs",
+    },
+    Command {
+        path: "File > Revert to Saved",
+        action: "RevertDocumentToSaved",
+    },
+    Command {
+        path: "File > Show in Finder",
+        action: "ShowInFinder",
+    },
+    Command {
+        path: "File > Copy File Path",
+        action: "CopyPath",
+    },
+    Command {
+        path: "File > Share…",
+        action: "ShareDocument",
+    },
+    Command {
+        path: "File > Page Setup…",
+        action: "RunPageLayout",
+    },
+    Command {
+        path: "File > Print…",
+        action: "PrintDocument",
+    },
+    Command {
+        path: "Edit > Undo",
+        action: "Undo",
+    },
+    Command {
+        path: "Edit > Redo",
+        action: "Redo",
+    },
+    Command {
+        path: "Edit > Cut",
+        action: "Cut",
+    },
+    Command {
+        path: "Edit > Copy",
+        action: "Copy",
+    },
+    Command {
+        path: "Edit > Copy as Rich Text",
+        action: "CopyWithStyle",
+    },
+    Command {
+        path: "Edit > Paste",
+        action: "Paste",
+    },
+    Command {
+        path: "Edit > Paste Exactly",
+        action: "PasteAsIs",
+    },
+    Command {
+        path: "Edit > Delete",
+        action: "Delete",
+    },
+    Command {
+        path: "Edit > Select > Select All",
+        action: "SelectAll",
+    },
+    Command {
+        path: "Edit > Select > Select Line",
+        action: "SelectParagraph",
+    },
+    Command {
+        path: "Edit > Select > Select Word",
+        action: "SelectWord",
+    },
+    Command {
+        path: "Edit > Select > Select Enclosing Symbols",
+        action: "SelectEnclosingSymbols",
+    },
+    Command {
+        path: "Edit > Select > Select Column Up",
+        action: "SelectColumnUp",
+    },
+    Command {
+        path: "Edit > Select > Select Column Down",
+        action: "SelectColumnDown",
+    },
+    Command {
+        path: "Edit > Select > Split Selection by Lines",
+        action: "SplitSelectionByLines",
+    },
+    Command {
+        path: "Edit > Complete",
+        action: "Complete",
+    },
+    Command {
+        path: "Edit > Insert Backslash",
+        action: "InputBackSlash",
+    },
+    Command {
+        path: "Edit > Insert Yen Mark",
+        action: "InputYenMark",
+    },
+    Command {
+        path: "Edit > Insert by Unicode Code Point…",
+        action: "ShowUnicodeInputPanel",
+    },
     Command {
         path: "Edit > Spelling and Grammar > Show Spelling and Grammar",
         action: "ShowGuessPanel",
     },
-    Command { path: "Edit > Spelling and Grammar > Check Document Now", action: "CheckSpelling" },
+    Command {
+        path: "Edit > Spelling and Grammar > Check Document Now",
+        action: "CheckSpelling",
+    },
     Command {
         path: "Edit > Spelling and Grammar > Check Spelling While Typing",
         action: "ToggleContinuousSpellChecking",
@@ -544,18 +792,30 @@ pub const COMMANDS: &[Command] = &[
         path: "Edit > Spelling and Grammar > Correct Spelling Automatically",
         action: "ToggleAutomaticSpellingCorrection",
     },
-    Command { path: "Edit > Substitutions > Replace Quotes", action: "ReplaceQuotesInSelection" },
+    Command {
+        path: "Edit > Substitutions > Replace Quotes",
+        action: "ReplaceQuotesInSelection",
+    },
     Command {
         path: "Edit > Substitutions > Straighten Quotes",
         action: "StraightenQuotesInSelection",
     },
-    Command { path: "Edit > Substitutions > Replace Dashes", action: "ReplaceDashesInSelection" },
-    Command { path: "Edit > Substitutions > Replace Text", action: "ReplaceTextInSelection" },
+    Command {
+        path: "Edit > Substitutions > Replace Dashes",
+        action: "ReplaceDashesInSelection",
+    },
+    Command {
+        path: "Edit > Substitutions > Replace Text",
+        action: "ReplaceTextInSelection",
+    },
     Command {
         path: "Edit > Substitutions > Show Substitutions",
         action: "OrderFrontSubstitutionsPanel",
     },
-    Command { path: "Edit > Substitutions > Smart Copy/Paste", action: "ToggleSmartInsertDelete" },
+    Command {
+        path: "Edit > Substitutions > Smart Copy/Paste",
+        action: "ToggleSmartInsertDelete",
+    },
     Command {
         path: "Edit > Substitutions > Smart Quotes",
         action: "ToggleAutomaticQuoteSubstitution",
@@ -568,28 +828,82 @@ pub const COMMANDS: &[Command] = &[
         path: "Edit > Substitutions > Text Replacement",
         action: "ToggleAutomaticTextReplacement",
     },
-    Command { path: "Edit > Speech > Start Speaking", action: "StartSpeaking" },
-    Command { path: "Edit > Speech > Stop Speaking", action: "StopSpeaking" },
-    Command { path: "Format > Reset Syntax Analysis", action: "RecolorAll" },
-    Command { path: "Format > Font > Show Fonts", action: "OrderFrontFontPanel" },
-    Command { path: "Format > Font > Standard", action: "MakeFontStandard" },
-    Command { path: "Format > Font > Monospaced", action: "MakeFontMonospaced" },
-    Command { path: "Format > Font > Bigger", action: "BiggerFont" },
-    Command { path: "Format > Font > Smaller", action: "SmallerFont" },
-    Command { path: "Format > Font > Reset to Default", action: "ResetFont" },
-    Command { path: "Format > Font > Antialias", action: "ToggleAntialias" },
-    Command { path: "Format > Font > Ligatures", action: "ToggleLigatures" },
-    Command { path: "Format > Tab Width > 2", action: "ChangeTabWidth" },
-    Command { path: "Format > Tab Width > 4", action: "ChangeTabWidth" },
-    Command { path: "Format > Tab Width > 8", action: "ChangeTabWidth" },
-    Command { path: "Format > Tab Width > Custom…", action: "CustomizeTabWidth" },
+    Command {
+        path: "Edit > Speech > Start Speaking",
+        action: "StartSpeaking",
+    },
+    Command {
+        path: "Edit > Speech > Stop Speaking",
+        action: "StopSpeaking",
+    },
+    Command {
+        path: "Format > Reset Syntax Analysis",
+        action: "RecolorAll",
+    },
+    Command {
+        path: "Format > Font > Show Fonts",
+        action: "OrderFrontFontPanel",
+    },
+    Command {
+        path: "Format > Font > Standard",
+        action: "MakeFontStandard",
+    },
+    Command {
+        path: "Format > Font > Monospaced",
+        action: "MakeFontMonospaced",
+    },
+    Command {
+        path: "Format > Font > Bigger",
+        action: "BiggerFont",
+    },
+    Command {
+        path: "Format > Font > Smaller",
+        action: "SmallerFont",
+    },
+    Command {
+        path: "Format > Font > Reset to Default",
+        action: "ResetFont",
+    },
+    Command {
+        path: "Format > Font > Antialias",
+        action: "ToggleAntialias",
+    },
+    Command {
+        path: "Format > Font > Ligatures",
+        action: "ToggleLigatures",
+    },
+    Command {
+        path: "Format > Tab Width > 2",
+        action: "ChangeTabWidth",
+    },
+    Command {
+        path: "Format > Tab Width > 4",
+        action: "ChangeTabWidth",
+    },
+    Command {
+        path: "Format > Tab Width > 8",
+        action: "ChangeTabWidth",
+    },
+    Command {
+        path: "Format > Tab Width > Custom…",
+        action: "CustomizeTabWidth",
+    },
     Command {
         path: "Format > Tab Width > Use Spaces for Indentation",
         action: "ToggleAutoTabExpand",
     },
-    Command { path: "Format > Show Invisibles", action: "ToggleInvisibleChars" },
-    Command { path: "Format > Show Indent Guides", action: "ToggleIndentGuides" },
-    Command { path: "Format > Show Page Guide", action: "TogglePageGuide" },
+    Command {
+        path: "Format > Show Invisibles",
+        action: "ToggleInvisibleChars",
+    },
+    Command {
+        path: "Format > Show Indent Guides",
+        action: "ToggleIndentGuides",
+    },
+    Command {
+        path: "Format > Show Page Guide",
+        action: "TogglePageGuide",
+    },
     Command {
         path: "Format > Writing Direction > Horizontal",
         action: "MakeLayoutOrientationHorizontal",
@@ -606,35 +920,122 @@ pub const COMMANDS: &[Command] = &[
         path: "Format > Writing Direction > Right to Left",
         action: "MakeWritingDirectionRightToLeft",
     },
-    Command { path: "Format > Wrap Lines", action: "ToggleLineWrap" },
-    Command { path: "Format > Prevent Editing", action: "ToggleEditable" },
-    Command { path: "View > Show Tab Bar", action: "ToggleTabBar" },
-    Command { path: "View > Hide Toolbar", action: "ToggleToolbarShown" },
-    Command { path: "View > Customize Toolbar…", action: "RunToolbarCustomizationPalette" },
-    Command { path: "View > Show Quick Actions…", action: "ShowQuickActions" },
-    Command { path: "View > Sidebar > File Browser", action: "ShowFileBrowser" },
-    Command { path: "View > Sidebar > Folder Find", action: "ShowFolderFinder" },
-    Command { path: "View > Sidebar > Show Sidebar", action: "ToggleSidebar" },
-    Command { path: "View > Inspector > Document Inspector", action: "ShowDocumentInspector" },
-    Command { path: "View > Inspector > Outline", action: "ShowOutlineInspector" },
-    Command { path: "View > Inspector > Warnings", action: "ShowWarningsInspector" },
-    Command { path: "View > Inspector > Show Inspector", action: "ToggleInspector" },
-    Command { path: "View > Show Navigation Bar", action: "ToggleNavigationBar" },
-    Command { path: "View > Show Line Numbers", action: "ToggleLineNumber" },
-    Command { path: "View > Show Status Bar", action: "ToggleStatusBar" },
-    Command { path: "View > Move Focus to Next Editor", action: "FocusNextEditor" },
-    Command { path: "View > Move Focus to Previous Editor", action: "FocusPreviousEditor" },
-    Command { path: "View > Split Editor", action: "OpenSplitTextView" },
-    Command { path: "View > Close Split Editor", action: "CloseSplitTextView" },
-    Command { path: "View > Stack Editors Vertically", action: "ToggleSplitOrientation" },
-    Command { path: "View > Enter Full Screen", action: "ToggleFullScreen" },
-    Command { path: "Text > Insert Snippet > Edit Snippets…", action: "ShowSnippetEditor" },
-    Command { path: "Text > Comment > Toggle Comment", action: "ToggleComment" },
-    Command { path: "Text > Comment > Inline Comment", action: "InlineCommentOut" },
-    Command { path: "Text > Comment > Block Comment", action: "BlockCommentOut" },
-    Command { path: "Text > Comment > Uncomment", action: "Uncomment" },
-    Command { path: "Text > Indentation > Shift Right", action: "ShiftRight" },
-    Command { path: "Text > Indentation > Shift Left", action: "ShiftLeft" },
+    Command {
+        path: "Format > Wrap Lines",
+        action: "ToggleLineWrap",
+    },
+    Command {
+        path: "Format > Prevent Editing",
+        action: "ToggleEditable",
+    },
+    Command {
+        path: "View > Show Tab Bar",
+        action: "ToggleTabBar",
+    },
+    Command {
+        path: "View > Hide Toolbar",
+        action: "ToggleToolbarShown",
+    },
+    Command {
+        path: "View > Customize Toolbar…",
+        action: "RunToolbarCustomizationPalette",
+    },
+    Command {
+        path: "View > Show Quick Actions…",
+        action: "ShowQuickActions",
+    },
+    Command {
+        path: "View > Sidebar > File Browser",
+        action: "ShowFileBrowser",
+    },
+    Command {
+        path: "View > Sidebar > Folder Find",
+        action: "ShowFolderFinder",
+    },
+    Command {
+        path: "View > Sidebar > Show Sidebar",
+        action: "ToggleSidebar",
+    },
+    Command {
+        path: "View > Inspector > Document Inspector",
+        action: "ShowDocumentInspector",
+    },
+    Command {
+        path: "View > Inspector > Outline",
+        action: "ShowOutlineInspector",
+    },
+    Command {
+        path: "View > Inspector > Warnings",
+        action: "ShowWarningsInspector",
+    },
+    Command {
+        path: "View > Inspector > Show Inspector",
+        action: "ToggleInspector",
+    },
+    Command {
+        path: "View > Show Navigation Bar",
+        action: "ToggleNavigationBar",
+    },
+    Command {
+        path: "View > Show Line Numbers",
+        action: "ToggleLineNumber",
+    },
+    Command {
+        path: "View > Show Status Bar",
+        action: "ToggleStatusBar",
+    },
+    Command {
+        path: "View > Move Focus to Next Editor",
+        action: "FocusNextEditor",
+    },
+    Command {
+        path: "View > Move Focus to Previous Editor",
+        action: "FocusPreviousEditor",
+    },
+    Command {
+        path: "View > Split Editor",
+        action: "OpenSplitTextView",
+    },
+    Command {
+        path: "View > Close Split Editor",
+        action: "CloseSplitTextView",
+    },
+    Command {
+        path: "View > Stack Editors Vertically",
+        action: "ToggleSplitOrientation",
+    },
+    Command {
+        path: "View > Enter Full Screen",
+        action: "ToggleFullScreen",
+    },
+    Command {
+        path: "Text > Insert Snippet > Edit Snippets…",
+        action: "ShowSnippetEditor",
+    },
+    Command {
+        path: "Text > Comment > Toggle Comment",
+        action: "ToggleComment",
+    },
+    Command {
+        path: "Text > Comment > Inline Comment",
+        action: "InlineCommentOut",
+    },
+    Command {
+        path: "Text > Comment > Block Comment",
+        action: "BlockCommentOut",
+    },
+    Command {
+        path: "Text > Comment > Uncomment",
+        action: "Uncomment",
+    },
+    Command {
+        path: "Text > Indentation > Shift Right",
+        action: "ShiftRight",
+    },
+    Command {
+        path: "Text > Indentation > Shift Left",
+        action: "ShiftLeft",
+    },
     Command {
         path: "Text > Indentation > Convert Indentation to Spaces",
         action: "ConvertIndentationToSpaces",
@@ -663,23 +1064,74 @@ pub const COMMANDS: &[Command] = &[
         path: "Text > Surround Selection With > Brackets",
         action: "SurroundSelectionWithSquareBrackets",
     },
-    Command { path: "Text > Surround Selection With > Custom…", action: "SurroundSelection" },
-    Command { path: "Text > Trim Trailing Whitespace", action: "TrimTrailingWhitespace" },
-    Command { path: "Text > Lines > Move Up", action: "MoveLineUp" },
-    Command { path: "Text > Lines > Move Down", action: "MoveLineDown" },
-    Command { path: "Text > Lines > Sort", action: "SortLinesAscending" },
-    Command { path: "Text > Lines > Sort by Pattern…", action: "PatternSort" },
-    Command { path: "Text > Lines > Reverse", action: "ReverseLines" },
-    Command { path: "Text > Lines > Shuffle", action: "ShuffleLines" },
-    Command { path: "Text > Lines > Delete Duplicates", action: "DeleteDuplicateLine" },
-    Command { path: "Text > Lines > Duplicate Line", action: "DuplicateLine" },
-    Command { path: "Text > Lines > Delete Line", action: "DeleteLine" },
-    Command { path: "Text > Lines > Join Lines", action: "JoinLines" },
-    Command { path: "Text > Transformations > Make Upper Case", action: "UppercaseWord" },
-    Command { path: "Text > Transformations > Make Lower Case", action: "LowercaseWord" },
-    Command { path: "Text > Transformations > Capitalize", action: "CapitalizeWord" },
-    Command { path: "Text > Transformations > Convert to Full Width", action: "ExchangeFullwidth" },
-    Command { path: "Text > Transformations > Convert to Half Width", action: "ExchangeHalfwidth" },
+    Command {
+        path: "Text > Surround Selection With > Custom…",
+        action: "SurroundSelection",
+    },
+    Command {
+        path: "Text > Trim Trailing Whitespace",
+        action: "TrimTrailingWhitespace",
+    },
+    Command {
+        path: "Text > Lines > Move Up",
+        action: "MoveLineUp",
+    },
+    Command {
+        path: "Text > Lines > Move Down",
+        action: "MoveLineDown",
+    },
+    Command {
+        path: "Text > Lines > Sort",
+        action: "SortLinesAscending",
+    },
+    Command {
+        path: "Text > Lines > Sort by Pattern…",
+        action: "PatternSort",
+    },
+    Command {
+        path: "Text > Lines > Reverse",
+        action: "ReverseLines",
+    },
+    Command {
+        path: "Text > Lines > Shuffle",
+        action: "ShuffleLines",
+    },
+    Command {
+        path: "Text > Lines > Delete Duplicates",
+        action: "DeleteDuplicateLine",
+    },
+    Command {
+        path: "Text > Lines > Duplicate Line",
+        action: "DuplicateLine",
+    },
+    Command {
+        path: "Text > Lines > Delete Line",
+        action: "DeleteLine",
+    },
+    Command {
+        path: "Text > Lines > Join Lines",
+        action: "JoinLines",
+    },
+    Command {
+        path: "Text > Transformations > Make Upper Case",
+        action: "UppercaseWord",
+    },
+    Command {
+        path: "Text > Transformations > Make Lower Case",
+        action: "LowercaseWord",
+    },
+    Command {
+        path: "Text > Transformations > Capitalize",
+        action: "CapitalizeWord",
+    },
+    Command {
+        path: "Text > Transformations > Convert to Full Width",
+        action: "ExchangeFullwidth",
+    },
+    Command {
+        path: "Text > Transformations > Convert to Half Width",
+        action: "ExchangeHalfwidth",
+    },
     Command {
         path: "Text > Transformations > Convert Alphanumeric Text to Full Width",
         action: "ExchangeFullwidthRoman",
@@ -688,38 +1140,122 @@ pub const COMMANDS: &[Command] = &[
         path: "Text > Transformations > Convert Alphanumeric Text to Half Width",
         action: "ExchangeHalfwidthRoman",
     },
-    Command { path: "Text > Transformations > URL Encode", action: "EncodeUrl" },
-    Command { path: "Text > Transformations > URL Decode", action: "DecodeUrl" },
-    Command { path: "Text > Inspect Character", action: "ShowSelectionInfo" },
-    Command { path: "Text > Advanced Character Count…", action: "ToggleAdvancedCounter" },
-    Command { path: "Text > Edit Color Code…", action: "EditColorCode" },
-    Command { path: "Find > Find…", action: "PerformTextFinderAction" },
-    Command { path: "Find > Find Next", action: "FindNext" },
-    Command { path: "Find > Find Previous", action: "FindPrevious" },
-    Command { path: "Find > Find All", action: "FindAll" },
-    Command { path: "Find > Select All Find Matches", action: "SelectAllFindMatches" },
-    Command { path: "Find > Use Selection for Find", action: "UseSelectionForFind" },
-    Command { path: "Find > Use Selection for Replace", action: "UseSelectionForReplace" },
-    Command { path: "Find > Jump to Selection", action: "CenterSelectionInVisibleArea" },
-    Command { path: "Find > Replace", action: "ShowReplaceInterface" },
-    Command { path: "Find > Replace and Find Next", action: "ReplaceAndFindNext" },
-    Command { path: "Find > Replace All", action: "ReplaceAll" },
+    Command {
+        path: "Text > Transformations > URL Encode",
+        action: "EncodeUrl",
+    },
+    Command {
+        path: "Text > Transformations > URL Decode",
+        action: "DecodeUrl",
+    },
+    Command {
+        path: "Text > Inspect Character",
+        action: "ShowSelectionInfo",
+    },
+    Command {
+        path: "Text > Advanced Character Count…",
+        action: "ToggleAdvancedCounter",
+    },
+    Command {
+        path: "Text > Edit Color Code…",
+        action: "EditColorCode",
+    },
+    Command {
+        path: "Find > Find…",
+        action: "PerformTextFinderAction",
+    },
+    Command {
+        path: "Find > Find Next",
+        action: "FindNext",
+    },
+    Command {
+        path: "Find > Find Previous",
+        action: "FindPrevious",
+    },
+    Command {
+        path: "Find > Find All",
+        action: "FindAll",
+    },
+    Command {
+        path: "Find > Select All Find Matches",
+        action: "SelectAllFindMatches",
+    },
+    Command {
+        path: "Find > Use Selection for Find",
+        action: "UseSelectionForFind",
+    },
+    Command {
+        path: "Find > Use Selection for Replace",
+        action: "UseSelectionForReplace",
+    },
+    Command {
+        path: "Find > Jump to Selection",
+        action: "CenterSelectionInVisibleArea",
+    },
+    Command {
+        path: "Find > Replace",
+        action: "ShowReplaceInterface",
+    },
+    Command {
+        path: "Find > Replace and Find Next",
+        action: "ReplaceAndFindNext",
+    },
+    Command {
+        path: "Find > Replace All",
+        action: "ReplaceAll",
+    },
     Command {
         path: "Find > Multiple Replace > Manage Multiple Replace…",
         action: "ShowMultipleReplace",
     },
-    Command { path: "Find > Highlight All", action: "HighlightAll" },
-    Command { path: "Find > Remove Highlights", action: "RemoveHighlights" },
-    Command { path: "Find > Open Outline Menu", action: "OpenOutlineMenu" },
-    Command { path: "Find > Select Previous Outline Item", action: "SelectPrevItemOfOutlineMenu" },
-    Command { path: "Find > Select Next Outline Item", action: "SelectNextItemOfOutlineMenu" },
-    Command { path: "Find > Go to Line…", action: "GotoLocation" },
-    Command { path: "Window > Minimize", action: "PerformMiniaturize" },
-    Command { path: "Window > Zoom", action: "PerformZoom" },
-    Command { path: "Window > Keep on Top", action: "ToggleKeepOnTop" },
-    Command { path: "Window > Bring All to Front", action: "ArrangeInFront" },
-    Command { path: "Window > Console", action: "ShowConsolePanel" },
-    Command { path: "Help > CotEditor Help", action: "ShowHelp" },
+    Command {
+        path: "Find > Highlight All",
+        action: "HighlightAll",
+    },
+    Command {
+        path: "Find > Remove Highlights",
+        action: "RemoveHighlights",
+    },
+    Command {
+        path: "Find > Open Outline Menu",
+        action: "OpenOutlineMenu",
+    },
+    Command {
+        path: "Find > Select Previous Outline Item",
+        action: "SelectPrevItemOfOutlineMenu",
+    },
+    Command {
+        path: "Find > Select Next Outline Item",
+        action: "SelectNextItemOfOutlineMenu",
+    },
+    Command {
+        path: "Find > Go to Line…",
+        action: "GotoLocation",
+    },
+    Command {
+        path: "Window > Minimize",
+        action: "PerformMiniaturize",
+    },
+    Command {
+        path: "Window > Zoom",
+        action: "PerformZoom",
+    },
+    Command {
+        path: "Window > Keep on Top",
+        action: "ToggleKeepOnTop",
+    },
+    Command {
+        path: "Window > Bring All to Front",
+        action: "ArrangeInFront",
+    },
+    Command {
+        path: "Window > Console",
+        action: "ShowConsolePanel",
+    },
+    Command {
+        path: "Help > CotEditor Help",
+        action: "ShowHelp",
+    },
     Command {
         path: "Help > CotEditor Scripting Guide > About Scripting",
         action: "OpenHelpAnchor",
@@ -728,11 +1264,26 @@ pub const COMMANDS: &[Command] = &[
         path: "Help > CotEditor Scripting Guide > AppleScript Dictionary",
         action: "OpenAppleScriptDictionary",
     },
-    Command { path: "Help > What’s New in CotEditor", action: "ShowWhatsNew" },
-    Command { path: "Help > Release Notes", action: "OpenHelpAnchor" },
-    Command { path: "Help > Create Issue Report", action: "CreateBugReport" },
-    Command { path: "Help > Report Issue", action: "ReportBug" },
-    Command { path: "Help > CotEditor Web Site", action: "OpenWebSite" },
+    Command {
+        path: "Help > What’s New in CotEditor",
+        action: "ShowWhatsNew",
+    },
+    Command {
+        path: "Help > Release Notes",
+        action: "OpenHelpAnchor",
+    },
+    Command {
+        path: "Help > Create Issue Report",
+        action: "CreateBugReport",
+    },
+    Command {
+        path: "Help > Report Issue",
+        action: "ReportBug",
+    },
+    Command {
+        path: "Help > CotEditor Web Site",
+        action: "OpenWebSite",
+    },
 ];
 
 #[cfg(test)]
@@ -751,15 +1302,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "SubText",
-                "File",
-                "Edit",
-                "Format",
-                "View",
-                "Text",
-                "Find",
-                "Window",
-                "Script",
+                "SubText", "File", "Edit", "Format", "View", "Text", "Find", "Window", "Script",
                 "Help",
             ]
         );
@@ -784,7 +1327,10 @@ mod tests {
                 })
                 .sum()
         }
-        let total: usize = app_menus(&crate::menus::MenuGates::default()).iter().map(count).sum();
+        let total: usize = app_menus(&crate::menus::MenuGates::default())
+            .iter()
+            .map(count)
+            .sum();
         assert_eq!(total, 172);
     }
 

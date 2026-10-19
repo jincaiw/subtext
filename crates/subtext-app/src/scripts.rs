@@ -358,10 +358,8 @@ mod tests {
 
         impl Probe {
             fn new(name: &str, body: &str, mode: u32) -> Self {
-                let path = std::env::temp_dir().join(format!(
-                    "subtext-probe-{}-{name}.sh",
-                    std::process::id()
-                ));
+                let path = std::env::temp_dir()
+                    .join(format!("subtext-probe-{}-{name}.sh", std::process::id()));
                 fs::write(&path, body).expect("the probe is writable");
                 let mut permissions = fs::metadata(&path).expect("the probe exists").permissions();
                 std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, mode);
@@ -460,7 +458,10 @@ mod tests {
             drop(probe);
 
             let outcome = execute(&script, None, None);
-            assert_eq!(outcome.failure.as_deref(), Some("The script “Probe” is gone"));
+            assert_eq!(
+                outcome.failure.as_deref(),
+                Some("The script “Probe” is gone")
+            );
         }
     }
 }

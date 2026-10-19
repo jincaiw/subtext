@@ -101,10 +101,13 @@ pub struct FindPanel {
 }
 
 impl FindPanel {
-    pub fn new(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let table = cx.new(|cx| {
-            TableState::new(FindResultTable::new(workspace.clone()), window, cx)
-        });
+    pub fn new(
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let table =
+            cx.new(|cx| TableState::new(FindResultTable::new(workspace.clone()), window, cx));
         // While the table has the keyboard focus, ⌘C and the standard Text
         // Size commands belong to it rather than to the editor. A blur on this
         // handle is the moment that stops being true.
@@ -117,13 +120,17 @@ impl FindPanel {
                 }
             }))
         };
-        Self { workspace, table, _results_blur: blur }
+        Self {
+            workspace,
+            table,
+            _results_blur: blur,
+        }
     }
 
-/// The `?` trigger and quick-reference popover for the regex syntax —
-/// upstream's `HelpLink` + `detachablePopover` pair. The popover manages
-/// its own open state and closes on an outside click.
-fn regex_reference_button(&self) -> impl IntoElement {
+    /// The `?` trigger and quick-reference popover for the regex syntax —
+    /// upstream's `HelpLink` + `detachablePopover` pair. The popover manages
+    /// its own open state and closes on an outside click.
+    fn regex_reference_button(&self) -> impl IntoElement {
         Popover::new("regex-reference")
             .trigger(
                 Button::new("regex-reference-trigger")
@@ -190,7 +197,8 @@ fn regex_reference_button(&self) -> impl IntoElement {
         let weak = workspace.downgrade();
         handle
             .update(cx, move |_, window, cx| {
-                weak.update(cx, |workspace, cx| command(workspace, window, cx)).ok();
+                weak.update(cx, |workspace, cx| command(workspace, window, cx))
+                    .ok();
             })
             .ok();
     }
@@ -208,7 +216,11 @@ impl Render for FindPanel {
         let (regex, case_sensitive, in_selection) = {
             let workspace = workspace.read(cx);
             let settings = &workspace.settings;
-            (settings.find_regex, settings.find_case_sensitive, settings.find_in_selection)
+            (
+                settings.find_regex,
+                settings.find_case_sensitive,
+                settings.find_in_selection,
+            )
         };
         let (count, current, error) = workspace.read(cx).find_status();
         let results_open = workspace.read(cx).find_results().1;
@@ -243,7 +255,13 @@ impl Render for FindPanel {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_field(&query, message, FindField::Query, window, cx))
-            .child(self.render_field(&replacement, replace_message, FindField::Replacement, window, cx))
+            .child(self.render_field(
+                &replacement,
+                replace_message,
+                FindField::Replacement,
+                window,
+                cx,
+            ))
             .child(options_row(
                 self.workspace.clone(),
                 regex,
@@ -369,71 +387,65 @@ impl FindPanel {
                     .border_color(cx.theme().border)
                     .overflow_hidden()
                     .track_focus(&focus_handle)
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                        // A click on the table makes it the keyboard target —
-                        // the same responder hand-off AppKit does for free.
-                        this.table.focus_handle(cx).focus(window, cx);
-                        if let Some(workspace) = this.workspace.upgrade() {
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            // A click on the table makes it the keyboard target —
+                            // the same responder hand-off AppKit does for free.
+                            this.table.focus_handle(cx).focus(window, cx);
+                            if let Some(workspace) = this.workspace.upgrade() {
+                                workspace.update(cx, |workspace, cx| {
+                                    workspace.focus_find_results(true, cx)
+                                });
+                            }
+                        }),
+                    )
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        let key = event.keystroke.key.as_str();
+                        let modifiers = event.keystroke.modifiers;
+                        let Some(workspace) = this.workspace.upgrade() else {
+                            return;
+                        };
+                        // ⌘C copies the selected rows, upstream's `.copyable`.
+                        if key == "c" && (modifiers.platform || modifiers.control) {
+                            workspace.update(cx, |workspace, cx| workspace.copy_find_results(cx));
+                            cx.stop_propagation();
+                            return;
+                        }
+                        let count = workspace.read(cx).find_results().0.len();
+                        if count == 0 {
+                            return;
+                        }
+                        // The keyboard row is the anchor row: the one a
+                        // shift-extension measures from.
+                        let anchor = workspace
+                            .read(cx)
+                            .selected_find_result_ranges()
+                            .first()
+                            .cloned();
+                        let anchor_ix = anchor.and_then(|anchor| {
+                            workspace
+                                .read(cx)
+                                .find_results()
+                                .0
+                                .iter()
+                                .position(|row| row.range == anchor)
+                        });
+                        let target = match key {
+                            "up" => Some(anchor_ix.map_or(count - 1, |ix| ix.saturating_sub(1))),
+                            "down" => Some(anchor_ix.map_or(0, |ix| (ix + 1).min(count - 1))),
+                            "home" => Some(0),
+                            "end" => Some(count - 1),
+                            _ => None,
+                        };
+                        if let Some(target) = target {
                             workspace.update(cx, |workspace, cx| {
-                                workspace.focus_find_results(true, cx)
+                                workspace.select_find_result_index(target, modifiers.shift, cx)
                             });
+                            keyboard_table.update(cx, |table, cx| table.scroll_to_row(target, cx));
+                            cx.stop_propagation();
                         }
                     }))
-                    .on_key_down(cx.listener(
-                        move |this, event: &KeyDownEvent, _, cx| {
-                            let key = event.keystroke.key.as_str();
-                            let modifiers = event.keystroke.modifiers;
-                            let Some(workspace) = this.workspace.upgrade() else { return };
-                            // ⌘C copies the selected rows, upstream's `.copyable`.
-                            if key == "c" && (modifiers.platform || modifiers.control) {
-                                workspace
-                                    .update(cx, |workspace, cx| workspace.copy_find_results(cx));
-                                cx.stop_propagation();
-                                return;
-                            }
-                            let count = workspace.read(cx).find_results().0.len();
-                            if count == 0 {
-                                return;
-                            }
-                            // The keyboard row is the anchor row: the one a
-                            // shift-extension measures from.
-                            let anchor = workspace
-                                .read(cx)
-                                .selected_find_result_ranges()
-                                .first()
-                                .cloned();
-                            let anchor_ix = anchor.and_then(|anchor| {
-                                workspace
-                                    .read(cx)
-                                    .find_results()
-                                    .0
-                                    .iter()
-                                    .position(|row| row.range == anchor)
-                            });
-                            let target = match key {
-                                "up" => {
-                                    Some(anchor_ix.map_or(count - 1, |ix| ix.saturating_sub(1)))
-                                }
-                                "down" => Some(anchor_ix.map_or(0, |ix| (ix + 1).min(count - 1))),
-                                "home" => Some(0),
-                                "end" => Some(count - 1),
-                                _ => None,
-                            };
-                            if let Some(target) = target {
-                                workspace.update(cx, |workspace, cx| {
-                                    workspace.select_find_result_index(
-                                        target,
-                                        modifiers.shift,
-                                        cx,
-                                    )
-                                });
-                                keyboard_table.update(cx, |table, cx| {
-                                    table.scroll_to_row(target, cx)
-                                });
-                                cx.stop_propagation();
-                            }
-                        },
-                    ))
                     // Upstream's table context menu is the Text Size menu; the
                     // same three commands are also on the standard Text Size
                     // menu items.
@@ -457,19 +469,24 @@ impl FindPanel {
                                     .ok();
                             }))
                             .separator()
-                            .item(PopupMenuItem::new("Reset to Default").on_click(
-                                move |_, _, cx| {
+                            .item(
+                                PopupMenuItem::new("Reset to Default").on_click(move |_, _, cx| {
                                     reset
                                         .update(cx, |workspace, cx| {
                                             workspace.reset_find_result_font_size(cx);
                                         })
                                         .ok();
-                                },
-                            ))
+                                }),
+                            )
                         });
                         menu.item(PopupMenuItem::submenu("Text Size", size_menu))
                     })
-                    .child(DataTable::new(&self.table).small().stripe(true).bordered(false)),
+                    .child(
+                        DataTable::new(&self.table)
+                            .small()
+                            .stripe(true)
+                            .bordered(false),
+                    ),
             )
             .into_any_element()
     }
@@ -624,20 +641,17 @@ fn result_cell(
     font_size: gpui_kit::Pixels,
     cx: &mut Context<TableState<FindResultTable>>,
 ) -> gpui_kit::Div {
-    div()
-        .text_size(font_size)
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |_, event: &gpui_kit::MouseDownEvent, _, cx| {
-                let range = range.clone();
-                workspace
-                    .update(cx, |workspace, cx| {
-                        workspace.select_find_result_range(range, event.modifiers, cx)
-                    })
-                    .ok();
-            }),
-        )
+    div().text_size(font_size).cursor_pointer().on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |_, event: &gpui_kit::MouseDownEvent, _, cx| {
+            let range = range.clone();
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.select_find_result_range(range, event.modifiers, cx)
+                })
+                .ok();
+        }),
+    )
 }
 
 /// The matched line's cell content: the displayed fragment with each capture
@@ -685,16 +699,26 @@ fn render_highlighted_line(
         }
         cursor = run_end;
     }
-    div().w_full().min_w_0().truncate().child(content).into_any_element()
+    div()
+        .w_full()
+        .min_w_0()
+        .truncate()
+        .child(content)
+        .into_any_element()
 }
 
 /// The owning group per byte of the displayed fragment — `None` where no
 /// capture paints. Later (finer) groups overwrite earlier ones, matching the
 /// attribute-stack order upstream adds them in.
-fn capture_owners(displayed_len: usize, capture_ranges: &[Option<Range<usize>>]) -> Vec<Option<usize>> {
+fn capture_owners(
+    displayed_len: usize,
+    capture_ranges: &[Option<Range<usize>>],
+) -> Vec<Option<usize>> {
     let mut owner: Vec<Option<usize>> = vec![None; displayed_len];
     for (capture_ix, capture) in capture_ranges.iter().enumerate() {
-        let Some(range) = capture.as_ref() else { continue };
+        let Some(range) = capture.as_ref() else {
+            continue;
+        };
         let end = range.end.min(displayed_len);
         for slot in owner.iter_mut().take(end).skip(range.start) {
             *slot = Some(capture_ix);
@@ -740,7 +764,11 @@ fn highlighter_colors(groups: usize) -> Vec<gpui_kit::Hsla> {
 fn hsb_components_to_hsl(saturation: f32, brightness: f32) -> (f32, f32) {
     let lightness = brightness * (1. - saturation / 2.);
     let denominator = 1. - (2. * lightness - 1.).abs();
-    let saturation = if denominator <= 0. { 0. } else { brightness * saturation / denominator };
+    let saturation = if denominator <= 0. {
+        0.
+    } else {
+        brightness * saturation / denominator
+    };
     (saturation, lightness)
 }
 
@@ -760,7 +788,11 @@ pub(crate) fn apply_row_selection(
     visible: &[Range<usize>],
 ) -> (Vec<Range<usize>>, Option<usize>) {
     if shift && let Some(anchor) = anchor {
-        let (lo, hi) = if anchor <= target { (anchor, target) } else { (target, anchor) };
+        let (lo, hi) = if anchor <= target {
+            (anchor, target)
+        } else {
+            (target, anchor)
+        };
         return (visible[lo..=hi].to_vec(), Some(anchor));
     }
     if command {
@@ -827,10 +859,8 @@ const REGEX_QUANTIFIERS: &[(&str, &str)] = &[
     ("{,n}", "at least 0 but not more than n times"),
     ("{n}", "n times"),
 ];
-const REGEX_EXTENDED_GROUPS: &[(&str, &str)] = &[
-    ("(?=subexp)", "look-ahead"),
-    ("(?<=subexp)", "look-behind"),
-];
+const REGEX_EXTENDED_GROUPS: &[(&str, &str)] =
+    &[("(?=subexp)", "look-ahead"), ("(?<=subexp)", "look-behind")];
 const REGEX_BACK_REFERENCE: &[(&str, &str)] = &[("$1", "first match")];
 
 /// One titled group of the reference — upstream's `DefinitionList`: a
@@ -850,7 +880,11 @@ fn definition_list(
         list = list.child(
             h_flex()
                 .gap_2()
-                .child(div().font_weight(FontWeight::MEDIUM).child(term.to_string()))
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(term.to_string()),
+                )
                 .child(div().child(description.to_string())),
         );
     }
@@ -889,7 +923,11 @@ fn regular_expression_reference(cx: &App) -> gpui_kit::AnyElement {
                     v_flex()
                         .gap_3()
                         .child(definition_list("Quantifiers", REGEX_QUANTIFIERS, cx))
-                        .child(definition_list("Extended Groups", REGEX_EXTENDED_GROUPS, cx))
+                        .child(definition_list(
+                            "Extended Groups",
+                            REGEX_EXTENDED_GROUPS,
+                            cx,
+                        ))
                         .child(definition_list("Back Reference", REGEX_BACK_REFERENCE, cx)),
                 ),
         )
@@ -969,50 +1007,45 @@ impl FindPanel {
                 // the clear one. (The replacement field's message then adds
                 // its own trailing inset through `Input::suffix`, which is
                 // upstream's `contentInsets` layering on top.)
-                div()
-                    .w_full()
-                    .h_full()
-                    .pl(px(32.))
-                    .pr(px(24.))
-                    .child(
-                        Input::new(&state)
-                            .appearance(false)
-                            .w_full()
-                            .h_full()
-                            .when_some(message, |input, (text, is_error)| {
-                        input.suffix(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .max_w(rems(MESSAGE_MAX_WIDTH))
-                                        .truncate()
-                                        .text_sm()
-                                        .text_color(if is_error { danger } else { muted })
-                                        .child(text),
-                                )
-                                .child(
-                                    Button::new("find-clear")
-                                        .ghost()
-                                        .compact()
-                                        .icon(gpui_kit::assets::IconName::CircleX)
-                                        .accessibility_label("Clear")
-                                        .tooltip("Clear the field.")
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            state.update(cx, |state, cx| {
-                                                state.set_value("", window, cx);
-                                            });
-                                            if let Some(workspace) = this.workspace.upgrade() {
-                                                workspace.update(cx, |workspace, cx| {
-                                                    workspace.refresh_matches(cx);
+                div().w_full().h_full().pl(px(32.)).pr(px(24.)).child(
+                    Input::new(&state)
+                        .appearance(false)
+                        .w_full()
+                        .h_full()
+                        .when_some(message, |input, (text, is_error)| {
+                            input.suffix(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .max_w(rems(MESSAGE_MAX_WIDTH))
+                                            .truncate()
+                                            .text_sm()
+                                            .text_color(if is_error { danger } else { muted })
+                                            .child(text),
+                                    )
+                                    .child(
+                                        Button::new("find-clear")
+                                            .ghost()
+                                            .compact()
+                                            .icon(gpui_kit::assets::IconName::CircleX)
+                                            .accessibility_label("Clear")
+                                            .tooltip("Clear the field.")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                state.update(cx, |state, cx| {
+                                                    state.set_value("", window, cx);
                                                 });
-                                            }
-                                        })),
-                                ),
-                        )
-                    }),
-            ),
+                                                if let Some(workspace) = this.workspace.upgrade() {
+                                                    workspace.update(cx, |workspace, cx| {
+                                                        workspace.refresh_matches(cx);
+                                                    });
+                                                }
+                                            })),
+                                    ),
+                            )
+                        }),
+                ),
             )
             .child(
                 // Upstream overlays the history menu at the field's top-leading
@@ -1042,22 +1075,20 @@ impl FindPanel {
                                     };
                                     let workspace = workspace.clone();
                                     let value = entry.clone();
-                                    menu = menu.item(
-                                        PopupMenuItem::new(shown).on_click(
-                                            move |_, window, cx| {
-                                                workspace
-                                                    .update(cx, |workspace, cx| {
-                                                        workspace.set_find_field(
-                                                            history,
-                                                            value.clone(),
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    })
-                                                    .ok();
-                                            },
-                                        ),
-                                    );
+                                    menu = menu.item(PopupMenuItem::new(shown).on_click(
+                                        move |_, window, cx| {
+                                            workspace
+                                                .update(cx, |workspace, cx| {
+                                                    workspace.set_find_field(
+                                                        history,
+                                                        value.clone(),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                })
+                                                .ok();
+                                        },
+                                    ));
                                 }
                                 menu = menu.separator();
                             }
@@ -1081,7 +1112,7 @@ impl FindPanel {
                                     }),
                             )
                         }),
-                    ),
+                ),
             )
     }
 
@@ -1196,10 +1227,7 @@ impl FindPanel {
 /// (strict equivalence, diacritics, width, TR#29 boundaries) are shown
 /// disabled with the reason in their tooltip, the way the settings panes
 /// handle unreachable toggles — none of them pretends to work.
-fn advanced_find_options(
-    workspace: &WeakEntity<Workspace>,
-    cx: &App,
-) -> gpui_kit::AnyElement {
+fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_kit::AnyElement {
     let Some(workspace_entity) = workspace.upgrade() else {
         return div().into_any_element();
     };
@@ -1213,7 +1241,9 @@ fn advanced_find_options(
     let weak = workspace.clone();
 
     let header = |title: &'static str| {
-        div().font_weight(FontWeight::SEMIBOLD).child(title.to_string())
+        div()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(title.to_string())
     };
     v_flex()
         .w(rems(17.))
@@ -1385,30 +1415,36 @@ fn options_row(
     regex_reference: gpui_kit::AnyElement,
     advanced_options: gpui_kit::AnyElement,
 ) -> impl IntoElement {
-    let switch = |id: &'static str, label: &'static str, checked: bool, field: fn(&mut Workspace, bool)| {
-        let workspace = workspace.clone();
-        Checkbox::new(id)
-            .checked(checked)
-            .label(label)
-            .on_click(move |checked, _, cx| {
-                let checked = *checked;
-                workspace
-                    .update(cx, |workspace, cx| {
-                        field(workspace, checked);
-                        let _ = workspace.settings.save();
-                        workspace.refresh_matches(cx);
-                    })
-                    .ok();
-            })
-    };
+    let switch =
+        |id: &'static str, label: &'static str, checked: bool, field: fn(&mut Workspace, bool)| {
+            let workspace = workspace.clone();
+            Checkbox::new(id)
+                .checked(checked)
+                .label(label)
+                .on_click(move |checked, _, cx| {
+                    let checked = *checked;
+                    workspace
+                        .update(cx, |workspace, cx| {
+                            field(workspace, checked);
+                            let _ = workspace.settings.save();
+                            workspace.refresh_matches(cx);
+                        })
+                        .ok();
+                })
+        };
 
     h_flex()
         .w_full()
         .gap_4()
         .items_center()
-        .child(switch("find-regex", "Regular Expression", regex, |workspace, on| {
-            workspace.settings.find_regex = on;
-        }))
+        .child(switch(
+            "find-regex",
+            "Regular Expression",
+            regex,
+            |workspace, on| {
+                workspace.settings.find_regex = on;
+            },
+        ))
         .child(regex_reference)
         .child(switch(
             "find-case",
@@ -1433,7 +1469,7 @@ fn options_row(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_unique_history, apply_row_selection, hsb_components_to_hsl, highlighter_colors,
+        append_unique_history, apply_row_selection, highlighter_colors, hsb_components_to_hsl,
         result_message,
     };
     use crate::settings::FIND_HISTORY_LIMIT;
@@ -1449,8 +1485,14 @@ mod tests {
     #[test]
     fn a_shift_click_selects_the_display_order_span_from_the_anchor() {
         let visible = vec![0..5, 11..16, 20..24];
-        let (selected, anchor) =
-            apply_row_selection(std::slice::from_ref(&(0..5)), Some(0), 2, true, false, &visible);
+        let (selected, anchor) = apply_row_selection(
+            std::slice::from_ref(&(0..5)),
+            Some(0),
+            2,
+            true,
+            false,
+            &visible,
+        );
         assert_eq!(selected, vec![0..5, 11..16, 20..24]);
         // The anchor stays where the extension started from.
         assert_eq!(anchor, Some(0));
@@ -1474,14 +1516,8 @@ mod tests {
     #[test]
     fn a_command_click_toggles_a_row_in_the_set() {
         let visible = vec![0..5, 11..16, 20..24];
-        let (selected, anchor) = apply_row_selection(
-            &[0..5, 11..16],
-            Some(0),
-            1,
-            false,
-            true,
-            &visible,
-        );
+        let (selected, anchor) =
+            apply_row_selection(&[0..5, 11..16], Some(0), 1, false, true, &visible);
         assert_eq!(selected, vec![0..5]);
         assert_eq!(anchor, Some(1));
 
@@ -1544,13 +1580,20 @@ mod tests {
         // range a finer group shares with group 0 the finer colour wins —
         // "alpha" inside "alpha-123" is group 1's colour, not group 0's.
         use super::capture_owners;
-        let owners = capture_owners(
-            9,
-            &[Some(0..9), Some(0..5), Some(5..6), Some(6..9)],
-        );
+        let owners = capture_owners(9, &[Some(0..9), Some(0..5), Some(5..6), Some(6..9)]);
         assert_eq!(
             owners,
-            vec![Some(1), Some(1), Some(1), Some(1), Some(1), Some(2), Some(3), Some(3), Some(3)]
+            vec![
+                Some(1),
+                Some(1),
+                Some(1),
+                Some(1),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(3),
+                Some(3)
+            ]
         );
     }
 
@@ -1581,7 +1624,10 @@ mod tests {
 
     #[test]
     fn a_count_with_no_current_match_is_a_plain_count() {
-        assert_eq!(result_message(3, 0, None), Some(("3 matches".to_string(), false)));
+        assert_eq!(
+            result_message(3, 0, None),
+            Some(("3 matches".to_string(), false))
+        );
     }
 
     #[test]

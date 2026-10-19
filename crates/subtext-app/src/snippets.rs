@@ -80,7 +80,10 @@ pub(crate) fn items(sections: &Sections) -> Vec<MenuItem> {
         items.push(MenuItem::separator());
     }
 
-    items.push(MenuItem::action("Edit Snippets…", actions::text::ShowSnippetEditor));
+    items.push(MenuItem::action(
+        "Edit Snippets…",
+        actions::text::ShowSnippetEditor,
+    ));
     items
 }
 
@@ -173,7 +176,10 @@ mod tests {
         let sections = Sections::of(&snippets, Some("HTML"));
         assert_eq!(
             bound(&sections),
-            [(1, "secondary-shift-u".to_string()), (2, "secondary-u".to_string())]
+            [
+                (1, "secondary-shift-u".to_string()),
+                (2, "secondary-u".to_string())
+            ]
         );
     }
 

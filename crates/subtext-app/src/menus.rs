@@ -332,11 +332,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
     replace(&mut menus, TEXT_ENCODING_MENU, encodings(state));
     replace(&mut menus, SYNTAX_MENU, syntaxes(state));
     replace(&mut menus, THEME_MENU, themes(state));
-    replace(
-        &mut menus,
-        UNICODE_NORMALIZATIONS_MENU,
-        normalizations(),
-    );
+    replace(&mut menus, UNICODE_NORMALIZATIONS_MENU, normalizations());
     replace(&mut menus, SCRIPT_MENU, scripts::items(&state.scripts));
     replace(&mut menus, OPEN_RECENT_MENU, recent_documents(state));
 
@@ -563,7 +559,11 @@ fn row_shortcut(modifiers: &str, key: &str) -> Option<Shortcut> {
         return None;
     }
 
-    let has = |word: &str| modifiers.split_whitespace().any(|modifier| modifier == word);
+    let has = |word: &str| {
+        modifiers
+            .split_whitespace()
+            .any(|modifier| modifier == word)
+    };
     Some(Shortcut {
         key: key.to_ascii_lowercase(),
         control: has("control"),
@@ -766,9 +766,11 @@ fn encodings(state: &MenuState) -> Vec<MenuItem> {
 /// encoding goes to the top, behind a separator, so the menu can always show
 /// what the document is in even when the user has taken that encoding out.
 fn encoding_items(groups: &[Vec<FileEncoding>], current: Option<FileEncoding>) -> Vec<MenuItem> {
-    let mut items = Vec::with_capacity(groups.iter().map(Vec::len).sum::<usize>() + groups.len() + 2);
+    let mut items =
+        Vec::with_capacity(groups.iter().map(Vec::len).sum::<usize>() + groups.len() + 2);
 
-    if let Some(current) = current.filter(|encoding| !groups.iter().flatten().any(|e| e == encoding))
+    if let Some(current) =
+        current.filter(|encoding| !groups.iter().flatten().any(|e| e == encoding))
     {
         items.push(encoding_item(current, true, false));
         items.push(MenuItem::separator());
@@ -996,7 +998,12 @@ mod tests {
         state.document = None;
         let menus = build(&state);
 
-        assert!(named(&menus, LINE_ENDINGS_MENU).items.iter().all(MenuItem::is_disabled));
+        assert!(
+            named(&menus, LINE_ENDINGS_MENU)
+                .items
+                .iter()
+                .all(MenuItem::is_disabled)
+        );
         assert!(named(&menus, SYNTAX_MENU).items.iter().all(|item| {
             // The separator is the one item with no disabled flag to set.
             matches!(item, MenuItem::Separator) || item.is_disabled()
@@ -1017,7 +1024,12 @@ mod tests {
             checked(&menus, THEME_MENU).as_deref(),
             Some("Solarized Dark")
         );
-        assert!(named(&menus, THEME_MENU).items.iter().all(|item| !item.is_disabled()));
+        assert!(
+            named(&menus, THEME_MENU)
+                .items
+                .iter()
+                .all(|item| !item.is_disabled())
+        );
     }
 
     /// `None` first, behind a separator, then every syntax — and the document's
@@ -1036,7 +1048,10 @@ mod tests {
     fn a_document_with_no_syntax_checks_none() {
         let mut state = state();
         state.document.as_mut().unwrap().syntax = NO_SYNTAX.to_string();
-        assert_eq!(checked(&build(&state), SYNTAX_MENU).as_deref(), Some(NO_SYNTAX));
+        assert_eq!(
+            checked(&build(&state), SYNTAX_MENU).as_deref(),
+            Some(NO_SYNTAX)
+        );
     }
 
     /// A menu item whose action nothing handles is greyed out by GPUI, so every
@@ -1097,9 +1112,16 @@ mod tests {
         let groups = grouped(&labels(&menus, TEXT_ENCODING_MENU));
         let registry = FileEncoding::menu_groups(&EncodingList::defaults());
 
-        assert_eq!(groups.len(), registry.len() + 1, "one group per registry group, plus the tail");
+        assert_eq!(
+            groups.len(),
+            registry.len() + 1,
+            "one group per registry group, plus the tail"
+        );
         for (group, registry) in groups.iter().zip(registry.iter()) {
-            assert_eq!(group, &registry.iter().map(|e| e.name()).collect::<Vec<_>>());
+            assert_eq!(
+                group,
+                &registry.iter().map(|e| e.name()).collect::<Vec<_>>()
+            );
         }
         assert_eq!(groups.last().unwrap(), &[CUSTOMIZE_ENCODINGS]);
     }
@@ -1143,7 +1165,9 @@ mod tests {
     fn an_encoding_the_list_lacks_goes_to_the_top_behind_a_separator() {
         let groups = vec![
             vec![FileEncoding::of(TextEncoding::UTF8)],
-            vec![FileEncoding::of(TextEncoding::from_identifier("euc-jp").unwrap())],
+            vec![FileEncoding::of(
+                TextEncoding::from_identifier("euc-jp").unwrap(),
+            )],
         ];
 
         let missing = encoding_items(&groups, Some(FileEncoding::of(TextEncoding::UTF16_LE)));
@@ -1168,7 +1192,13 @@ mod tests {
         let listed = encoding_items(&groups, Some(FileEncoding::of(TextEncoding::UTF8)));
         assert_eq!(
             item_labels(&listed),
-            ["Unicode (UTF-8)", "―", "Japanese (EUC)", "―", CUSTOMIZE_ENCODINGS]
+            [
+                "Unicode (UTF-8)",
+                "―",
+                "Japanese (EUC)",
+                "―",
+                CUSTOMIZE_ENCODINGS
+            ]
         );
     }
 
@@ -1201,7 +1231,11 @@ mod tests {
         let mut unique = identifiers.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(unique.len(), identifiers.len(), "two items name one encoding");
+        assert_eq!(
+            unique.len(),
+            identifiers.len(),
+            "two items name one encoding"
+        );
 
         for identifier in &identifiers {
             assert!(
@@ -1285,7 +1319,15 @@ mod tests {
             .collect();
         assert_eq!(
             carried,
-            ["NFD", "NFC", "NFKD", "NFKC", "NFKC Case-Fold", "Modified NFD", "Modified NFC"]
+            [
+                "NFD",
+                "NFC",
+                "NFKD",
+                "NFKC",
+                "NFKC Case-Fold",
+                "Modified NFD",
+                "Modified NFC"
+            ]
         );
     }
 
@@ -1309,7 +1351,14 @@ mod tests {
         ];
         assert_eq!(
             labels(&build(&state), INSERT_SNIPPET_MENU),
-            ["Header", "―", "[Markdown]", "Emphasis", "―", "Edit Snippets…"]
+            [
+                "Header",
+                "―",
+                "[Markdown]",
+                "Emphasis",
+                "―",
+                "Edit Snippets…"
+            ]
         );
     }
 
@@ -1531,7 +1580,9 @@ mod tests {
         state.recent_documents = vec![PathBuf::from("/notes/todo.txt")];
         let before = state.signature();
 
-        state.recent_documents.insert(0, PathBuf::from("/notes/design.md"));
+        state
+            .recent_documents
+            .insert(0, PathBuf::from("/notes/design.md"));
         assert_ne!(before, state.signature());
 
         state.recent_documents.clear();
@@ -1550,11 +1601,19 @@ mod tests {
 
         let mut reended = state();
         reended.document.as_mut().unwrap().line_ending = LineEnding::LF;
-        assert_ne!(reended.signature(), before, "a line ending change was missed");
+        assert_ne!(
+            reended.signature(),
+            before,
+            "a line ending change was missed"
+        );
 
         let mut reencoded = state();
         reencoded.document.as_mut().unwrap().encoding = FileEncoding::of(TextEncoding::UTF16_LE);
-        assert_ne!(reencoded.signature(), before, "an encoding change was missed");
+        assert_ne!(
+            reencoded.signature(),
+            before,
+            "an encoding change was missed"
+        );
 
         let mut rethemed = state();
         rethemed.theme = "Solarized Light".into();
@@ -1564,7 +1623,11 @@ mod tests {
         // too.
         let mut closed = state();
         closed.document = None;
-        assert_ne!(closed.signature(), before, "closing the document was missed");
+        assert_ne!(
+            closed.signature(),
+            before,
+            "closing the document was missed"
+        );
     }
 
     /// The scripts are part of it, unlike the syntax and theme tables: the
@@ -1575,7 +1638,11 @@ mod tests {
         let before = state().signature();
 
         let mut appeared = state();
-        appeared.scripts = vec![ScriptItem::Script(script("Save", "/scripts/Save.@s.sh", None))];
+        appeared.scripts = vec![ScriptItem::Script(script(
+            "Save",
+            "/scripts/Save.@s.sh",
+            None,
+        ))];
         assert_ne!(
             appeared.signature(),
             before,
@@ -1612,7 +1679,10 @@ mod tests {
 
     /// The path of every command the bar offers.
     fn paths(state: &MenuState) -> Vec<String> {
-        commands(state).into_iter().map(|command| command.path).collect()
+        commands(state)
+            .into_iter()
+            .map(|command| command.path)
+            .collect()
     }
 
     /// The list is the bar flattened: a submenu's title goes in front of every
@@ -1664,8 +1734,16 @@ mod tests {
         state.document = None;
         let found = paths(&state);
 
-        assert!(!found.iter().any(|path| path.starts_with("Format > Syntax > ")));
-        assert!(!found.iter().any(|path| path.starts_with("Format > Line Endings > ")));
+        assert!(
+            !found
+                .iter()
+                .any(|path| path.starts_with("Format > Syntax > "))
+        );
+        assert!(
+            !found
+                .iter()
+                .any(|path| path.starts_with("Format > Line Endings > "))
+        );
         assert!(!found.contains(&"Format > Text Encoding > Unicode (UTF-8)".to_string()));
         assert!(!found.contains(&"Text > Insert Snippet > Emphasis".to_string()));
         // The way to the list editor is not a way to change an encoding, so it
@@ -1715,7 +1793,10 @@ mod tests {
         let commands = commands(&scripted());
 
         let save = commands.iter().find(|c| c.path == "Script > Save").unwrap();
-        assert_eq!(save.shortcut, Some(Shortcut::parse("@s").expect("a key").symbol()));
+        assert_eq!(
+            save.shortcut,
+            Some(Shortcut::parse("@s").expect("a key").symbol())
+        );
 
         let clean = commands
             .iter()
@@ -1758,7 +1839,12 @@ mod tests {
 
         let live: Vec<(String, &'static str)> = commands(&state)
             .into_iter()
-            .map(|command| (command.path, crate::bridge::name_of(command.action.as_ref())))
+            .map(|command| {
+                (
+                    command.path,
+                    crate::bridge::name_of(command.action.as_ref()),
+                )
+            })
             .collect();
 
         for entry in menu::COMMANDS {
@@ -1767,7 +1853,8 @@ mod tests {
                 continue;
             }
             assert!(
-                live.iter().any(|(path, action)| path == entry.path && *action == entry.action),
+                live.iter()
+                    .any(|(path, action)| path == entry.path && *action == entry.action),
                 "{} is in the table but not in the bar",
                 entry.path
             );
@@ -1792,11 +1879,17 @@ mod tests {
     #[test]
     fn every_key_map_row_names_the_modifiers_it_has() {
         for row in keymap::SHORTCUTS {
-            let shortcut = row_shortcut(row.2, row.3).unwrap_or_else(|| panic!("{} has no key", row.0));
-            let named = [shortcut.control, shortcut.option, shortcut.shift, shortcut.command]
-                .into_iter()
-                .filter(|set| *set)
-                .count();
+            let shortcut =
+                row_shortcut(row.2, row.3).unwrap_or_else(|| panic!("{} has no key", row.0));
+            let named = [
+                shortcut.control,
+                shortcut.option,
+                shortcut.shift,
+                shortcut.command,
+            ]
+            .into_iter()
+            .filter(|set| *set)
+            .count();
             assert_eq!(
                 named,
                 row.2.split_whitespace().count(),

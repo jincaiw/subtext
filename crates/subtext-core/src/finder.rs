@@ -62,7 +62,10 @@ impl Searcher {
     /// error so the find bar can show it instead of silently matching nothing.
     pub fn new(query: &str, options: &FindOptions) -> Result<Self, regex::Error> {
         if query.is_empty() {
-            return Ok(Self { regex: Regex::new("").expect("empty pattern is valid"), empty: true });
+            return Ok(Self {
+                regex: Regex::new("").expect("empty pattern is valid"),
+                empty: true,
+            });
         }
         let pattern = if options.regex {
             query.to_string()
@@ -83,7 +86,10 @@ impl Searcher {
             .multi_line(options.multiline)
             .dot_matches_new_line(options.singleline)
             .build()?;
-        Ok(Self { regex, empty: false })
+        Ok(Self {
+            regex,
+            empty: false,
+        })
     }
 
     /// Every match in `text`, in document order and non-overlapping.
@@ -121,7 +127,9 @@ impl Searcher {
             .map(|captures| {
                 captures
                     .iter()
-                    .map(|group| group.map(|matched| start + matched.start()..start + matched.end()))
+                    .map(|group| {
+                        group.map(|matched| start + matched.start()..start + matched.end())
+                    })
                     .collect()
             })
             .collect()
@@ -143,9 +151,11 @@ impl Searcher {
         let from = from.clamp(start, end);
 
         if let Some(found) = self.regex.find_at(text, from)
-            && found.start() >= from && found.end() <= end {
-                return Some(found.start()..found.end());
-            }
+            && found.start() >= from
+            && found.end() <= end
+        {
+            return Some(found.start()..found.end());
+        }
         if wrap_around {
             let found = self.regex.find_at(text, start)?;
             if found.end() <= end {
@@ -278,9 +288,9 @@ pub fn replace_one(
     let mut out = String::with_capacity(text.len());
     out.push_str(&text[..range.start]);
     let inserted = match syntax {
-        ReplacementSyntax::Regex => {
-            searcher.expand(text, range, replacement).unwrap_or_default()
-        }
+        ReplacementSyntax::Regex => searcher
+            .expand(text, range, replacement)
+            .unwrap_or_default(),
         ReplacementSyntax::Literal => replacement.to_string(),
     };
     let caret = range.start + inserted.len();
@@ -311,7 +321,6 @@ mod tests {
         assert!(searcher.find_all(text, &(4..7)).is_empty());
     }
 
-
     #[test]
     fn literal_search_is_case_insensitive_by_default() {
         let searcher = Searcher::new("hello", &FindOptions::default()).unwrap();
@@ -321,7 +330,10 @@ mod tests {
 
     #[test]
     fn case_sensitive_search_narrows_results() {
-        let options = FindOptions { case_sensitive: true, ..Default::default() };
+        let options = FindOptions {
+            case_sensitive: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new("hello", &options).unwrap();
         let text = "Hello world, hello there";
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
@@ -330,18 +342,27 @@ mod tests {
     #[test]
     fn find_all_with_captures_returns_group_zero_and_optional_groups_in_order() {
         let text = "a=1 b=two";
-        let options = FindOptions { regex: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"([a-z])=(1|(two))", &options).unwrap();
         let found = searcher.find_all_with_captures(text, &(0..text.len()));
         assert_eq!(found.len(), 2);
         assert_eq!(found[0], vec![Some(0..3), Some(0..1), Some(2..3), None]);
-        assert_eq!(found[1], vec![Some(4..9), Some(4..5), Some(6..9), Some(6..9)]);
+        assert_eq!(
+            found[1],
+            vec![Some(4..9), Some(4..5), Some(6..9), Some(6..9)]
+        );
     }
 
     #[test]
     fn find_all_with_captures_preserves_document_offsets_for_a_scoped_search() {
         let text = "prefix alpha suffix";
-        let options = FindOptions { regex: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"(alpha)", &options).unwrap();
         assert_eq!(
             searcher.find_all_with_captures(text, &(7..12)),
@@ -352,11 +373,19 @@ mod tests {
     #[test]
     fn singleline_lets_dot_match_line_separators() {
         let text = "one\ntwo";
-        let options = FindOptions { regex: true, singleline: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            singleline: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new("one.two", &options).unwrap();
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
 
-        let options = FindOptions { regex: true, singleline: false, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            singleline: false,
+            ..Default::default()
+        };
         let searcher = Searcher::new("one.two", &options).unwrap();
         assert!(searcher.find_all(text, &(0..text.len())).is_empty());
     }
@@ -365,30 +394,50 @@ mod tests {
     fn multiline_controls_whether_anchors_match_lines() {
         let text = "x\ny";
         // Upstream's default: anchors match lines.
-        let options = FindOptions { regex: true, multiline: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            multiline: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"^y", &options).unwrap();
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
 
-        let options = FindOptions { regex: true, multiline: false, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            multiline: false,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"^y", &options).unwrap();
         assert!(searcher.find_all(text, &(0..text.len())).is_empty());
     }
 
     #[test]
     fn regex_search_uses_capture_groups() {
-        let options = FindOptions { regex: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"\d{3}", &options).unwrap();
         let text = "abc 123 def 456";
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 2);
 
-        let (replaced, count) = replace_all(text, &searcher, "[$0]", ReplacementSyntax::Regex, &(0..text.len()));
+        let (replaced, count) = replace_all(
+            text,
+            &searcher,
+            "[$0]",
+            ReplacementSyntax::Regex,
+            &(0..text.len()),
+        );
         assert_eq!(count, 2);
         assert_eq!(replaced, "abc [123] def [456]");
     }
 
     #[test]
     fn whole_word_does_not_match_substrings() {
-        let options = FindOptions { whole_word: true, ..Default::default() };
+        let options = FindOptions {
+            whole_word: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new("cat", &options).unwrap();
         let text = "cat catalog cats";
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
@@ -398,8 +447,14 @@ mod tests {
     fn find_next_wraps_to_the_top() {
         let searcher = Searcher::new("a", &FindOptions::default()).unwrap();
         let text = "a b a";
-        assert_eq!(searcher.find_next(text, 1, &(0..text.len()), true), Some(4..5));
-        assert_eq!(searcher.find_next(text, 5, &(0..text.len()), true), Some(0..1));
+        assert_eq!(
+            searcher.find_next(text, 1, &(0..text.len()), true),
+            Some(4..5)
+        );
+        assert_eq!(
+            searcher.find_next(text, 5, &(0..text.len()), true),
+            Some(0..1)
+        );
         assert_eq!(searcher.find_next(text, 5, &(0..text.len()), false), None);
     }
 
@@ -407,8 +462,14 @@ mod tests {
     fn find_previous_scans_backwards() {
         let searcher = Searcher::new("a", &FindOptions::default()).unwrap();
         let text = "a b a";
-        assert_eq!(searcher.find_previous(text, 4, &(0..text.len()), true), Some(0..1));
-        assert_eq!(searcher.find_previous(text, 0, &(0..text.len()), false), None);
+        assert_eq!(
+            searcher.find_previous(text, 4, &(0..text.len()), true),
+            Some(0..1)
+        );
+        assert_eq!(
+            searcher.find_previous(text, 0, &(0..text.len()), false),
+            None
+        );
     }
 
     #[test]
@@ -421,7 +482,10 @@ mod tests {
     #[test]
     fn escape_sequences_decode_newlines() {
         assert_eq!(unescape(r"a\nb\tc"), "a\nb\tc");
-        let options = FindOptions { escape_sequences: true, ..Default::default() };
+        let options = FindOptions {
+            escape_sequences: true,
+            ..Default::default()
+        };
         let searcher = Searcher::new(r"a\nb", &options).unwrap();
         let text = "a\nb";
         assert_eq!(searcher.find_all(text, &(0..text.len())).len(), 1);
@@ -430,14 +494,16 @@ mod tests {
     #[test]
     fn literal_replacement_keeps_dollar_signs() {
         let searcher = Searcher::new("x", &FindOptions::default()).unwrap();
-        let (replaced, _) =
-            replace_all("x", &searcher, "$1", ReplacementSyntax::Literal, &(0..1));
+        let (replaced, _) = replace_all("x", &searcher, "$1", ReplacementSyntax::Literal, &(0..1));
         assert_eq!(replaced, "$1");
     }
 
     #[test]
     fn invalid_regex_is_reported() {
-        let options = FindOptions { regex: true, ..Default::default() };
+        let options = FindOptions {
+            regex: true,
+            ..Default::default()
+        };
         assert!(Searcher::new("([", &options).is_err());
     }
 }

@@ -169,7 +169,10 @@ fn header(cx: &App) -> impl IntoElement {
     for column in Column::ALL {
         row = row.child(cell(
             column,
-            div().text_xs().text_color(cx.theme().muted_foreground).child(column.label()),
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(column.label()),
         ));
     }
     row.border_b_1().border_color(cx.theme().border)
@@ -177,7 +180,10 @@ fn header(cx: &App) -> impl IntoElement {
 
 /// A muted hint under a control.
 fn note(text: &'static str, cx: &App) -> impl IntoElement {
-    div().text_xs().text_color(cx.theme().muted_foreground).child(text)
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
 }
 
 /// Where `id` sits in the table.
@@ -306,10 +312,15 @@ impl RuleRow {
 
     /// Focus this row's find field, which is where *Add* leaves the caret.
     fn focus_find(&self, window: &mut Window, cx: &mut Context<Self>) {
-        self.find.update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
+        self.find
+            .update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
     }
 
-    fn render_find(&self, error: Option<&PatternError>, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_find(
+        &self,
+        error: Option<&PatternError>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         h_flex()
             .w_full()
             .gap_1()
@@ -354,7 +365,10 @@ impl Render for RuleRow {
             .items_center()
             .rounded_sm()
             .when(selected, |this| this.bg(cx.theme().accent))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.select(cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.select(cx)),
+            )
             .child(cell(
                 Column::Enabled,
                 Checkbox::new(self.id.element("enabled"))
@@ -710,9 +724,9 @@ impl Render for MultipleReplaceSheet {
             .w_full()
             .gap_3()
             .child(
-                div()
-                    .text_sm()
-                    .child("Perform replacement using these rules in succession from the top down:"),
+                div().text_sm().child(
+                    "Perform replacement using these rules in succession from the top down:",
+                ),
             )
             .child(
                 v_flex()
@@ -738,7 +752,10 @@ impl Render for MultipleReplaceSheet {
                     .child(note("Invalid rules will be skipped.", cx))
                     .when_some(error, |this, error| {
                         this.child(
-                            div().text_xs().text_color(cx.theme().danger).child(error.message()),
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().danger)
+                                .child(error.message()),
                         )
                     })
                     .when_some(self.result.clone(), |this, result| {
@@ -815,7 +832,10 @@ mod tests {
     fn the_header_names_every_column_once() {
         assert_eq!(Column::ALL.len(), 6);
         let labels: Vec<&'static str> = Column::ALL.iter().map(|column| column.label()).collect();
-        assert_eq!(labels, vec!["", "Find", "Replace With", "RE", "IC", "Description"]);
+        assert_eq!(
+            labels,
+            vec!["", "Find", "Replace With", "RE", "IC", "Description"]
+        );
     }
 
     #[test]
@@ -823,7 +843,11 @@ mod tests {
         for column in [Column::Find, Column::Replacement, Column::Description] {
             assert!(!column.is_fixed(), "{column:?}");
         }
-        for column in [Column::Enabled, Column::RegularExpression, Column::IgnoresCase] {
+        for column in [
+            Column::Enabled,
+            Column::RegularExpression,
+            Column::IgnoresCase,
+        ] {
             assert!(column.is_fixed(), "{column:?}");
         }
     }
@@ -842,7 +866,10 @@ mod tests {
             RuleId(2).element("enabled"),
             "two rules must not share a control id"
         );
-        assert_ne!(RuleId(1).element("enabled"), RuleId(1).element("ignores-case"));
+        assert_ne!(
+            RuleId(1).element("enabled"),
+            RuleId(1).element("ignores-case")
+        );
     }
 
     #[test]

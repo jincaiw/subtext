@@ -296,9 +296,10 @@ impl CommandBar {
         cx: &mut Context<Self>,
     ) -> Self {
         let state = cx.new(|cx| CommandState::new(window, cx));
-        let state_subscription = cx.observe_in(&state, window, |bar: &mut Self, state, window, cx| {
-            bar.refresh(&state, window, cx);
-        });
+        let state_subscription =
+            cx.observe_in(&state, window, |bar: &mut Self, state, window, cx| {
+                bar.refresh(&state, window, cx);
+            });
 
         // The field takes the keyboard as soon as the panel is up, which is
         // what makes the bar usable without a click. Deferred, because the
@@ -329,7 +330,12 @@ impl CommandBar {
     ///
     /// This is the palette's observer, so it runs once the palette has been
     /// updated and is free to read it.
-    fn refresh(&mut self, state: &Entity<CommandState>, window: &mut Window, cx: &mut Context<Self>) {
+    fn refresh(
+        &mut self,
+        state: &Entity<CommandState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let query = state.read(cx).query(cx);
 
         if query != self.query {
@@ -513,10 +519,13 @@ fn draw_row(
         .items_center()
         .justify_center()
         .text_color(if selected { strong } else { muted })
-        .child(Icon::new(match kind {
-            CommandKind::Script => IconName::SquareTerminal,
-            CommandKind::Command => IconName::SquareMenu,
-        }).small());
+        .child(
+            Icon::new(match kind {
+                CommandKind::Script => IconName::SquareTerminal,
+                CommandKind::Command => IconName::SquareMenu,
+            })
+            .small(),
+        );
 
     let mut matched = line();
     for (offset, component) in matches.iter().enumerate() {
@@ -564,7 +573,11 @@ fn draw_row(
 
 /// A line of the row: no wrapping, and no wider than the row itself.
 fn line() -> gpui_kit::Div {
-    h_flex().gap(rems(0.25)).items_center().whitespace_nowrap().overflow_hidden()
+    h_flex()
+        .gap(rems(0.25))
+        .items_center()
+        .whitespace_nowrap()
+        .overflow_hidden()
 }
 
 /// The separator between two path components.
@@ -668,7 +681,10 @@ mod tests {
         let entry = command("Format > Tab Width > Custom…");
         let (matches, _) = match_command(&entry, "tab custom").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
+            matches
+                .iter()
+                .map(|m| m.string.as_str())
+                .collect::<Vec<_>>(),
             ["Tab Width", "Custom…"]
         );
 
@@ -693,7 +709,10 @@ mod tests {
         let entry = command("Edit > Select > Select All");
         let (matches, _) = match_command(&entry, "all").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
+            matches
+                .iter()
+                .map(|m| m.string.as_str())
+                .collect::<Vec<_>>(),
             ["Select All"]
         );
     }
@@ -706,7 +725,10 @@ mod tests {
         let entry = command("Edit > Select > Select All");
         let (matches, _) = match_command(&entry, "select").unwrap();
         assert_eq!(
-            matches.iter().map(|m| m.string.as_str()).collect::<Vec<_>>(),
+            matches
+                .iter()
+                .map(|m| m.string.as_str())
+                .collect::<Vec<_>>(),
             ["Select", "Select All"]
         );
         assert!(matches[1].ranges.is_empty());
@@ -755,7 +777,9 @@ mod tests {
                 .expect("a path has a title");
             let found = candidates_for(&commands(), title);
             assert!(
-                found.iter().any(|candidate| candidate.command.path == entry.path),
+                found
+                    .iter()
+                    .any(|candidate| candidate.command.path == entry.path),
                 "{title} does not find {}",
                 entry.path
             );
@@ -844,7 +868,11 @@ mod tests {
     fn a_command_shows_the_shortcut_it_has() {
         assert_eq!(
             command("File > Save").shortcut,
-            Some(subtext_core::snippets::Shortcut::parse("@s").unwrap().symbol())
+            Some(
+                subtext_core::snippets::Shortcut::parse("@s")
+                    .unwrap()
+                    .symbol()
+            )
         );
         // A runtime item has none: nothing in the menu bar binds a syntax.
         assert_eq!(command("Format > Syntax > Ruby").shortcut, None);

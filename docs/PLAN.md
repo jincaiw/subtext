@@ -2636,15 +2636,69 @@ BE 文件重存成本机字节序（并注明这是上游行为）、无标记�
 
 ---
 
+## 阶段 18 — 清账：格式化门禁，与一份「剩下为什么不做」的清单
+
+**盘点（2026-10-19）**：缺口表当时 31 行。逐条过了一遍，能做完的只有一条，其余分成
+三类：平台不提供的能力、框架没有的接口、以及需要真机手势/UI 测试才能验证的东西。
+这一阶段把能做完的做完，把其余的理由写实。
+
+### 18.1 `cargo fmt` 接入
+
+全仓 49 个文件与 rustfmt 默认风格不一致（912 处）。一次性格式化后 `cargo fmt --check`
+归零，并加进 CI 作为第一道门禁（它最便宜，失败得最快）。
+
+两个必须一起改的地方，否则门禁第二天就会被人关掉：
+
+* **生成器自己格式化输出**。`menu.rs` / `keymap.rs` 是 `tools/generate_menu.py` 写的，
+  如果生成器不跑 rustfmt，重新生成一次就让整棵树回到未格式化状态。现在 `main()`
+  写完两个文件后调 `rustfmt --edition 2024`，**幂等**（连跑两次逐字节相同）。
+* **契约测试不能按行读**。`menu_contract` 里那条「恰好一处按状态置灰」原先按**单行**
+  找 `MenuItem::action(...).disabled(...)`；格式化把它拆成五行，测试立刻误报。
+  现在从 `.disabled(` 往回找到最近的 `MenuItem::action(`，把这一段拼起来再看 ——
+  它测的是门禁，不是换行方式。
+
+### 18.2 试过又退回来的：编码列表的 Delete 键
+
+上游是 `.onDeleteCommand { model.remove(ids: selection) }`，SubText 只有删除按钮。
+这一轮实现了按键处理并做探针验证，结论是**验证不了**：
+
+* `Window::dispatch_keystroke` 与 `PlatformInput` 全公开，按键**可以**程序化注入
+  （这条以后有用，见下）；
+* 但 GPUI 沿**焦点路径**派发按键。编码列表是设置窗口里的对话框，对话框自己拿走了
+  焦点；给列表加 `track_focus` 并在首次渲染时 `focus()` 也没用 —— 探针里
+  `dispatch_keystroke("delete")` 返回 `false`，处理器一次都没进。
+* 也就是说：用户点一行再按 Delete 大概率能用，但**这一点无法在本机证明**。
+  按项目纪律，未经验证的交互不写进「完成」，改动已整体回退（工作树无残留）。
+
+结论记在这里：**键盘交互原则上可注入验证，但只对拥有焦点的视图成立**；对话框里的
+子视图要验，得先有能驱动焦点的手段，而 `gpui-kit` 0.7.3 的 `test-support` 打不开。
+
+### 18.3 剩下的，逐条写清为什么不做
+
+| 缺口 | 卡在哪 |
+| --- | --- |
+| 编码列表拖拽、分栏拖动、编码列表 Delete | 手势/焦点，本机无法验证（见 18.2） |
+| `Words` 计数、NFKC 之外的 ICU 能力 | 平台不提供 ICU |
+| 系统强调色、macOS 26 玻璃效果、SF Symbols 字形 | 框架不暴露 |
+| `Full Path` 无中截断/不可选、历史条目无 tooltip | 框架没有该接口（tooltip 只有部分组件自带） |
+| 检查器展开动画 | 元素级动画要自己驱动 `Animation` + `MotionReveal`，且本机无法验证动画帧 |
+| 正则弹层限高、补全列表虚拟化 | overlay/布局的既有取舍，试过并回退 |
+| 最近文档标题、`Created`/`Owner` 的平台差异 | 平台 API 缺失 |
+| `subtext-app` 的 Linux/Windows 编译 | 缺交叉 C 工具链 |
+| 一次性的 `did_finish_launching` SIGABRT | 3 次复现未出现，无法定位 |
+
+**验证**：686 项测试全绿、clippy `-D warnings`、`cargo fmt --all --check` 零差异、
+生成器幂等、冒烟 stderr 0。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
-| `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
 | UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
-| 三个副窗口此前没有 Base `Root`（已修） | `gpui_kit::open_window` 会把视图包一层 `base::Root`，`cx.open_window` 不会。设置窗口、关于窗口、快速操作面板走的是后者，所以它们从来没有组件窗口状态，也就从来没有能力打开 overlay——只是此前都不开对话框，所以没暴露。§8.11 的冒烟探针第一次跑就崩在这里，三处已一并改成 `gpui_kit::open_window`（`Workspace` 因此多存一个 `settings_view: Option<WeakEntity<SettingsWindow>>`，因为窗口的根视图不再是 `SettingsWindow`）。**判据**：`grep -rn 'cx\.open_window' crates/` 应为空。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
@@ -2664,7 +2718,6 @@ BE 文件重存成本机字节序（并注明这是上游行为）、无标记�
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
-| ~~大纲里 `title` 类条目在 `heading` 之后的层级~~ | **不是缺口（证据已核）**：`OutlinePolicy.normalizedLevels` 那条 `title` 特例只出现在 `Packages/Syntax/Tests/SyntaxParsersTests/OutlinePolicyTests.swift` 与它自己的定义里，**生产代码没有任何调用点** —— `OutlineInspectorView.rebuildOutline()` 走的是 `OutlineBuildNode.build(from: self.items)`，直接吃提取结果，`title` 就是 `.level(0)`，与 SubText 的 `indent_for` 完全一致。此前把「库里有这段代码」当成了「应用会跑这段代码」。 |
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **三个纯 Rust crate 已由 CI 跨目标检查**（§14.4）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |

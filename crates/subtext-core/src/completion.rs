@@ -63,7 +63,9 @@ impl CompletionSources {
 /// position after that character.
 pub fn partial_word_range(text: &str, caret: usize, syntax_first_letters: &[char]) -> Range<usize> {
     let caret = floor_char_boundary(text, caret);
-    let appkit = run_start(text, caret, &|c| c.is_alphanumeric() || c == '_' || c == '.');
+    let appkit = run_start(text, caret, &|c| {
+        c.is_alphanumeric() || c == '_' || c == '.'
+    });
     let widened = run_start(text, caret, &|c| {
         c.is_alphanumeric() || c == '_' || syntax_first_letters.contains(&c)
     });
@@ -123,7 +125,11 @@ pub fn candidates(
         // in Rust's regex, so the two engines agree on what a word is.
         let pattern = format!(r"\b{}\w+\b", regex::escape(word));
         if let Ok(pattern) = Regex::new(&pattern) {
-            found.extend(pattern.find_iter(text).map(|found| found.as_str().to_string()));
+            found.extend(
+                pattern
+                    .find_iter(text)
+                    .map(|found| found.as_str().to_string()),
+            );
         }
     }
 
@@ -277,7 +283,10 @@ mod tests {
     #[test]
     fn the_document_supplies_the_words_that_begin_with_the_partial() {
         let text = "let foo = 1\nfooBar()\nlet food = 2\n";
-        let sources = CompletionSources { document: true, ..Default::default() };
+        let sources = CompletionSources {
+            document: true,
+            ..Default::default()
+        };
         let found = candidates(text, &(4..6), sources, &[]);
         assert_eq!(found, words(&["foo", "fooBar", "food"]));
 
@@ -288,18 +297,30 @@ mod tests {
     #[test]
     fn a_one_character_symbol_does_not_offer_the_whole_document() {
         let text = "_alpha _beta";
-        let sources = CompletionSources { document: true, ..Default::default() };
+        let sources = CompletionSources {
+            document: true,
+            ..Default::default()
+        };
         // `_` on its own: the guard skips the document search.
         assert!(candidates(text, &(0..1), sources, &[]).is_empty());
         // A one-character *letter* is searched.
-        assert_eq!(candidates("a b alpha", &(0..1), sources, &[]), words(&["alpha"]));
+        assert_eq!(
+            candidates("a b alpha", &(0..1), sources, &[]),
+            words(&["alpha"])
+        );
     }
 
     #[test]
     fn the_syntax_supplies_case_insensitive_prefixes() {
         let syntax = words(&["@interface", "int", "Integer"]);
-        let sources = CompletionSources { syntax: true, ..Default::default() };
-        assert_eq!(candidates("in", &(0..2), sources, &syntax), words(&["int", "Integer"]));
+        let sources = CompletionSources {
+            syntax: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            candidates("in", &(0..2), sources, &syntax),
+            words(&["int", "Integer"])
+        );
         // Case-insensitive, unlike the document search.
         assert_eq!(
             candidates("IN", &(0..2), sources, &syntax),
@@ -312,7 +333,11 @@ mod tests {
     #[test]
     fn the_document_comes_before_the_syntax_and_repeats_are_dropped() {
         let syntax = words(&["int", "Integer"]);
-        let sources = CompletionSources { document: true, syntax: true, ..Default::default() };
+        let sources = CompletionSources {
+            document: true,
+            syntax: true,
+            ..Default::default()
+        };
         let found = candidates("int x\ninteger y", &(0..3), sources, &syntax);
         // The document's search needs at least one more word character after
         // the partial, so it offers `integer` and never the word itself.
@@ -324,19 +349,36 @@ mod tests {
         // The document search never returns the word itself — its pattern needs
         // one more character — so this guard is about the syntax list.
         let syntax = words(&["int"]);
-        let sources = CompletionSources { syntax: true, ..Default::default() };
+        let sources = CompletionSources {
+            syntax: true,
+            ..Default::default()
+        };
         assert!(candidates("int", &(0..3), sources, &syntax).is_empty());
         // A second candidate makes the list worth showing.
         let syntax = words(&["int", "interface"]);
-        assert_eq!(candidates("int", &(0..3), sources, &syntax), words(&["int", "interface"]));
+        assert_eq!(
+            candidates("int", &(0..3), sources, &syntax),
+            words(&["int", "interface"])
+        );
     }
 
     #[test]
     fn no_sources_means_no_candidates() {
-        assert!(candidates("foo", &(0..3), CompletionSources::default(), &words(&["foobar"])).is_empty());
+        assert!(
+            candidates(
+                "foo",
+                &(0..3),
+                CompletionSources::default(),
+                &words(&["foobar"])
+            )
+            .is_empty()
+        );
         // The standard source is AppKit's, which SubText cannot reach: with
         // only that switch on there is nothing to offer.
-        let standard = CompletionSources { standard: true, ..Default::default() };
+        let standard = CompletionSources {
+            standard: true,
+            ..Default::default()
+        };
         assert!(candidates("foo", &(0..3), standard, &words(&["foobar"])).is_empty());
     }
 

@@ -113,7 +113,9 @@ impl ColorSheet {
         // the same state a moment later, through the publisher that fires when
         // the panel is first observed.
         sheet.write_code(color, window, cx);
-        sheet.code.update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
+        sheet
+            .code
+            .update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
 
         let subscriptions = vec![
             cx.subscribe_in(&sheet.code.clone(), window, Self::on_code_change),
@@ -150,8 +152,9 @@ impl ColorSheet {
         };
         self.kind = kind;
         self.select_kind(kind, window, cx);
-        self.picker
-            .update(cx, |picker, cx| picker.set_value(hsla_of(color), window, cx));
+        self.picker.update(cx, |picker, cx| {
+            picker.set_value(hsla_of(color), window, cx)
+        });
         cx.notify();
     }
 
@@ -235,7 +238,8 @@ impl ColorSheet {
     /// Rewrite the field from `color`, keeping the panel's letter case.
     fn write_code(&mut self, color: Color, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.write_style(color);
-        self.code.update(cx, |state, cx| state.set_value(text, window, cx));
+        self.code
+            .update(cx, |state, cx| state.set_value(text, window, cx));
         cx.notify();
     }
 
@@ -274,9 +278,9 @@ impl ColorSheet {
         // The code is monospaced: a colour code is a token, not prose, and the
         // digits of `#336699` line up under `#336699` only in a fixed pitch.
         v_flex().w_full().gap_1().child(
-            div().w_full().child(
-                Input::new(&self.code).font_family(cx.theme().mono_font_family.clone()),
-            ),
+            div()
+                .w_full()
+                .child(Input::new(&self.code).font_family(cx.theme().mono_font_family.clone())),
         )
     }
 
@@ -285,7 +289,9 @@ impl ColorSheet {
             .gap_2()
             .child(div().w(rems(LABEL_COLUMN)).text_sm().child("Color:"))
             .child(
-                div().flex_1().child(ColorSelect::new(&self.picker).with_size(Size::Small)),
+                div()
+                    .flex_1()
+                    .child(ColorSelect::new(&self.picker).with_size(Size::Small)),
             )
     }
 
@@ -342,8 +348,20 @@ impl Render for ColorSheet {
 /// four hex notations are the ones whose letter case is preserved.
 fn kind_sections() -> [(&'static str, Vec<&'static str>); 2] {
     [
-        ("Hexadecimal", ColorCodeType::HEX_TYPES.iter().map(|kind| kind.label()).collect()),
-        ("CSS", ColorCodeType::CSS_TYPES.iter().map(|kind| kind.label()).collect()),
+        (
+            "Hexadecimal",
+            ColorCodeType::HEX_TYPES
+                .iter()
+                .map(|kind| kind.label())
+                .collect(),
+        ),
+        (
+            "CSS",
+            ColorCodeType::CSS_TYPES
+                .iter()
+                .map(|kind| kind.label())
+                .collect(),
+        ),
     ]
 }
 
@@ -358,7 +376,10 @@ fn kinds() -> KindDelegate {
 
 /// Where `kind` sits in the menu built by [`kinds`].
 fn index_of(kind: ColorCodeType) -> IndexPath {
-    match ColorCodeType::HEX_TYPES.iter().position(|candidate| *candidate == kind) {
+    match ColorCodeType::HEX_TYPES
+        .iter()
+        .position(|candidate| *candidate == kind)
+    {
         Some(row) => IndexPath::new(row).section(0),
         None => {
             let row = ColorCodeType::CSS_TYPES
@@ -372,7 +393,9 @@ fn index_of(kind: ColorCodeType) -> IndexPath {
 
 /// The notation a menu label names.
 fn kind_for_label(label: &str) -> Option<ColorCodeType> {
-    ColorCodeType::ALL.into_iter().find(|kind| kind.label() == label)
+    ColorCodeType::ALL
+        .into_iter()
+        .find(|kind| kind.label() == label)
 }
 
 /// The panel's `Hsla`, from this crate's `Color`.

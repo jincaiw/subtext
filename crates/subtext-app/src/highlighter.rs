@@ -61,7 +61,10 @@ impl CotStyleResolver {
             let color = entry.color.unwrap_or_else(|| theme.text_color());
             styles.insert(
                 token.style_name().to_string(),
-                HighlightStyle { color: Some(to_hsla(color)), ..Default::default() },
+                HighlightStyle {
+                    color: Some(to_hsla(color)),
+                    ..Default::default()
+                },
             );
         }
         Self { styles }
@@ -86,9 +89,17 @@ pub fn editor_style(theme: &Theme) -> InputEditorStyle {
 
     let text = to_hsla(text_color);
     let background = to_hsla(background_color);
-    let selection = to_hsla(theme.selection.resolve(CotRgba::new(0xB5, 0xD6, 0xFD, 0xFF)));
+    let selection = to_hsla(
+        theme
+            .selection
+            .resolve(CotRgba::new(0xB5, 0xD6, 0xFD, 0xFF)),
+    );
     let caret = to_hsla(theme.insertion_point.resolve(text_color));
-    let invisibles = to_hsla(theme.invisibles.resolve(CotRgba::new(0xC0, 0xC0, 0xC0, 0xFF)));
+    let invisibles = to_hsla(
+        theme
+            .invisibles
+            .resolve(CotRgba::new(0xC0, 0xC0, 0xC0, 0xFF)),
+    );
     let current_line = to_hsla(theme.line_highlight.resolve(background_color));
 
     InputEditorStyle {
@@ -386,7 +397,10 @@ mod tests {
 
         let mut cursor = 0;
         for (range, _) in &runs {
-            assert_eq!(range.start, cursor, "runs must tile without gaps or overlap");
+            assert_eq!(
+                range.start, cursor,
+                "runs must tile without gaps or overlap"
+            );
             cursor = range.end;
         }
         assert_eq!(cursor, text.len());
@@ -424,7 +438,8 @@ mod tests {
         let runs = highlighter.styled_runs(&(0..text.len()), &resolver);
         let comment_style = resolver.style("comments").unwrap();
         assert!(
-            runs.iter().any(|(range, style)| range.start == 0 && *style == comment_style),
+            runs.iter()
+                .any(|(range, style)| range.start == 0 && *style == comment_style),
             "the leading comment should carry the comment colour"
         );
     }

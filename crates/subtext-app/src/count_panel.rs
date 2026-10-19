@@ -127,7 +127,10 @@ impl CountOptionsView {
         let OptionsEvent::Confirm(Some(label)) = event else {
             return;
         };
-        let Some(unit) = CharacterUnit::ALL.into_iter().find(|unit| unit.label() == *label) else {
+        let Some(unit) = CharacterUnit::ALL
+            .into_iter()
+            .find(|unit| unit.label() == *label)
+        else {
             return;
         };
         self.write(|settings| settings.count_unit = unit, cx);
@@ -143,7 +146,10 @@ impl CountOptionsView {
         let OptionsEvent::Confirm(Some(label)) = event else {
             return;
         };
-        let Some(form) = Normalization::ALL.into_iter().find(|form| form.name() == *label) else {
+        let Some(form) = Normalization::ALL
+            .into_iter()
+            .find(|form| form.name() == *label)
+        else {
             return;
         };
         self.write(|settings| settings.count_normalization_form = form, cx);
@@ -159,8 +165,9 @@ impl CountOptionsView {
         let OptionsEvent::Confirm(Some(label)) = event else {
             return;
         };
-        let Some(encoding) =
-            subtext_core::encoding::AVAILABLE.iter().find(|encoding| encoding.name == *label)
+        let Some(encoding) = subtext_core::encoding::AVAILABLE
+            .iter()
+            .find(|encoding| encoding.name == *label)
         else {
             return;
         };
@@ -204,7 +211,10 @@ fn normalizations() -> OptionsDelegate {
 
 /// Every encoding SubText can write, which is what the byte unit can read.
 fn encoding_labels() -> Vec<&'static str> {
-    subtext_core::encoding::AVAILABLE.iter().map(|encoding| encoding.name).collect()
+    subtext_core::encoding::AVAILABLE
+        .iter()
+        .map(|encoding| encoding.name)
+        .collect()
 }
 
 fn encodings() -> OptionsDelegate {
@@ -213,7 +223,10 @@ fn encodings() -> OptionsDelegate {
 
 /// Where `label` sits among `labels`.
 fn index_of(labels: &[&'static str], label: &str) -> IndexPath {
-    let row = labels.iter().position(|candidate| *candidate == label).unwrap_or(0);
+    let row = labels
+        .iter()
+        .position(|candidate| *candidate == label)
+        .unwrap_or(0);
     IndexPath::new(row).section(0)
 }
 
@@ -285,7 +298,8 @@ impl Render for CountOptionsView {
                                 view.update(cx, |view, cx| {
                                     view.write(
                                         |settings| {
-                                            settings.count_treats_consecutive_whitespace_as_single =
+                                            settings
+                                                .count_treats_consecutive_whitespace_as_single =
                                                 checked;
                                         },
                                         cx,
@@ -393,7 +407,9 @@ impl CountSheet {
     /// Start the counter and close the sheet.
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.workspace
-            .update_in(cx, |workspace, window, cx| workspace.start_advanced_count(window, cx))
+            .update_in(cx, |workspace, window, cx| {
+                workspace.start_advanced_count(window, cx)
+            })
             .ok();
         window.close_dialog(cx);
     }
@@ -401,26 +417,23 @@ impl CountSheet {
 
 impl Render for CountSheet {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .gap_4()
-            .child(self.options.clone())
-            .child(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .justify_end()
-                    .child(
-                        Button::new("count-cancel")
-                            .label("Cancel")
-                            .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
-                    )
-                    .child(
-                        Button::new("count-start")
-                            .primary()
-                            .label("Start")
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
-                    ),
-            )
+        v_flex().gap_4().child(self.options.clone()).child(
+            h_flex()
+                .w_full()
+                .gap_2()
+                .justify_end()
+                .child(
+                    Button::new("count-cancel")
+                        .label("Cancel")
+                        .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
+                )
+                .child(
+                    Button::new("count-start")
+                        .primary()
+                        .label("Start")
+                        .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                ),
+        )
     }
 }
 
@@ -463,7 +476,10 @@ mod tests {
 
     #[test]
     fn the_byte_unit_is_spelled_out_and_the_rest_are_characters() {
-        assert_eq!(count_parts(Some(12), CharacterUnit::Byte), ("12".into(), "bytes".into()));
+        assert_eq!(
+            count_parts(Some(12), CharacterUnit::Byte),
+            ("12".into(), "bytes".into())
+        );
         assert_eq!(
             count_parts(Some(12), CharacterUnit::Utf16),
             ("12".into(), "character(s)".into())
@@ -473,7 +489,10 @@ mod tests {
             ("12".into(), "character(s)".into())
         );
         // A failed count has no number to show, only the word.
-        assert_eq!(count_parts(None, CharacterUnit::Byte), (String::new(), "failed".into()));
+        assert_eq!(
+            count_parts(None, CharacterUnit::Byte),
+            (String::new(), "failed".into())
+        );
     }
 
     #[test]
@@ -508,7 +527,10 @@ mod tests {
     #[test]
     fn every_unit_and_every_encoding_is_offered() {
         assert_eq!(unit_labels().len(), CharacterUnit::ALL.len());
-        assert_eq!(encoding_labels().len(), subtext_core::encoding::AVAILABLE.len());
+        assert_eq!(
+            encoding_labels().len(),
+            subtext_core::encoding::AVAILABLE.len()
+        );
         // The default is on the list, which is what the panel selects.
         assert!(index_of(&unit_labels(), CharacterUnit::GraphemeCluster.label()).row == 0);
     }

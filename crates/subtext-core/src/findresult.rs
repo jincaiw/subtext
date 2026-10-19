@@ -191,7 +191,9 @@ fn clamp_around(
         return content.clone();
     }
     let effective_head = head_padding.min(target.start.saturating_sub(content.start));
-    let start = content.start.max(target.start.saturating_sub(effective_head));
+    let start = content
+        .start
+        .max(target.start.saturating_sub(effective_head));
     let end = content.end.min(start + max_length);
     start..end
 }
@@ -302,7 +304,10 @@ mod tests {
     fn a_match_past_the_head_offset_loses_its_head_to_an_ellipsis() {
         let line = "abcdefghijklmnopqMATCH";
         // 17 characters before the match: keep 16 of them.
-        assert_eq!(truncate_head(line, 17, CELL_HEAD_OFFSET), "…bcdefghijklmnopqMATCH");
+        assert_eq!(
+            truncate_head(line, 17, CELL_HEAD_OFFSET),
+            "…bcdefghijklmnopqMATCH"
+        );
     }
 
     #[test]

@@ -71,8 +71,12 @@ impl ColorCodeType {
     ];
 
     /// The notations the panel's *Hex* section holds.
-    pub const HEX_TYPES: [Self; 4] =
-        [Self::Hex, Self::HexWithAlpha, Self::ShortHex, Self::ShortHexWithAlpha];
+    pub const HEX_TYPES: [Self; 4] = [
+        Self::Hex,
+        Self::HexWithAlpha,
+        Self::ShortHex,
+        Self::ShortHexWithAlpha,
+    ];
 
     /// The notations the panel's *CSS* section holds.
     pub const CSS_TYPES: [Self; 7] = [
@@ -153,10 +157,20 @@ pub struct Color {
 }
 
 impl Color {
-    pub const BLACK: Self = Self { red: 0., green: 0., blue: 0., alpha: 1. };
+    pub const BLACK: Self = Self {
+        red: 0.,
+        green: 0.,
+        blue: 0.,
+        alpha: 1.,
+    };
 
     pub const fn new(red: f64, green: f64, blue: f64, alpha: f64) -> Self {
-        Self { red, green, blue, alpha }
+        Self {
+            red,
+            green,
+            blue,
+            alpha,
+        }
     }
 
     /// A colour from 8-bit channels and an alpha in `0.0..=1.0`.
@@ -232,7 +246,12 @@ impl Color {
             let value = if value.is_finite() { value } else { 0. };
             (255. * value).round().clamp(0., 255.) as u8
         };
-        [channel(self.red), channel(self.green), channel(self.blue), channel(self.alpha)]
+        [
+            channel(self.red),
+            channel(self.green),
+            channel(self.blue),
+            channel(self.alpha),
+        ]
     }
 
     /// The 24-bit `0xRRGGBB` value, alpha dropped.
@@ -274,8 +293,11 @@ impl Color {
         let diff = max - min;
 
         // The epsilon is upstream's: a hair of difference is not a colour.
-        let saturation =
-            if diff > 0.00001 { diff / (1. - ((max + min) - 1.).abs()) } else { 0. };
+        let saturation = if diff > 0.00001 {
+            diff / (1. - ((max + min) - 1.).abs())
+        } else {
+            0.
+        };
         let lightness = (max + min) / 2.;
         (self.hue(), saturation, lightness)
     }
@@ -329,7 +351,11 @@ impl Color {
         let (hue, saturation, lightness) = self.hsl();
         // A colour with no saturation has no hue to speak of; upstream reports
         // 0 rather than whatever the arithmetic happened to leave behind.
-        let hue = if saturation > 0. { (360. * hue).round() } else { 0. };
+        let hue = if saturation > 0. {
+            (360. * hue).round()
+        } else {
+            0.
+        };
         let saturation = (100. * saturation).round();
         let lightness = (100. * lightness).round();
         if with_alpha {
@@ -349,7 +375,10 @@ impl Color {
         let whiteness = (100. * whiteness).round() as i64;
         let blackness = (100. * blackness).round() as i64;
         if with_alpha {
-            format!("hwb({hue} {whiteness}% {blackness}% / {})", css_alpha(self.alpha))
+            format!(
+                "hwb({hue} {whiteness}% {blackness}% / {})",
+                css_alpha(self.alpha)
+            )
         } else {
             format!("hwb({hue} {whiteness}% {blackness}%)")
         }
@@ -364,7 +393,12 @@ impl Color {
     /// as this module's, so nothing is converted but the numbers' type.
     pub fn hsla(self) -> (f32, f32, f32, f32) {
         let (hue, saturation, lightness) = self.hsl();
-        (hue as f32, saturation as f32, lightness as f32, self.alpha as f32)
+        (
+            hue as f32,
+            saturation as f32,
+            lightness as f32,
+            self.alpha as f32,
+        )
     }
 }
 
@@ -387,7 +421,11 @@ fn css_alpha(alpha: f64) -> String {
     if text.ends_with('.') {
         text.pop();
     }
-    if negative && text != "0" { format!("-{text}") } else { text }
+    if negative && text != "0" {
+        format!("-{text}")
+    } else {
+        text
+    }
 }
 
 /// The CSS colour names, in the order upstream lists them.
@@ -396,154 +434,746 @@ fn css_alpha(alpha: f64) -> String {
 /// a value, so `#00ffff` reports `aqua` rather than the later `cyan`, and
 /// `#ff00ff` reports `fuchsia` rather than `magenta`.
 pub static KEYWORD_COLORS: [KeywordColor; 148] = [
-    KeywordColor { value: 0x000000, keyword: "black", version: 1 },
-    KeywordColor { value: 0x000080, keyword: "navy", version: 1 },
-    KeywordColor { value: 0x0000ff, keyword: "blue", version: 1 },
-    KeywordColor { value: 0x008000, keyword: "green", version: 1 },
-    KeywordColor { value: 0x00ff00, keyword: "lime", version: 1 },
-    KeywordColor { value: 0x00ffff, keyword: "aqua", version: 1 },
-    KeywordColor { value: 0x008080, keyword: "teal", version: 1 },
-    KeywordColor { value: 0x800000, keyword: "maroon", version: 1 },
-    KeywordColor { value: 0x800080, keyword: "purple", version: 1 },
-    KeywordColor { value: 0x808000, keyword: "olive", version: 1 },
-    KeywordColor { value: 0x808080, keyword: "gray", version: 1 },
-    KeywordColor { value: 0xc0c0c0, keyword: "silver", version: 1 },
-    KeywordColor { value: 0xff0000, keyword: "red", version: 1 },
-    KeywordColor { value: 0xff00ff, keyword: "fuchsia", version: 1 },
-    KeywordColor { value: 0xffff00, keyword: "yellow", version: 1 },
-    KeywordColor { value: 0xffffff, keyword: "white", version: 1 },
-    KeywordColor { value: 0xffa500, keyword: "orange", version: 2 },
-    KeywordColor { value: 0x00008b, keyword: "darkblue", version: 3 },
-    KeywordColor { value: 0x0000cd, keyword: "mediumblue", version: 3 },
-    KeywordColor { value: 0x006400, keyword: "darkgreen", version: 3 },
-    KeywordColor { value: 0x008b8b, keyword: "darkcyan", version: 3 },
-    KeywordColor { value: 0x00bfff, keyword: "deepskyblue", version: 3 },
-    KeywordColor { value: 0x00ced1, keyword: "darkturquoise", version: 3 },
-    KeywordColor { value: 0x00fa9a, keyword: "mediumspringgreen", version: 3 },
-    KeywordColor { value: 0x00ff7f, keyword: "springgreen", version: 3 },
-    KeywordColor { value: 0x00ffff, keyword: "cyan", version: 3 },
-    KeywordColor { value: 0x191970, keyword: "midnightblue", version: 3 },
-    KeywordColor { value: 0x1e90ff, keyword: "dodgerblue", version: 3 },
-    KeywordColor { value: 0x20b2aa, keyword: "lightseagreen", version: 3 },
-    KeywordColor { value: 0x228b22, keyword: "forestgreen", version: 3 },
-    KeywordColor { value: 0x2e8b57, keyword: "seagreen", version: 3 },
-    KeywordColor { value: 0x2f4f4f, keyword: "darkslategray", version: 3 },
-    KeywordColor { value: 0x2f4f4f, keyword: "darkslategrey", version: 3 },
-    KeywordColor { value: 0x32cd32, keyword: "limegreen", version: 3 },
-    KeywordColor { value: 0x3cb371, keyword: "mediumseagreen", version: 3 },
-    KeywordColor { value: 0x40e0d0, keyword: "turquoise", version: 3 },
-    KeywordColor { value: 0x4169e1, keyword: "royalblue", version: 3 },
-    KeywordColor { value: 0x4682b4, keyword: "steelblue", version: 3 },
-    KeywordColor { value: 0x483d8b, keyword: "darkslateblue", version: 3 },
-    KeywordColor { value: 0x48d1cc, keyword: "mediumturquoise", version: 3 },
-    KeywordColor { value: 0x4b0082, keyword: "indigo", version: 3 },
-    KeywordColor { value: 0x556b2f, keyword: "darkolivegreen", version: 3 },
-    KeywordColor { value: 0x5f9ea0, keyword: "cadetblue", version: 3 },
-    KeywordColor { value: 0x6495ed, keyword: "cornflowerblue", version: 3 },
-    KeywordColor { value: 0x66cdaa, keyword: "mediumaquamarine", version: 3 },
-    KeywordColor { value: 0x696969, keyword: "dimgray", version: 3 },
-    KeywordColor { value: 0x696969, keyword: "dimgrey", version: 3 },
-    KeywordColor { value: 0x6a5acd, keyword: "slateblue", version: 3 },
-    KeywordColor { value: 0x6b8e23, keyword: "olivedrab", version: 3 },
-    KeywordColor { value: 0x708090, keyword: "slategray", version: 3 },
-    KeywordColor { value: 0x708090, keyword: "slategrey", version: 3 },
-    KeywordColor { value: 0x778899, keyword: "lightslategray", version: 3 },
-    KeywordColor { value: 0x778899, keyword: "lightslategrey", version: 3 },
-    KeywordColor { value: 0x7b68ee, keyword: "mediumslateblue", version: 3 },
-    KeywordColor { value: 0x7cfc00, keyword: "lawngreen", version: 3 },
-    KeywordColor { value: 0x7fff00, keyword: "chartreuse", version: 3 },
-    KeywordColor { value: 0x7fffd4, keyword: "aquamarine", version: 3 },
-    KeywordColor { value: 0x808080, keyword: "grey", version: 3 },
-    KeywordColor { value: 0x87ceeb, keyword: "skyblue", version: 3 },
-    KeywordColor { value: 0x87cefa, keyword: "lightskyblue", version: 3 },
-    KeywordColor { value: 0x8a2be2, keyword: "blueviolet", version: 3 },
-    KeywordColor { value: 0x8b0000, keyword: "darkred", version: 3 },
-    KeywordColor { value: 0x8b008b, keyword: "darkmagenta", version: 3 },
-    KeywordColor { value: 0x8b4513, keyword: "saddlebrown", version: 3 },
-    KeywordColor { value: 0x8fbc8f, keyword: "darkseagreen", version: 3 },
-    KeywordColor { value: 0x90ee90, keyword: "lightgreen", version: 3 },
-    KeywordColor { value: 0x9370db, keyword: "mediumpurple", version: 3 },
-    KeywordColor { value: 0x9400d3, keyword: "darkviolet", version: 3 },
-    KeywordColor { value: 0x98fb98, keyword: "palegreen", version: 3 },
-    KeywordColor { value: 0x9932cc, keyword: "darkorchid", version: 3 },
-    KeywordColor { value: 0x9acd32, keyword: "yellowgreen", version: 3 },
-    KeywordColor { value: 0xa0522d, keyword: "sienna", version: 3 },
-    KeywordColor { value: 0xa52a2a, keyword: "brown", version: 3 },
-    KeywordColor { value: 0xa9a9a9, keyword: "darkgray", version: 3 },
-    KeywordColor { value: 0xa9a9a9, keyword: "darkgrey", version: 3 },
-    KeywordColor { value: 0xadd8e6, keyword: "lightblue", version: 3 },
-    KeywordColor { value: 0xadff2f, keyword: "greenyellow", version: 3 },
-    KeywordColor { value: 0xafeeee, keyword: "paleturquoise", version: 3 },
-    KeywordColor { value: 0xb0c4de, keyword: "lightsteelblue", version: 3 },
-    KeywordColor { value: 0xb0e0e6, keyword: "powderblue", version: 3 },
-    KeywordColor { value: 0xb22222, keyword: "firebrick", version: 3 },
-    KeywordColor { value: 0xb8860b, keyword: "darkgoldenrod", version: 3 },
-    KeywordColor { value: 0xba55d3, keyword: "mediumorchid", version: 3 },
-    KeywordColor { value: 0xbc8f8f, keyword: "rosybrown", version: 3 },
-    KeywordColor { value: 0xbdb76b, keyword: "darkkhaki", version: 3 },
-    KeywordColor { value: 0xc71585, keyword: "mediumvioletred", version: 3 },
-    KeywordColor { value: 0xcd5c5c, keyword: "indianred", version: 3 },
-    KeywordColor { value: 0xcd853f, keyword: "peru", version: 3 },
-    KeywordColor { value: 0xd2691e, keyword: "chocolate", version: 3 },
-    KeywordColor { value: 0xd2b48c, keyword: "tan", version: 3 },
-    KeywordColor { value: 0xd3d3d3, keyword: "lightgray", version: 3 },
-    KeywordColor { value: 0xd3d3d3, keyword: "lightgrey", version: 3 },
-    KeywordColor { value: 0xd8bfd8, keyword: "thistle", version: 3 },
-    KeywordColor { value: 0xda70d6, keyword: "orchid", version: 3 },
-    KeywordColor { value: 0xdaa520, keyword: "goldenrod", version: 3 },
-    KeywordColor { value: 0xdb7093, keyword: "palevioletred", version: 3 },
-    KeywordColor { value: 0xdc143c, keyword: "crimson", version: 3 },
-    KeywordColor { value: 0xdcdcdc, keyword: "gainsboro", version: 3 },
-    KeywordColor { value: 0xdda0dd, keyword: "plum", version: 3 },
-    KeywordColor { value: 0xdeb887, keyword: "burlywood", version: 3 },
-    KeywordColor { value: 0xe0ffff, keyword: "lightcyan", version: 3 },
-    KeywordColor { value: 0xe6e6fa, keyword: "lavender", version: 3 },
-    KeywordColor { value: 0xe9967a, keyword: "darksalmon", version: 3 },
-    KeywordColor { value: 0xee82ee, keyword: "violet", version: 3 },
-    KeywordColor { value: 0xeee8aa, keyword: "palegoldenrod", version: 3 },
-    KeywordColor { value: 0xf08080, keyword: "lightcoral", version: 3 },
-    KeywordColor { value: 0xf0e68c, keyword: "khaki", version: 3 },
-    KeywordColor { value: 0xf0f8ff, keyword: "aliceblue", version: 3 },
-    KeywordColor { value: 0xf0fff0, keyword: "honeydew", version: 3 },
-    KeywordColor { value: 0xf0ffff, keyword: "azure", version: 3 },
-    KeywordColor { value: 0xf4a460, keyword: "sandybrown", version: 3 },
-    KeywordColor { value: 0xf5deb3, keyword: "wheat", version: 3 },
-    KeywordColor { value: 0xf5f5dc, keyword: "beige", version: 3 },
-    KeywordColor { value: 0xf5f5f5, keyword: "whitesmoke", version: 3 },
-    KeywordColor { value: 0xf5fffa, keyword: "mintcream", version: 3 },
-    KeywordColor { value: 0xf8f8ff, keyword: "ghostwhite", version: 3 },
-    KeywordColor { value: 0xfa8072, keyword: "salmon", version: 3 },
-    KeywordColor { value: 0xfaebd7, keyword: "antiquewhite", version: 3 },
-    KeywordColor { value: 0xfaf0e6, keyword: "linen", version: 3 },
-    KeywordColor { value: 0xfafad2, keyword: "lightgoldenrodyellow", version: 3 },
-    KeywordColor { value: 0xfdf5e6, keyword: "oldlace", version: 3 },
-    KeywordColor { value: 0xff00ff, keyword: "magenta", version: 3 },
-    KeywordColor { value: 0xff1493, keyword: "deeppink", version: 3 },
-    KeywordColor { value: 0xff4500, keyword: "orangered", version: 3 },
-    KeywordColor { value: 0xff6347, keyword: "tomato", version: 3 },
-    KeywordColor { value: 0xff69b4, keyword: "hotpink", version: 3 },
-    KeywordColor { value: 0xff7f50, keyword: "coral", version: 3 },
-    KeywordColor { value: 0xff8c00, keyword: "darkorange", version: 3 },
-    KeywordColor { value: 0xffa07a, keyword: "lightsalmon", version: 3 },
-    KeywordColor { value: 0xffb6c1, keyword: "lightpink", version: 3 },
-    KeywordColor { value: 0xffc0cb, keyword: "pink", version: 3 },
-    KeywordColor { value: 0xffd700, keyword: "gold", version: 3 },
-    KeywordColor { value: 0xffdab9, keyword: "peachpuff", version: 3 },
-    KeywordColor { value: 0xffdead, keyword: "navajowhite", version: 3 },
-    KeywordColor { value: 0xffe4b5, keyword: "moccasin", version: 3 },
-    KeywordColor { value: 0xffe4c4, keyword: "bisque", version: 3 },
-    KeywordColor { value: 0xffe4e1, keyword: "mistyrose", version: 3 },
-    KeywordColor { value: 0xffebcd, keyword: "blanchedalmond", version: 3 },
-    KeywordColor { value: 0xffefd5, keyword: "papayawhip", version: 3 },
-    KeywordColor { value: 0xfff0f5, keyword: "lavenderblush", version: 3 },
-    KeywordColor { value: 0xfff5ee, keyword: "seashell", version: 3 },
-    KeywordColor { value: 0xfff8dc, keyword: "cornsilk", version: 3 },
-    KeywordColor { value: 0xfffacd, keyword: "lemonchiffon", version: 3 },
-    KeywordColor { value: 0xfffaf0, keyword: "floralwhite", version: 3 },
-    KeywordColor { value: 0xfffafa, keyword: "snow", version: 3 },
-    KeywordColor { value: 0xffffe0, keyword: "lightyellow", version: 3 },
-    KeywordColor { value: 0xfffff0, keyword: "ivory", version: 3 },
-    KeywordColor { value: 0x663399, keyword: "rebeccapurple", version: 4 },
+    KeywordColor {
+        value: 0x000000,
+        keyword: "black",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x000080,
+        keyword: "navy",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x0000ff,
+        keyword: "blue",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x008000,
+        keyword: "green",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x00ff00,
+        keyword: "lime",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x00ffff,
+        keyword: "aqua",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x008080,
+        keyword: "teal",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x800000,
+        keyword: "maroon",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x800080,
+        keyword: "purple",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x808000,
+        keyword: "olive",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0x808080,
+        keyword: "gray",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xc0c0c0,
+        keyword: "silver",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xff0000,
+        keyword: "red",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xff00ff,
+        keyword: "fuchsia",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xffff00,
+        keyword: "yellow",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xffffff,
+        keyword: "white",
+        version: 1,
+    },
+    KeywordColor {
+        value: 0xffa500,
+        keyword: "orange",
+        version: 2,
+    },
+    KeywordColor {
+        value: 0x00008b,
+        keyword: "darkblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x0000cd,
+        keyword: "mediumblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x006400,
+        keyword: "darkgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x008b8b,
+        keyword: "darkcyan",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x00bfff,
+        keyword: "deepskyblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x00ced1,
+        keyword: "darkturquoise",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x00fa9a,
+        keyword: "mediumspringgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x00ff7f,
+        keyword: "springgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x00ffff,
+        keyword: "cyan",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x191970,
+        keyword: "midnightblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x1e90ff,
+        keyword: "dodgerblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x20b2aa,
+        keyword: "lightseagreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x228b22,
+        keyword: "forestgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x2e8b57,
+        keyword: "seagreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x2f4f4f,
+        keyword: "darkslategray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x2f4f4f,
+        keyword: "darkslategrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x32cd32,
+        keyword: "limegreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x3cb371,
+        keyword: "mediumseagreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x40e0d0,
+        keyword: "turquoise",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x4169e1,
+        keyword: "royalblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x4682b4,
+        keyword: "steelblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x483d8b,
+        keyword: "darkslateblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x48d1cc,
+        keyword: "mediumturquoise",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x4b0082,
+        keyword: "indigo",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x556b2f,
+        keyword: "darkolivegreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x5f9ea0,
+        keyword: "cadetblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x6495ed,
+        keyword: "cornflowerblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x66cdaa,
+        keyword: "mediumaquamarine",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x696969,
+        keyword: "dimgray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x696969,
+        keyword: "dimgrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x6a5acd,
+        keyword: "slateblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x6b8e23,
+        keyword: "olivedrab",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x708090,
+        keyword: "slategray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x708090,
+        keyword: "slategrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x778899,
+        keyword: "lightslategray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x778899,
+        keyword: "lightslategrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x7b68ee,
+        keyword: "mediumslateblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x7cfc00,
+        keyword: "lawngreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x7fff00,
+        keyword: "chartreuse",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x7fffd4,
+        keyword: "aquamarine",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x808080,
+        keyword: "grey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x87ceeb,
+        keyword: "skyblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x87cefa,
+        keyword: "lightskyblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x8a2be2,
+        keyword: "blueviolet",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x8b0000,
+        keyword: "darkred",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x8b008b,
+        keyword: "darkmagenta",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x8b4513,
+        keyword: "saddlebrown",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x8fbc8f,
+        keyword: "darkseagreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x90ee90,
+        keyword: "lightgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x9370db,
+        keyword: "mediumpurple",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x9400d3,
+        keyword: "darkviolet",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x98fb98,
+        keyword: "palegreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x9932cc,
+        keyword: "darkorchid",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x9acd32,
+        keyword: "yellowgreen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xa0522d,
+        keyword: "sienna",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xa52a2a,
+        keyword: "brown",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xa9a9a9,
+        keyword: "darkgray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xa9a9a9,
+        keyword: "darkgrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xadd8e6,
+        keyword: "lightblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xadff2f,
+        keyword: "greenyellow",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xafeeee,
+        keyword: "paleturquoise",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xb0c4de,
+        keyword: "lightsteelblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xb0e0e6,
+        keyword: "powderblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xb22222,
+        keyword: "firebrick",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xb8860b,
+        keyword: "darkgoldenrod",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xba55d3,
+        keyword: "mediumorchid",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xbc8f8f,
+        keyword: "rosybrown",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xbdb76b,
+        keyword: "darkkhaki",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xc71585,
+        keyword: "mediumvioletred",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xcd5c5c,
+        keyword: "indianred",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xcd853f,
+        keyword: "peru",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xd2691e,
+        keyword: "chocolate",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xd2b48c,
+        keyword: "tan",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xd3d3d3,
+        keyword: "lightgray",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xd3d3d3,
+        keyword: "lightgrey",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xd8bfd8,
+        keyword: "thistle",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xda70d6,
+        keyword: "orchid",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdaa520,
+        keyword: "goldenrod",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdb7093,
+        keyword: "palevioletred",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdc143c,
+        keyword: "crimson",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdcdcdc,
+        keyword: "gainsboro",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdda0dd,
+        keyword: "plum",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xdeb887,
+        keyword: "burlywood",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xe0ffff,
+        keyword: "lightcyan",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xe6e6fa,
+        keyword: "lavender",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xe9967a,
+        keyword: "darksalmon",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xee82ee,
+        keyword: "violet",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xeee8aa,
+        keyword: "palegoldenrod",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf08080,
+        keyword: "lightcoral",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf0e68c,
+        keyword: "khaki",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf0f8ff,
+        keyword: "aliceblue",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf0fff0,
+        keyword: "honeydew",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf0ffff,
+        keyword: "azure",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf4a460,
+        keyword: "sandybrown",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf5deb3,
+        keyword: "wheat",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf5f5dc,
+        keyword: "beige",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf5f5f5,
+        keyword: "whitesmoke",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf5fffa,
+        keyword: "mintcream",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xf8f8ff,
+        keyword: "ghostwhite",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfa8072,
+        keyword: "salmon",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfaebd7,
+        keyword: "antiquewhite",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfaf0e6,
+        keyword: "linen",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfafad2,
+        keyword: "lightgoldenrodyellow",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfdf5e6,
+        keyword: "oldlace",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff00ff,
+        keyword: "magenta",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff1493,
+        keyword: "deeppink",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff4500,
+        keyword: "orangered",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff6347,
+        keyword: "tomato",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff69b4,
+        keyword: "hotpink",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff7f50,
+        keyword: "coral",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xff8c00,
+        keyword: "darkorange",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffa07a,
+        keyword: "lightsalmon",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffb6c1,
+        keyword: "lightpink",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffc0cb,
+        keyword: "pink",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffd700,
+        keyword: "gold",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffdab9,
+        keyword: "peachpuff",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffdead,
+        keyword: "navajowhite",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffe4b5,
+        keyword: "moccasin",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffe4c4,
+        keyword: "bisque",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffe4e1,
+        keyword: "mistyrose",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffebcd,
+        keyword: "blanchedalmond",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffefd5,
+        keyword: "papayawhip",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfff0f5,
+        keyword: "lavenderblush",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfff5ee,
+        keyword: "seashell",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfff8dc,
+        keyword: "cornsilk",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfffacd,
+        keyword: "lemonchiffon",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfffaf0,
+        keyword: "floralwhite",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfffafa,
+        keyword: "snow",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xffffe0,
+        keyword: "lightyellow",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0xfffff0,
+        keyword: "ivory",
+        version: 3,
+    },
+    KeywordColor {
+        value: 0x663399,
+        keyword: "rebeccapurple",
+        version: 4,
+    },
 ];
 
 /// A CSS colour name and the value it stands for.
@@ -559,15 +1189,20 @@ pub struct KeywordColor {
 
 /// The first name for a 24-bit value, or `None` when it has none.
 pub fn keyword_for_value(value: u32) -> Option<&'static str> {
-    KEYWORD_COLORS.iter().find(|color| color.value == value).map(|color| color.keyword)
+    KEYWORD_COLORS
+        .iter()
+        .find(|color| color.value == value)
+        .map(|color| color.keyword)
 }
 
 /// The value a name stands for, case-insensitively.
 pub fn value_for_keyword(keyword: &str) -> Option<u32> {
     let keyword = keyword.to_lowercase();
-    KEYWORD_COLORS.iter().find(|color| color.keyword == keyword).map(|color| color.value)
+    KEYWORD_COLORS
+        .iter()
+        .find(|color| color.keyword == keyword)
+        .map(|color| color.value)
 }
-
 
 /// A colour built from an HSL triple.
 ///
@@ -604,7 +1239,12 @@ pub fn from_hsl(hue: f64, saturation: f64, lightness: f64, alpha: f64) -> Color 
             p
         }
     };
-    Color::new(channel(hue + 1. / 3.), channel(hue), channel(hue - 1. / 3.), alpha)
+    Color::new(
+        channel(hue + 1. / 3.),
+        channel(hue),
+        channel(hue - 1. / 3.),
+        alpha,
+    )
 }
 
 /// A colour built from an HWB triple.
@@ -660,9 +1300,18 @@ macro_rules! pattern {
 pattern!(hex_re, r"#([0-9a-fA-F]{6})");
 pattern!(hex_with_alpha_re, r"#([0-9a-fA-F]{6})([0-9a-fA-F]{2})");
 pattern!(short_hex_re, r"#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])");
-pattern!(short_hex_with_alpha_re, r"#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])");
-pattern!(css_rgb_comma_re, r"rgb\( *([0-9]{1,3}) *, *([0-9]{1,3}) *, *([0-9]{1,3}) *\)");
-pattern!(css_rgb_space_re, r"rgb\( *([0-9.]+%?) +([0-9.]+%?) +([0-9.]+%?) *\)");
+pattern!(
+    short_hex_with_alpha_re,
+    r"#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])"
+);
+pattern!(
+    css_rgb_comma_re,
+    r"rgb\( *([0-9]{1,3}) *, *([0-9]{1,3}) *, *([0-9]{1,3}) *\)"
+);
+pattern!(
+    css_rgb_space_re,
+    r"rgb\( *([0-9.]+%?) +([0-9.]+%?) +([0-9.]+%?) *\)"
+);
 pattern!(
     css_rgba_comma_re,
     r"rgba\( *([0-9]{1,3}) *, *([0-9]{1,3}) *, *([0-9]{1,3})(?: *, *([0-9.]+))? *\)"
@@ -671,8 +1320,14 @@ pattern!(
     css_rgba_space_re,
     r"rgba?\( *([0-9.]+%?) +([0-9.]+%?) +([0-9.]+%?)(?: *\/ *([0-9.]+%?))? *\)"
 );
-pattern!(css_hsl_comma_re, r"hsl\( *([0-9]{1,3}) *, *([0-9.]+)% *, *([0-9.]+)% *\)");
-pattern!(css_hsl_space_re, r"hsl\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\)");
+pattern!(
+    css_hsl_comma_re,
+    r"hsl\( *([0-9]{1,3}) *, *([0-9.]+)% *, *([0-9.]+)% *\)"
+);
+pattern!(
+    css_hsl_space_re,
+    r"hsl\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\)"
+);
 pattern!(
     css_hsla_comma_re,
     r"hsla\( *([0-9]{1,3}) *, *([0-9.]+)% *, *([0-9.]+)%(?: *, *([0-9.]+))? *\)"
@@ -681,8 +1336,14 @@ pattern!(
     css_hsla_space_re,
     r"hsla?\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?)(?: *\/ *([0-9.]+%?))? *\)"
 );
-pattern!(css_hwb_re, r"hwb\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\)");
-pattern!(css_hwb_with_alpha_re, r"hwb\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\/ *([0-9.]+%?) *\)");
+pattern!(
+    css_hwb_re,
+    r"hwb\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\)"
+);
+pattern!(
+    css_hwb_with_alpha_re,
+    r"hwb\( *([0-9.]+) +([0-9.]+%?) +([0-9.]+%?) *\/ *([0-9.]+%?) *\)"
+);
 pattern!(keyword_re, r"[a-zA-Z]+");
 
 /// A decimal number, or `None` when the text is not one.
@@ -752,7 +1413,11 @@ fn from_hex(hex: u32, alpha: f64) -> Option<Color> {
 
 /// The three decimal channels of a `rgb(...)` / `hsl(...)` style pattern.
 fn channels(captures: &regex::Captures<'_>) -> Option<(f64, f64, f64)> {
-    Some((group(captures, 1)?, group(captures, 2)?, group(captures, 3)?))
+    Some((
+        group(captures, 1)?,
+        group(captures, 2)?,
+        group(captures, 3)?,
+    ))
 }
 
 impl ColorCodeType {
@@ -797,7 +1462,9 @@ impl ColorCodeType {
             Self::CssRgb => {
                 if let Some(captures) = whole_match(css_rgb_comma_re(), code)
                     && let Some((red, green, blue)) = channels(&captures)
-                    && [red, green, blue].iter().all(|value| (0. ..=255.).contains(value))
+                    && [red, green, blue]
+                        .iter()
+                        .all(|value| (0. ..=255.).contains(value))
                 {
                     return Some(Color::new(red / 255., green / 255., blue / 255., 1.));
                 }
@@ -812,7 +1479,9 @@ impl ColorCodeType {
                     && let Some((red, green, blue)) = channels(&captures)
                     && let Some(alpha) =
                         optional_alpha_component(captures.get(4).map(|part| part.as_str()))
-                    && [red, green, blue].iter().all(|value| (0. ..=255.).contains(value))
+                    && [red, green, blue]
+                        .iter()
+                        .all(|value| (0. ..=255.).contains(value))
                     && (0. ..=1.).contains(&alpha)
                 {
                     return Some(Color::new(red / 255., green / 255., blue / 255., alpha));
@@ -821,9 +1490,9 @@ impl ColorCodeType {
                 let red = rgb_component(captures.get(1)?.as_str())?;
                 let green = rgb_component(captures.get(2)?.as_str())?;
                 let blue = rgb_component(captures.get(3)?.as_str())?;
-                let alpha =
-                    optional_alpha_component(captures.get(4).map(|part| part.as_str()))?;
-                (0. ..=1.).contains(&alpha)
+                let alpha = optional_alpha_component(captures.get(4).map(|part| part.as_str()))?;
+                (0. ..=1.)
+                    .contains(&alpha)
                     .then(|| Color::new(red, green, blue, alpha))
             }
             Self::CssHsl => {
@@ -850,7 +1519,12 @@ impl ColorCodeType {
                 {
                     return None;
                 }
-                Some(from_hsl(hue / 360., saturation / 100., lightness / 100., 1.))
+                Some(from_hsl(
+                    hue / 360.,
+                    saturation / 100.,
+                    lightness / 100.,
+                    1.,
+                ))
             }
             Self::CssHsla => {
                 if let Some(captures) = whole_match(css_hsla_comma_re(), code)
@@ -873,8 +1547,7 @@ impl ColorCodeType {
                 let hue = group(&captures, 1)?;
                 let saturation = percentage_component(captures.get(2)?.as_str())?;
                 let lightness = percentage_component(captures.get(3)?.as_str())?;
-                let alpha =
-                    optional_alpha_component(captures.get(4).map(|part| part.as_str()))?;
+                let alpha = optional_alpha_component(captures.get(4).map(|part| part.as_str()))?;
                 if !(0. ..=360.).contains(&hue)
                     || !(0. ..=100.).contains(&saturation)
                     || !(0. ..=100.).contains(&lightness)
@@ -882,7 +1555,12 @@ impl ColorCodeType {
                 {
                     return None;
                 }
-                Some(from_hsl(hue / 360., saturation / 100., lightness / 100., alpha))
+                Some(from_hsl(
+                    hue / 360.,
+                    saturation / 100.,
+                    lightness / 100.,
+                    alpha,
+                ))
             }
             Self::CssHwb => {
                 let captures = whole_match(css_hwb_re(), code)?;
@@ -910,7 +1588,12 @@ impl ColorCodeType {
                 {
                     return None;
                 }
-                Some(from_hwb(hue / 360., whiteness / 100., blackness / 100., alpha))
+                Some(from_hwb(
+                    hue / 360.,
+                    whiteness / 100.,
+                    blackness / 100.,
+                    alpha,
+                ))
             }
             Self::CssKeyword => {
                 // A keyword is letters and nothing else, so a code that parses
@@ -945,20 +1628,35 @@ mod tests {
 
     #[test]
     fn hex_codes_read_at_all_four_widths() {
-        assert!(close(Color::from_code("#336699").unwrap().1, rgb(0.2, 0.4, 0.6, 1.)));
+        assert!(close(
+            Color::from_code("#336699").unwrap().1,
+            rgb(0.2, 0.4, 0.6, 1.)
+        ));
         assert!(close(
             Color::from_code("#33669980").unwrap().1,
             rgb(0.2, 0.4, 0.6, f64::from(0x80u8) / 255.)
         ));
-        assert!(close(Color::from_code("#369").unwrap().1, rgb(0.2, 0.4, 0.6, 1.)));
-        assert!(close(Color::from_code("#369c").unwrap().1, rgb(0.2, 0.4, 0.6, 0.8)));
+        assert!(close(
+            Color::from_code("#369").unwrap().1,
+            rgb(0.2, 0.4, 0.6, 1.)
+        ));
+        assert!(close(
+            Color::from_code("#369c").unwrap().1,
+            rgb(0.2, 0.4, 0.6, 0.8)
+        ));
     }
 
     #[test]
     fn css_rgb_codes_read_both_syntaxes() {
         let expected = rgb(0.2, 0.4, 0.6, 1.);
-        assert!(close(Color::from_code("rgb(51, 102, 153)").unwrap().1, expected));
-        assert!(close(Color::from_code("rgb(20% 40% 60%)").unwrap().1, expected));
+        assert!(close(
+            Color::from_code("rgb(51, 102, 153)").unwrap().1,
+            expected
+        ));
+        assert!(close(
+            Color::from_code("rgb(20% 40% 60%)").unwrap().1,
+            expected
+        ));
         assert!(close(
             Color::from_code("rgba(51, 102, 153, 0.5)").unwrap().1,
             rgb(0.2, 0.4, 0.6, 0.5)
@@ -974,24 +1672,47 @@ mod tests {
         // Upstream compares the parsed HSL triple; here the triple is folded
         // into RGB, so the assertion is on the RGB the same triple names.
         let expected = from_hsl(0.5, 0.5, 0.25, 1.);
-        assert!(close(Color::from_code("hsl(180, 50%, 25%)").unwrap().1, expected));
-        assert!(close(Color::from_code("hsl(180 50 25)").unwrap().1, expected));
+        assert!(close(
+            Color::from_code("hsl(180, 50%, 25%)").unwrap().1,
+            expected
+        ));
+        assert!(close(
+            Color::from_code("hsl(180 50 25)").unwrap().1,
+            expected
+        ));
         let translucent = from_hsl(0.5, 0.5, 0.25, 0.5);
-        assert!(close(Color::from_code("hsla(180, 50%, 25%, 0.5)").unwrap().1, translucent));
-        assert!(close(Color::from_code("hsl(180 50% 25% / 50%)").unwrap().1, translucent));
+        assert!(close(
+            Color::from_code("hsla(180, 50%, 25%, 0.5)").unwrap().1,
+            translucent
+        ));
+        assert!(close(
+            Color::from_code("hsl(180 50% 25% / 50%)").unwrap().1,
+            translucent
+        ));
     }
 
     #[test]
     fn css_hwb_codes_read_both_syntaxes() {
         let expected = from_hwb(0.5, 0.2, 0.3, 1.);
-        assert!(close(Color::from_code("hwb(180 20% 30%)").unwrap().1, expected));
+        assert!(close(
+            Color::from_code("hwb(180 20% 30%)").unwrap().1,
+            expected
+        ));
         let translucent = from_hwb(0.5, 0.2, 0.3, 0.5);
-        assert!(close(Color::from_code("hwb(180 20% 30% / 50%)").unwrap().1, translucent));
+        assert!(close(
+            Color::from_code("hwb(180 20% 30% / 50%)").unwrap().1,
+            translucent
+        ));
     }
 
     #[test]
     fn css_keywords_are_case_insensitive() {
-        let midnight = rgb(f64::from(0x19u8) / 255., f64::from(0x19u8) / 255., f64::from(0x70u8) / 255., 1.);
+        let midnight = rgb(
+            f64::from(0x19u8) / 255.,
+            f64::from(0x19u8) / 255.,
+            f64::from(0x70u8) / 255.,
+            1.,
+        );
         for spelling in ["MidnightBlue", "midnightblue", "MIDNIGHTBLUE"] {
             let (kind, color) = Color::from_code(spelling).unwrap();
             assert_eq!(kind, ColorCodeType::CssKeyword);
@@ -1049,10 +1770,16 @@ mod tests {
         // `#369` is a three-digit hex, so it must not be read as a four-digit
         // one that happens to be a prefix of nothing else.
         assert_eq!(Color::from_code("#369").unwrap().0, ColorCodeType::ShortHex);
-        assert_eq!(Color::from_code("#369c").unwrap().0, ColorCodeType::ShortHexWithAlpha);
+        assert_eq!(
+            Color::from_code("#369c").unwrap().0,
+            ColorCodeType::ShortHexWithAlpha
+        );
         // And a four-digit code is not read as a three-digit one with a
         // trailing character left over.
-        assert_eq!(Color::from_code("#ffff").unwrap().0, ColorCodeType::ShortHexWithAlpha);
+        assert_eq!(
+            Color::from_code("#ffff").unwrap().0,
+            ColorCodeType::ShortHexWithAlpha
+        );
     }
 
     // ---- writing ---------------------------------------------------------
@@ -1061,13 +1788,28 @@ mod tests {
     fn white_writes_every_notation() {
         let white = Color::from_code("#ffffff").unwrap().1;
         assert_eq!(white.code(ColorCodeType::Hex).unwrap(), "#ffffff");
-        assert_eq!(white.code(ColorCodeType::HexWithAlpha).unwrap(), "#ffffffff");
+        assert_eq!(
+            white.code(ColorCodeType::HexWithAlpha).unwrap(),
+            "#ffffffff"
+        );
         assert_eq!(white.code(ColorCodeType::ShortHex).unwrap(), "#fff");
-        assert_eq!(white.code(ColorCodeType::ShortHexWithAlpha).unwrap(), "#ffff");
-        assert_eq!(white.code(ColorCodeType::CssRgb).unwrap(), "rgb(255,255,255)");
-        assert_eq!(white.code(ColorCodeType::CssRgba).unwrap(), "rgba(255,255,255,1)");
+        assert_eq!(
+            white.code(ColorCodeType::ShortHexWithAlpha).unwrap(),
+            "#ffff"
+        );
+        assert_eq!(
+            white.code(ColorCodeType::CssRgb).unwrap(),
+            "rgb(255,255,255)"
+        );
+        assert_eq!(
+            white.code(ColorCodeType::CssRgba).unwrap(),
+            "rgba(255,255,255,1)"
+        );
         assert_eq!(white.code(ColorCodeType::CssHsl).unwrap(), "hsl(0,0%,100%)");
-        assert_eq!(white.code(ColorCodeType::CssHsla).unwrap(), "hsla(0,0%,100%,1)");
+        assert_eq!(
+            white.code(ColorCodeType::CssHsla).unwrap(),
+            "hsla(0,0%,100%,1)"
+        );
         assert_eq!(white.code(ColorCodeType::CssKeyword).unwrap(), "white");
     }
 
@@ -1075,13 +1817,22 @@ mod tests {
     fn black_writes_every_notation() {
         let black = Color::from_code("#000000").unwrap().1;
         assert_eq!(black.code(ColorCodeType::Hex).unwrap(), "#000000");
-        assert_eq!(black.code(ColorCodeType::HexWithAlpha).unwrap(), "#000000ff");
+        assert_eq!(
+            black.code(ColorCodeType::HexWithAlpha).unwrap(),
+            "#000000ff"
+        );
         assert_eq!(black.code(ColorCodeType::ShortHex).unwrap(), "#000");
-        assert_eq!(black.code(ColorCodeType::ShortHexWithAlpha).unwrap(), "#000f");
+        assert_eq!(
+            black.code(ColorCodeType::ShortHexWithAlpha).unwrap(),
+            "#000f"
+        );
         assert_eq!(black.code(ColorCodeType::CssRgb).unwrap(), "rgb(0,0,0)");
         assert_eq!(black.code(ColorCodeType::CssRgba).unwrap(), "rgba(0,0,0,1)");
         assert_eq!(black.code(ColorCodeType::CssHsl).unwrap(), "hsl(0,0%,0%)");
-        assert_eq!(black.code(ColorCodeType::CssHsla).unwrap(), "hsla(0,0%,0%,1)");
+        assert_eq!(
+            black.code(ColorCodeType::CssHsla).unwrap(),
+            "hsla(0,0%,0%,1)"
+        );
         assert_eq!(black.code(ColorCodeType::CssKeyword).unwrap(), "black");
     }
 
@@ -1093,7 +1844,10 @@ mod tests {
 
         let shrinkable = Color::from_code("#0066aa").unwrap().1;
         assert_eq!(shrinkable.code(ColorCodeType::ShortHex).unwrap(), "#06a");
-        assert_eq!(shrinkable.code(ColorCodeType::ShortHexWithAlpha).unwrap(), "#06af");
+        assert_eq!(
+            shrinkable.code(ColorCodeType::ShortHexWithAlpha).unwrap(),
+            "#06af"
+        );
 
         // The alpha channel is checked too, not just the three colour ones.
         let opaque = Color::from_code("#ff660080").unwrap().1;
@@ -1105,14 +1859,23 @@ mod tests {
         let (kind, color) = Color::from_code("#f60c").unwrap();
         assert_eq!(kind, ColorCodeType::ShortHexWithAlpha);
         assert_eq!(color.code(ColorCodeType::Hex).unwrap(), "#ff6600");
-        assert_eq!(color.code(ColorCodeType::HexWithAlpha).unwrap(), "#ff6600cc");
-        assert_eq!(color.code(ColorCodeType::ShortHexWithAlpha).unwrap(), "#f60c");
+        assert_eq!(
+            color.code(ColorCodeType::HexWithAlpha).unwrap(),
+            "#ff6600cc"
+        );
+        assert_eq!(
+            color.code(ColorCodeType::ShortHexWithAlpha).unwrap(),
+            "#f60c"
+        );
     }
 
     #[test]
     fn a_keyword_is_only_written_for_a_named_colour() {
         let named = Color::from_code("#191970").unwrap().1;
-        assert_eq!(named.code(ColorCodeType::CssKeyword).unwrap(), "midnightblue");
+        assert_eq!(
+            named.code(ColorCodeType::CssKeyword).unwrap(),
+            "midnightblue"
+        );
         let unnamed = Color::from_code("#123456").unwrap().1;
         assert_eq!(unnamed.code(ColorCodeType::CssKeyword), None);
     }
@@ -1121,9 +1884,18 @@ mod tests {
     fn alpha_is_written_to_two_places_at_most() {
         // Upstream's `testCSSAlphaColorCodeRounding`.
         let color = Color::from_code("#33669955").unwrap().1;
-        assert_eq!(color.code(ColorCodeType::CssRgb).unwrap(), "rgb(51,102,153)");
-        assert_eq!(color.code(ColorCodeType::CssRgba).unwrap(), "rgba(51,102,153,0.33)");
-        assert_eq!(color.code(ColorCodeType::CssHsla).unwrap(), "hsla(210,50%,40%,0.33)");
+        assert_eq!(
+            color.code(ColorCodeType::CssRgb).unwrap(),
+            "rgb(51,102,153)"
+        );
+        assert_eq!(
+            color.code(ColorCodeType::CssRgba).unwrap(),
+            "rgba(51,102,153,0.33)"
+        );
+        assert_eq!(
+            color.code(ColorCodeType::CssHsla).unwrap(),
+            "hsla(210,50%,40%,0.33)"
+        );
         assert_eq!(
             color.code(ColorCodeType::CssHwbWithAlpha).unwrap(),
             "hwb(210 20% 40% / 0.33)"
@@ -1147,10 +1919,19 @@ mod tests {
     fn a_non_finite_channel_writes_as_zero() {
         // Upstream's `testNaNAlphaColorCode`.
         let color = rgb(0., 0., 0., f64::NAN);
-        assert_eq!(color.code(ColorCodeType::HexWithAlpha).unwrap(), "#00000000");
-        assert_eq!(color.code(ColorCodeType::ShortHexWithAlpha).unwrap(), "#0000");
+        assert_eq!(
+            color.code(ColorCodeType::HexWithAlpha).unwrap(),
+            "#00000000"
+        );
+        assert_eq!(
+            color.code(ColorCodeType::ShortHexWithAlpha).unwrap(),
+            "#0000"
+        );
         assert_eq!(color.code(ColorCodeType::CssRgba).unwrap(), "rgba(0,0,0,0)");
-        assert_eq!(color.code(ColorCodeType::CssHsla).unwrap(), "hsla(0,0%,0%,0)");
+        assert_eq!(
+            color.code(ColorCodeType::CssHsla).unwrap(),
+            "hsla(0,0%,0%,0)"
+        );
         assert_eq!(
             color.code(ColorCodeType::CssHwbWithAlpha).unwrap(),
             "hwb(0 0% 100% / 0)"
@@ -1163,7 +1944,10 @@ mod tests {
         let (kind, color) = Color::from_code("hwb(150 20% 10%)").unwrap();
         assert_eq!(kind, ColorCodeType::CssHwb);
         assert_eq!(color.code(ColorCodeType::Hex).unwrap(), "#33e68c");
-        assert_eq!(color.code(ColorCodeType::CssHwb).unwrap(), "hwb(150 20% 10%)");
+        assert_eq!(
+            color.code(ColorCodeType::CssHwb).unwrap(),
+            "hwb(150 20% 10%)"
+        );
     }
 
     #[test]
@@ -1182,7 +1966,10 @@ mod tests {
         let (kind, color) = Color::from_code("hwb(150 20% 10% / .5)").unwrap();
         assert_eq!(kind, ColorCodeType::CssHwbWithAlpha);
         assert!((color.alpha - 0.5).abs() < 1e-9);
-        assert_eq!(color.code(ColorCodeType::CssHwbWithAlpha).unwrap(), "hwb(150 20% 10% / 0.5)");
+        assert_eq!(
+            color.code(ColorCodeType::CssHwbWithAlpha).unwrap(),
+            "hwb(150 20% 10% / 0.5)"
+        );
     }
 
     #[test]

@@ -52,7 +52,10 @@ impl Resources {
 
         // 2. The development tree, so `cargo run` works without a copy step.
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        candidates.push((manifest.join("../../resources"), ResourceOrigin::Development));
+        candidates.push((
+            manifest.join("../../resources"),
+            ResourceOrigin::Development,
+        ));
 
         // 3. The user's support directory.
         if let Some(config) = dirs::config_dir() {
@@ -83,7 +86,9 @@ impl Resources {
 
 /// The user's settings and key-binding files.
 pub fn config_directory() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("subtext")
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("subtext")
 }
 
 /// Where the user may drop their own syntax definitions and themes.
@@ -126,7 +131,8 @@ mod tests {
 
     #[test]
     fn development_tree_resolves() {
-        let resources = Resources::discover().expect("resources/ must be findable from the source tree");
+        let resources =
+            Resources::discover().expect("resources/ must be findable from the source tree");
         assert!(resources.syntaxes().is_dir());
         assert!(resources.themes().is_dir());
     }

@@ -117,7 +117,11 @@ fn split_point(chunk: &str, start: usize) -> usize {
     if characters < 2 {
         return start;
     }
-    start + chunk.grapheme_indices(true).nth(characters / 2).map_or(chunk.len(), |(at, _)| at)
+    start
+        + chunk
+            .grapheme_indices(true)
+            .nth(characters / 2)
+            .map_or(chunk.len(), |(at, _)| at)
 }
 
 /// The line endings in `text` that are **not** `base`, with their ranges.
@@ -159,7 +163,10 @@ mod tests {
         assert!(incompatible_characters("", TextEncoding::UTF8).is_empty());
         assert!(incompatible_characters("abc😀", TextEncoding::UTF8).is_empty());
         // UTF-16 is a Unicode encoding too, so it is skipped as well.
-        assert!(incompatible_characters("abc😀", TextEncoding::from_identifier("utf-16le").unwrap()).is_empty());
+        assert!(
+            incompatible_characters("abc😀", TextEncoding::from_identifier("utf-16le").unwrap())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -221,10 +228,7 @@ mod tests {
         let text = "dog\u{85}cow\ncat\r\ncow";
         assert_eq!(
             inconsistent_line_endings(text, LineEnding::LF),
-            vec![
-                (3..5, LineEnding::NEL),
-                (12..14, LineEnding::CRLF),
-            ]
+            vec![(3..5, LineEnding::NEL), (12..14, LineEnding::CRLF),]
         );
         // …and the character at the start of each range is the ending itself.
         for (range, ending) in inconsistent_line_endings(text, LineEnding::LF) {
@@ -242,7 +246,10 @@ mod tests {
         // `"\r\n"` must not be reported as a stray CR followed by a stray LF.
         let text = "a\r\nb";
         assert!(inconsistent_line_endings(text, LineEnding::CRLF).is_empty());
-        assert_eq!(inconsistent_line_endings(text, LineEnding::LF), vec![(1..3, LineEnding::CRLF)]);
+        assert_eq!(
+            inconsistent_line_endings(text, LineEnding::LF),
+            vec![(1..3, LineEnding::CRLF)]
+        );
     }
 
     #[test]
@@ -274,7 +281,13 @@ mod debug_probe {
             let encoding = TextEncoding::from_identifier(id).unwrap();
             for text in ["👾", "あ", "é", "€"] {
                 let found = incompatible_characters(text, encoding);
-                println!("{id} {text:?} -> {:?}", found.iter().map(|f| f.converted.clone()).collect::<Vec<_>>());
+                println!(
+                    "{id} {text:?} -> {:?}",
+                    found
+                        .iter()
+                        .map(|f| f.converted.clone())
+                        .collect::<Vec<_>>()
+                );
             }
         }
     }

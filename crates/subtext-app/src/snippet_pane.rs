@@ -80,9 +80,7 @@ impl Tab {
     /// What the table holds, in upstream's wording.
     pub fn intro(self) -> &'static str {
         match self {
-            Tab::Command => {
-                "Text to be inserted by a command in the menu or by keyboard shortcut:"
-            }
+            Tab::Command => "Text to be inserted by a command in the menu or by keyboard shortcut:",
             Tab::FileDrop => "Text to be inserted by dropping files to the editor:",
         }
     }
@@ -102,7 +100,10 @@ pub struct RowState {
 
 impl RowState {
     fn new(syntaxes: Rc<Vec<String>>) -> Self {
-        Self { syntaxes, selected: false }
+        Self {
+            syntaxes,
+            selected: false,
+        }
     }
 }
 
@@ -118,8 +119,11 @@ pub enum CommandColumn {
 }
 
 impl CommandColumn {
-    pub const ALL: [CommandColumn; 3] =
-        [CommandColumn::Syntax, CommandColumn::Name, CommandColumn::Key];
+    pub const ALL: [CommandColumn; 3] = [
+        CommandColumn::Syntax,
+        CommandColumn::Name,
+        CommandColumn::Key,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -151,8 +155,11 @@ pub enum FileDropColumn {
 }
 
 impl FileDropColumn {
-    pub const ALL: [FileDropColumn; 3] =
-        [FileDropColumn::Syntax, FileDropColumn::Extensions, FileDropColumn::Description];
+    pub const ALL: [FileDropColumn; 3] = [
+        FileDropColumn::Syntax,
+        FileDropColumn::Extensions,
+        FileDropColumn::Description,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -184,15 +191,15 @@ fn cell(width: f32, content: impl IntoElement) -> Div {
 }
 
 /// The header row of a table.
-pub fn header(
-    labels: impl IntoIterator<Item = (&'static str, f32)>,
-    cx: &App,
-) -> impl IntoElement {
+pub fn header(labels: impl IntoIterator<Item = (&'static str, f32)>, cx: &App) -> impl IntoElement {
     let mut row = h_flex().w_full().gap_2().px_1().py_1().flex_shrink_0();
     for (label, width) in labels {
         row = row.child(cell(
             width,
-            div().text_xs().text_color(cx.theme().muted_foreground).child(label),
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label),
         ));
     }
     row.border_b_1().border_color(cx.theme().border)
@@ -234,7 +241,10 @@ pub fn shortcut_rejection(shortcut: Shortcut) -> Option<String> {
         return Some(rejection.message(shortcut));
     }
     taken_by(shortcut).map(|command| {
-        format!("“{}” is already taken by the “{command}” command.", shortcut.symbol())
+        format!(
+            "“{}” is already taken by the “{command}” command.",
+            shortcut.symbol()
+        )
     })
 }
 
@@ -420,7 +430,8 @@ impl SnippetRow {
 
     /// Put the caret in the name field, which is where *Add* leaves it.
     pub fn focus_name(&self, window: &mut Window, cx: &mut Context<Self>) {
-        self.name.update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
+        self.name
+            .update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
     }
 
     /// A keystroke in the name field: the settings follow the field.
@@ -443,7 +454,9 @@ impl SnippetRow {
     /// because a subscription handler runs as an effect — after the row's own
     /// update has ended and its lease has been returned.
     fn report(&self, cx: &mut Context<Self>) {
-        self.pane.update(cx, |pane, cx| pane.snippets_edited(cx)).ok();
+        self.pane
+            .update(cx, |pane, cx| pane.snippets_edited(cx))
+            .ok();
     }
 
     fn set_scope(&mut self, scope: Option<String>, cx: &mut Context<Self>) {
@@ -552,7 +565,9 @@ impl SnippetRow {
             .rounded_sm()
             .text_sm()
             .track_focus(&self.focus)
-            .when(recording, |this| this.border_1().border_color(cx.theme().primary))
+            .when(recording, |this| {
+                this.border_1().border_color(cx.theme().primary)
+            })
             .tooltip(move |_, cx| {
                 cx.new(move |_| {
                     Tooltip::new(if recording {
@@ -563,12 +578,16 @@ impl SnippetRow {
                 })
                 .into()
             })
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                this.focus.focus(window, cx);
-                cx.notify();
-            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    this.focus.focus(window, cx);
+                    cx.notify();
+                }),
+            )
             .capture_key_down(move |event: &KeyDownEvent, window, cx| {
-                row.update(cx, |row, cx| row.record(&event.keystroke, window, cx)).ok();
+                row.update(cx, |row, cx| row.record(&event.keystroke, window, cx))
+                    .ok();
             })
             .child(shown)
     }
@@ -589,14 +608,18 @@ impl Render for SnippetRow {
             .rounded_sm()
             .when(selected, |this| this.bg(cx.theme().accent))
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                pane.update(cx, |pane, cx| pane.select_row(Tab::Command, id, cx)).ok();
+                pane.update(cx, |pane, cx| pane.select_row(Tab::Command, id, cx))
+                    .ok();
             })
             .child(cell(CommandColumn::Syntax.width(), self.render_syntax(cx)))
             .child(cell(
                 CommandColumn::Name.width(),
                 Input::new(&self.name).small().aria_label("Name"),
             ))
-            .child(cell(CommandColumn::Key.width(), self.render_shortcut(window, cx)))
+            .child(cell(
+                CommandColumn::Key.width(),
+                self.render_shortcut(window, cx),
+            ))
     }
 }
 
@@ -707,7 +730,9 @@ impl FileDropRow {
 
     /// Hand the pane what this row now says — see [`SnippetRow::report`].
     fn report(&self, cx: &mut Context<Self>) {
-        self.pane.update(cx, |pane, cx| pane.file_drop_edited(cx)).ok();
+        self.pane
+            .update(cx, |pane, cx| pane.file_drop_edited(cx))
+            .ok();
     }
 
     fn element(&self, part: &'static str) -> ElementId {
@@ -759,16 +784,21 @@ impl Render for FileDropRow {
             .rounded_sm()
             .when(selected, |this| this.bg(cx.theme().accent))
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                pane.update(cx, |pane, cx| pane.select_row(Tab::FileDrop, id, cx)).ok();
+                pane.update(cx, |pane, cx| pane.select_row(Tab::FileDrop, id, cx))
+                    .ok();
             })
             .child(cell(FileDropColumn::Syntax.width(), self.render_syntax(cx)))
             .child(cell(
                 FileDropColumn::Extensions.width(),
-                Input::new(&self.extensions).small().aria_label("Extensions"),
+                Input::new(&self.extensions)
+                    .small()
+                    .aria_label("Extensions"),
             ))
             .child(cell(
                 FileDropColumn::Description.width(),
-                Input::new(&self.description).small().aria_label("Description"),
+                Input::new(&self.description)
+                    .small()
+                    .aria_label("Description"),
             ))
     }
 }
@@ -787,7 +817,10 @@ pub fn parse_extensions(text: &str) -> Vec<String> {
 
 /// The rows every pane shares.
 pub fn row_state(syntaxes: &Rc<Vec<String>>, selected: bool) -> RowState {
-    RowState { syntaxes: syntaxes.clone(), selected }
+    RowState {
+        syntaxes: syntaxes.clone(),
+        selected,
+    }
 }
 
 #[cfg(test)]
@@ -807,7 +840,12 @@ mod tests {
     /// handed out twice.
     #[test]
     fn a_taken_name_gains_the_smallest_free_number() {
-        let taken = |names: &[&str]| names.iter().map(|name| name.to_string()).collect::<Vec<_>>();
+        let taken = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+        };
 
         assert_eq!(unique_name("Untitled", &taken(&["Untitled"])), "Untitled 2");
         assert_eq!(
@@ -816,7 +854,10 @@ mod tests {
         );
         // The number it already carries is where the search starts, so a gap
         // below it is left alone — upstream's own quirk.
-        assert_eq!(unique_name("Untitled 3", &taken(&["Untitled 3"])), "Untitled 4");
+        assert_eq!(
+            unique_name("Untitled 3", &taken(&["Untitled 3"])),
+            "Untitled 4"
+        );
         assert_eq!(
             unique_name("Untitled 3", &taken(&["Untitled", "Untitled 3"])),
             "Untitled 4"
@@ -854,7 +895,10 @@ mod tests {
     /// AppKit hands ⌘⇧c back as `C`, so the two spellings have to collapse.
     #[test]
     fn an_uppercase_key_gains_a_shift() {
-        assert_eq!(shortcut_of(&key("secondary-K")).unwrap(), Shortcut::parse("$@k").unwrap());
+        assert_eq!(
+            shortcut_of(&key("secondary-K")).unwrap(),
+            Shortcut::parse("$@k").unwrap()
+        );
         assert_eq!(shortcut_of(&key("secondary-K")).unwrap().spec(), "$@k");
     }
 

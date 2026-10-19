@@ -19,7 +19,7 @@
 use std::fmt;
 use std::sync::LazyLock;
 
-use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8};
+use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
 
 /// The byte-order marks SubText recognises, in the order they must be tested.
 ///
@@ -89,7 +89,13 @@ impl fmt::Display for Bom {
 
 /// Sniff the byte-order mark at the head of `bytes`.
 pub fn detect_bom(bytes: &[u8]) -> Bom {
-    const MARKS: [Bom; 5] = [Bom::Utf32Le, Bom::Utf32Be, Bom::Utf8, Bom::Utf16Le, Bom::Utf16Be];
+    const MARKS: [Bom; 5] = [
+        Bom::Utf32Le,
+        Bom::Utf32Be,
+        Bom::Utf8,
+        Bom::Utf16Le,
+        Bom::Utf16Be,
+    ];
     for bom in MARKS {
         if bytes.starts_with(bom.bytes()) {
             return bom;
@@ -148,25 +154,47 @@ const NATIVE_IS_LITTLE: bool = cfg!(target_endian = "little");
 
 impl TextEncoding {
     const fn rs(name: &'static str, id: &'static str, encoding: &'static Encoding) -> Self {
-        Self { name, id, kind: Kind::Rs(encoding) }
+        Self {
+            name,
+            id,
+            kind: Kind::Rs(encoding),
+        }
     }
 
     pub const UTF8: Self = Self::rs("Unicode (UTF-8)", "utf-8", UTF_8);
     // The four wide forms are named the way Foundation names them — "Unicode
     // (UTF-16BE)", not "Unicode (UTF-16 Big-Endian)" — because that is the string
     // upstream's menu shows, and the whole registry is spelled that way.
-    pub const UTF16: Self =
-        Self { name: "Unicode (UTF-16)", id: "utf-16", kind: Kind::Utf16 };
-    pub const UTF32: Self =
-        Self { name: "Unicode (UTF-32)", id: "utf-32", kind: Kind::Utf32 };
-    pub const UTF16_LE: Self =
-        Self { name: "Unicode (UTF-16LE)", id: "utf-16le", kind: Kind::Utf16Le };
-    pub const UTF16_BE: Self =
-        Self { name: "Unicode (UTF-16BE)", id: "utf-16be", kind: Kind::Utf16Be };
-    pub const UTF32_LE: Self =
-        Self { name: "Unicode (UTF-32LE)", id: "utf-32le", kind: Kind::Utf32Le };
-    pub const UTF32_BE: Self =
-        Self { name: "Unicode (UTF-32BE)", id: "utf-32be", kind: Kind::Utf32Be };
+    pub const UTF16: Self = Self {
+        name: "Unicode (UTF-16)",
+        id: "utf-16",
+        kind: Kind::Utf16,
+    };
+    pub const UTF32: Self = Self {
+        name: "Unicode (UTF-32)",
+        id: "utf-32",
+        kind: Kind::Utf32,
+    };
+    pub const UTF16_LE: Self = Self {
+        name: "Unicode (UTF-16LE)",
+        id: "utf-16le",
+        kind: Kind::Utf16Le,
+    };
+    pub const UTF16_BE: Self = Self {
+        name: "Unicode (UTF-16BE)",
+        id: "utf-16be",
+        kind: Kind::Utf16Be,
+    };
+    pub const UTF32_LE: Self = Self {
+        name: "Unicode (UTF-32LE)",
+        id: "utf-32le",
+        kind: Kind::Utf32Le,
+    };
+    pub const UTF32_BE: Self = Self {
+        name: "Unicode (UTF-32BE)",
+        id: "utf-32be",
+        kind: Kind::Utf32Be,
+    };
 
     /// Whether this encoding leaves the byte order to the mark.
     ///
@@ -203,10 +231,18 @@ impl TextEncoding {
     pub fn bom(self) -> Bom {
         match self.kind {
             Kind::Utf16 => {
-                if NATIVE_IS_LITTLE { Bom::Utf16Le } else { Bom::Utf16Be }
+                if NATIVE_IS_LITTLE {
+                    Bom::Utf16Le
+                } else {
+                    Bom::Utf16Be
+                }
             }
             Kind::Utf32 => {
-                if NATIVE_IS_LITTLE { Bom::Utf32Le } else { Bom::Utf32Be }
+                if NATIVE_IS_LITTLE {
+                    Bom::Utf32Le
+                } else {
+                    Bom::Utf32Be
+                }
             }
             // The endian-specific forms are written **without** a mark:
             // Foundation's `data(using: .utf16LittleEndian)` produces none, and
@@ -254,7 +290,10 @@ impl TextEncoding {
             return AVAILABLE.iter().copied().find(|e| e.id == *id);
         }
         let encoding = Encoding::for_label(lowered.as_bytes())?;
-        AVAILABLE.iter().copied().find(|e| matches!(e.kind, Kind::Rs(x) if x == encoding))
+        AVAILABLE
+            .iter()
+            .copied()
+            .find(|e| matches!(e.kind, Kind::Rs(x) if x == encoding))
     }
 
     /// Decode `bytes` (a BOM, if present, is expected to be already stripped).
@@ -318,7 +357,11 @@ fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
     let units: Vec<u16> = pairs
         .iter()
         .map(|pair| {
-            if little_endian { u16::from_le_bytes(*pair) } else { u16::from_be_bytes(*pair) }
+            if little_endian {
+                u16::from_le_bytes(*pair)
+            } else {
+                u16::from_be_bytes(*pair)
+            }
         })
         .collect();
     let mut out = String::with_capacity(bytes.len() / 2);
@@ -361,7 +404,11 @@ fn encode_utf16(text: &str, little_endian: bool) -> Vec<u8> {
     let mut buf = [0u16; 2];
     for c in text.chars() {
         for unit in c.encode_utf16(&mut buf) {
-            let bytes = if little_endian { unit.to_le_bytes() } else { unit.to_be_bytes() };
+            let bytes = if little_endian {
+                unit.to_le_bytes()
+            } else {
+                unit.to_be_bytes()
+            };
             out.extend_from_slice(&bytes);
         }
     }
@@ -372,7 +419,11 @@ fn encode_utf32(text: &str, little_endian: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() * 4);
     for c in text.chars() {
         let value = c as u32;
-        let bytes = if little_endian { value.to_le_bytes() } else { value.to_be_bytes() };
+        let bytes = if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
         out.extend_from_slice(&bytes);
     }
     out
@@ -462,12 +513,24 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
             "shift_jis_x0213",
             encoding_rs::SHIFT_JIS,
         ),
-        TextEncoding::rs("Japanese (ISO 2022-JP)", "iso-2022-jp", encoding_rs::ISO_2022_JP),
+        TextEncoding::rs(
+            "Japanese (ISO 2022-JP)",
+            "iso-2022-jp",
+            encoding_rs::ISO_2022_JP,
+        ),
     ],
     // Western. Upstream's two entries are exactly these.
     &[
-        TextEncoding::rs("Western (Mac OS Roman)", "macintosh", encoding_rs::MACINTOSH),
-        TextEncoding::rs("Western (Windows Latin 1)", "windows-1252", encoding_rs::WINDOWS_1252),
+        TextEncoding::rs(
+            "Western (Mac OS Roman)",
+            "macintosh",
+            encoding_rs::MACINTOSH,
+        ),
+        TextEncoding::rs(
+            "Western (Windows Latin 1)",
+            "windows-1252",
+            encoding_rs::WINDOWS_1252,
+        ),
     ],
     // Chinese. Upstream's group is ten: GB 18030, Big 5 HKSCS, Big 5-E, Big 5,
     // the two Mac OS ones, EUC-TW, GB 2312, and the two DOS ones. Big 5 and
@@ -485,12 +548,24 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     ],
     // Korean. Upstream's group is three: the Mac OS one, EUC, and the DOS one
     // (cp949, which is what `encoding_rs`'s EUC-KR codec is).
-    &[TextEncoding::rs("Korean (EUC)", "euc-kr", encoding_rs::EUC_KR)],
+    &[TextEncoding::rs(
+        "Korean (EUC)",
+        "euc-kr",
+        encoding_rs::EUC_KR,
+    )],
     // Thai, in upstream's order: the DOS one (cp874, which Windows shares) first,
     // then ISO 8859-11.
     &[
-        TextEncoding::rs("Thai (Windows, DOS)", "windows-874", encoding_rs::WINDOWS_874),
-        TextEncoding::rs("Thai (ISO 8859-11)", "iso-8859-11", encoding_rs::WINDOWS_874),
+        TextEncoding::rs(
+            "Thai (Windows, DOS)",
+            "windows-874",
+            encoding_rs::WINDOWS_874,
+        ),
+        TextEncoding::rs(
+            "Thai (ISO 8859-11)",
+            "iso-8859-11",
+            encoding_rs::WINDOWS_874,
+        ),
     ],
     // Arabic, Greek, Hebrew, Cyrillic. Upstream's group of sixteen is mostly Mac
     // OS codecs. The three Cyrillic entries are in upstream's order — ISO 8859-5,
@@ -501,13 +576,29 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // Turkish entry is.
     &[
         TextEncoding::rs("Arabic (ISO 8859-6)", "iso-8859-6", encoding_rs::ISO_8859_6),
-        TextEncoding::rs("Arabic (Windows)", "windows-1256", encoding_rs::WINDOWS_1256),
+        TextEncoding::rs(
+            "Arabic (Windows)",
+            "windows-1256",
+            encoding_rs::WINDOWS_1256,
+        ),
         TextEncoding::rs("Greek (ISO 8859-7)", "iso-8859-7", encoding_rs::ISO_8859_7),
         TextEncoding::rs("Greek (Windows)", "windows-1253", encoding_rs::WINDOWS_1253),
         TextEncoding::rs("Hebrew (ISO 8859-8)", "iso-8859-8", encoding_rs::ISO_8859_8),
-        TextEncoding::rs("Hebrew (Windows)", "windows-1255", encoding_rs::WINDOWS_1255),
-        TextEncoding::rs("Cyrillic (ISO 8859-5)", "iso-8859-5", encoding_rs::ISO_8859_5),
-        TextEncoding::rs("Cyrillic (Windows)", "windows-1251", encoding_rs::WINDOWS_1251),
+        TextEncoding::rs(
+            "Hebrew (Windows)",
+            "windows-1255",
+            encoding_rs::WINDOWS_1255,
+        ),
+        TextEncoding::rs(
+            "Cyrillic (ISO 8859-5)",
+            "iso-8859-5",
+            encoding_rs::ISO_8859_5,
+        ),
+        TextEncoding::rs(
+            "Cyrillic (Windows)",
+            "windows-1251",
+            encoding_rs::WINDOWS_1251,
+        ),
         TextEncoding::rs("Russian (DOS)", "ibm866", encoding_rs::IBM866),
     ],
     // ISO Latin 1 through 10, in upstream's order and under upstream's names —
@@ -524,24 +615,56 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // Latin 4 and the Turkish Windows code page — are not repeated here:
     // upstream names them once, in this group.
     &[
-        TextEncoding::rs("Western (ISO Latin 1)", "iso-8859-1", encoding_rs::WINDOWS_1252),
+        TextEncoding::rs(
+            "Western (ISO Latin 1)",
+            "iso-8859-1",
+            encoding_rs::WINDOWS_1252,
+        ),
         TextEncoding::rs(
             "Central European (ISO Latin 2)",
             "iso-latin-2",
             encoding_rs::ISO_8859_2,
         ),
-        TextEncoding::rs("Western (ISO Latin 3)", "iso-8859-3", encoding_rs::ISO_8859_3),
+        TextEncoding::rs(
+            "Western (ISO Latin 3)",
+            "iso-8859-3",
+            encoding_rs::ISO_8859_3,
+        ),
         TextEncoding::rs(
             "Central European (ISO Latin 4)",
             "iso-latin-4",
             encoding_rs::ISO_8859_4,
         ),
-        TextEncoding::rs("Turkish (ISO Latin 5)", "iso-latin-5", encoding_rs::WINDOWS_1254),
-        TextEncoding::rs("Nordic (ISO Latin 6)", "iso-8859-10", encoding_rs::ISO_8859_10),
-        TextEncoding::rs("Baltic (ISO Latin 7)", "iso-8859-13", encoding_rs::ISO_8859_13),
-        TextEncoding::rs("Celtic (ISO Latin 8)", "iso-8859-14", encoding_rs::ISO_8859_14),
-        TextEncoding::rs("Western (ISO Latin 9)", "iso-8859-15", encoding_rs::ISO_8859_15),
-        TextEncoding::rs("Romanian (ISO Latin 10)", "iso-8859-16", encoding_rs::ISO_8859_16),
+        TextEncoding::rs(
+            "Turkish (ISO Latin 5)",
+            "iso-latin-5",
+            encoding_rs::WINDOWS_1254,
+        ),
+        TextEncoding::rs(
+            "Nordic (ISO Latin 6)",
+            "iso-8859-10",
+            encoding_rs::ISO_8859_10,
+        ),
+        TextEncoding::rs(
+            "Baltic (ISO Latin 7)",
+            "iso-8859-13",
+            encoding_rs::ISO_8859_13,
+        ),
+        TextEncoding::rs(
+            "Celtic (ISO Latin 8)",
+            "iso-8859-14",
+            encoding_rs::ISO_8859_14,
+        ),
+        TextEncoding::rs(
+            "Western (ISO Latin 9)",
+            "iso-8859-15",
+            encoding_rs::ISO_8859_15,
+        ),
+        TextEncoding::rs(
+            "Romanian (ISO Latin 10)",
+            "iso-8859-16",
+            encoding_rs::ISO_8859_16,
+        ),
     ],
     // Central European, Windows code page. Upstream's group of four is a DOS
     // Latin-US, this one, a NextStep Latin and ASCII; `encoding_rs` has none of
@@ -588,11 +711,27 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
 pub static UNLISTED: &[TextEncoding] = &[
     TextEncoding::rs("Cyrillic (KOI8-R)", "koi8-r", encoding_rs::KOI8_R),
     TextEncoding::rs("Ukrainian (KOI8-U)", "koi8-u", encoding_rs::KOI8_U),
-    TextEncoding::rs("Turkish (Windows Latin 5)", "windows-1254", encoding_rs::WINDOWS_1254),
-    TextEncoding::rs("Baltic (Windows)", "windows-1257", encoding_rs::WINDOWS_1257),
-    TextEncoding::rs("Vietnamese (Windows)", "windows-1258", encoding_rs::WINDOWS_1258),
+    TextEncoding::rs(
+        "Turkish (Windows Latin 5)",
+        "windows-1254",
+        encoding_rs::WINDOWS_1254,
+    ),
+    TextEncoding::rs(
+        "Baltic (Windows)",
+        "windows-1257",
+        encoding_rs::WINDOWS_1257,
+    ),
+    TextEncoding::rs(
+        "Vietnamese (Windows)",
+        "windows-1258",
+        encoding_rs::WINDOWS_1258,
+    ),
     TextEncoding::rs("Chinese (GBK)", "gbk", encoding_rs::GBK),
-    TextEncoding::rs("Cyrillic (Mac OS Ukrainian)", "x-mac-cyrillic", encoding_rs::X_MAC_CYRILLIC),
+    TextEncoding::rs(
+        "Cyrillic (Mac OS Ukrainian)",
+        "x-mac-cyrillic",
+        encoding_rs::X_MAC_CYRILLIC,
+    ),
 ];
 
 /// The encoding list SubText ships with, in menu order.
@@ -607,7 +746,10 @@ pub static UNLISTED: &[TextEncoding] = &[
 /// is still what a build with no settings to consult falls back to, and what
 /// the editor's *Restore Defaults* puts back. [`AVAILABLE`] is the wider set.
 pub static MENU: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
-    MENU_GROUPS.iter().flat_map(|group| group.iter().copied()).collect()
+    MENU_GROUPS
+        .iter()
+        .flat_map(|group| group.iter().copied())
+        .collect()
 });
 
 /// Every encoding SubText can read and write: the shipped list, then
@@ -619,7 +761,10 @@ pub static MENU: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
 /// menu, the detector and the settings pickers all work from
 /// [`EncodingList`], which is the narrower set upstream builds them from too.
 pub static AVAILABLE: LazyLock<Vec<TextEncoding>> = LazyLock::new(|| {
-    MENU.iter().copied().chain(UNLISTED.iter().copied()).collect()
+    MENU.iter()
+        .copied()
+        .chain(UNLISTED.iter().copied())
+        .collect()
 });
 
 /// Spellings this registry used to carry that are not WHATWG labels, so the
@@ -728,9 +873,7 @@ impl EncodingList {
         let items: Vec<Option<TextEncoding>> = identifiers
             .iter()
             .filter_map(|identifier| match identifier {
-                Some(name) => {
-                    TextEncoding::from_identifier(name.as_ref()).map(Some)
-                }
+                Some(name) => TextEncoding::from_identifier(name.as_ref()).map(Some),
                 None => Some(None),
             })
             .collect();
@@ -790,11 +933,7 @@ impl EncodingList {
 
     /// Whether the entry at `index` can be taken out, and why not when it
     /// cannot. `None` for an index past the end, which is not removable either.
-    pub fn can_remove(
-        &self,
-        index: usize,
-        default_encoding: TextEncoding,
-    ) -> Option<RemovalError> {
+    pub fn can_remove(&self, index: usize, default_encoding: TextEncoding) -> Option<RemovalError> {
         match self.0.get(index).copied().flatten()? {
             encoding if encoding == TextEncoding::UTF8 => Some(RemovalError::Utf8),
             encoding if encoding == default_encoding => Some(RemovalError::DefaultEncoding),
@@ -825,12 +964,10 @@ impl EncodingList {
     /// item at the location to insert, click the Add + button". With nothing
     /// selected the entry goes to the top, which is upstream's
     /// `index?.advanced(by: 1) ?? 0`.
-    pub fn insert_after(
-        &mut self,
-        selection: Option<usize>,
-        item: Option<TextEncoding>,
-    ) -> usize {
-        let index = selection.filter(|index| *index < self.0.len()).map_or(0, |index| index + 1);
+    pub fn insert_after(&mut self, selection: Option<usize>, item: Option<TextEncoding>) -> usize {
+        let index = selection
+            .filter(|index| *index < self.0.len())
+            .map_or(0, |index| index + 1);
         self.0.insert(index, item);
         index
     }
@@ -897,12 +1034,18 @@ pub struct FileEncoding {
 impl FileEncoding {
     /// `encoding`, written without a mark.
     pub const fn of(encoding: TextEncoding) -> Self {
-        Self { encoding, with_utf8_bom: false }
+        Self {
+            encoding,
+            with_utf8_bom: false,
+        }
     }
 
     /// UTF-8 written with a mark. Upstream's one such encoding.
     pub const fn utf8_with_bom() -> Self {
-        Self { encoding: TextEncoding::UTF8, with_utf8_bom: true }
+        Self {
+            encoding: TextEncoding::UTF8,
+            with_utf8_bom: true,
+        }
     }
 
     /// The file encoding of a document that was read as `encoding` with `bom`.
@@ -1056,7 +1199,10 @@ impl DetectionOptions<'_> {
     /// encodings in the same order, which is what
     /// `the_default_list_is_the_menu` checks.
     pub fn defaults() -> DetectionOptions<'static> {
-        DetectionOptions { candidates: &MENU, respects_declaration: true }
+        DetectionOptions {
+            candidates: &MENU,
+            respects_declaration: true,
+        }
     }
 }
 
@@ -1103,7 +1249,12 @@ impl DecodedFile {
                 &bytes[bom.len()..]
             };
             let (text, _) = encoding.decode(body);
-            return Self { text, encoding, bom, detection: Detection::Bom };
+            return Self {
+                text,
+                encoding,
+                bom,
+                detection: Detection::Bom,
+            };
         }
 
         if options.respects_declaration
@@ -1111,18 +1262,33 @@ impl DecodedFile {
             && options.candidates.contains(&encoding)
         {
             let (text, _) = encoding.decode(bytes);
-            return Self { text, encoding, bom: Bom::None, detection: Detection::Declared };
+            return Self {
+                text,
+                encoding,
+                bom: Bom::None,
+                detection: Detection::Declared,
+            };
         }
 
         for encoding in options.candidates.iter().copied() {
             let (text, had_errors) = encoding.decode(bytes);
             if !had_errors {
-                return Self { text, encoding, bom: Bom::None, detection: Detection::Candidate };
+                return Self {
+                    text,
+                    encoding,
+                    bom: Bom::None,
+                    detection: Detection::Candidate,
+                };
             }
         }
 
         let (text, _) = fallback.decode(bytes);
-        Self { text, encoding: fallback, bom: Bom::None, detection: Detection::Default }
+        Self {
+            text,
+            encoding: fallback,
+            bom: Bom::None,
+            detection: Detection::Default,
+        }
     }
 
     /// Serialize back to bytes, re-attaching the BOM when the document has one.
@@ -1337,10 +1503,20 @@ mod tests {
         assert_eq!(file.encoding, TextEncoding::UTF16);
 
         let rewritten = file.encode();
-        assert_eq!(&rewritten[..2], Bom::Utf16Le.bytes(), "the mark follows the order written");
+        assert_eq!(
+            &rewritten[..2],
+            Bom::Utf16Le.bytes(),
+            "the mark follows the order written"
+        );
         if cfg!(target_endian = "little") {
-            assert_ne!(rewritten, bytes, "the byte order changed, as upstream's does");
-            assert_eq!(DecodedFile::decode(&rewritten, TextEncoding::UTF8, &defaults()).text, original);
+            assert_ne!(
+                rewritten, bytes,
+                "the byte order changed, as upstream's does"
+            );
+            assert_eq!(
+                DecodedFile::decode(&rewritten, TextEncoding::UTF8, &defaults()).text,
+                original
+            );
         }
     }
 
@@ -1363,11 +1539,18 @@ mod tests {
         let be = encode_utf16("a", false);
         assert_eq!(TextEncoding::UTF16.decode(&be), ("a".to_string(), false));
         let le = encode_utf16("a", true);
-        assert_eq!(TextEncoding::UTF16.decode(&le).0, "\u{6100}", "little-endian is not assumed");
+        assert_eq!(
+            TextEncoding::UTF16.decode(&le).0,
+            "\u{6100}",
+            "little-endian is not assumed"
+        );
 
         let (text, lossy) = TextEncoding::UTF32.decode(&encode_utf32("a", true));
         assert!(text.is_empty());
-        assert!(lossy, "Foundation returns nil here, which is a failed decode");
+        assert!(
+            lossy,
+            "Foundation returns nil here, which is a failed decode"
+        );
     }
 
     /// The endian-specific forms are written **without** a mark: Foundation's
@@ -1381,7 +1564,11 @@ mod tests {
             TextEncoding::UTF32_LE,
             TextEncoding::UTF32_BE,
         ] {
-            assert_eq!(encoding.bom(), Bom::None, "{encoding} should not imply a mark");
+            assert_eq!(
+                encoding.bom(),
+                Bom::None,
+                "{encoding} should not imply a mark"
+            );
         }
         let file = DecodedFile {
             text: "a".to_string(),
@@ -1402,7 +1589,10 @@ mod tests {
         let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode(text);
         let file = DecodedFile::decode(&bytes, TextEncoding::UTF8, &defaults());
         assert_eq!(file.text, text);
-        assert_eq!(file.encoding, TextEncoding::from_identifier("shift_jis").unwrap());
+        assert_eq!(
+            file.encoding,
+            TextEncoding::from_identifier("shift_jis").unwrap()
+        );
         assert_eq!(file.detection, Detection::Candidate);
     }
 
@@ -1468,7 +1658,10 @@ mod tests {
         ] {
             let found = TextEncoding::from_identifier(spelling)
                 .unwrap_or_else(|| panic!("{spelling} did not resolve"));
-            assert_eq!(found.name, name, "{spelling} resolved to the wrong encoding");
+            assert_eq!(
+                found.name, name,
+                "{spelling} resolved to the wrong encoding"
+            );
         }
     }
 
@@ -1479,10 +1672,26 @@ mod tests {
     #[test]
     fn the_identifiers_this_alignment_dropped_still_resolve() {
         for (dropped, codec, name) in [
-            ("windows-latin-2", encoding_rs::WINDOWS_1250, "Central European (Windows Latin 2)"),
-            ("iso-8859-2", encoding_rs::ISO_8859_2, "Central European (ISO Latin 2)"),
-            ("iso-8859-4", encoding_rs::ISO_8859_4, "Central European (ISO Latin 4)"),
-            ("iso-8859-9", encoding_rs::WINDOWS_1254, "Turkish (ISO Latin 5)"),
+            (
+                "windows-latin-2",
+                encoding_rs::WINDOWS_1250,
+                "Central European (Windows Latin 2)",
+            ),
+            (
+                "iso-8859-2",
+                encoding_rs::ISO_8859_2,
+                "Central European (ISO Latin 2)",
+            ),
+            (
+                "iso-8859-4",
+                encoding_rs::ISO_8859_4,
+                "Central European (ISO Latin 4)",
+            ),
+            (
+                "iso-8859-9",
+                encoding_rs::WINDOWS_1254,
+                "Turkish (ISO Latin 5)",
+            ),
         ] {
             let found = TextEncoding::from_identifier(dropped)
                 .unwrap_or_else(|| panic!("{dropped} did not resolve"));
@@ -1498,8 +1707,10 @@ mod tests {
     /// can gain an encoding the other does not have.
     #[test]
     fn the_menu_groups_are_the_registry_in_order() {
-        let flattened: Vec<TextEncoding> =
-            MENU_GROUPS.iter().flat_map(|group| group.iter().copied()).collect();
+        let flattened: Vec<TextEncoding> = MENU_GROUPS
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .collect();
         assert_eq!(flattened, MENU.to_vec());
     }
 
@@ -1627,7 +1838,11 @@ mod tests {
     /// out of the omitted set, or the reverse, fails here.
     #[test]
     fn the_menu_is_upstream_s_default_list_less_the_entries_no_codec_covers() {
-        assert_eq!(UPSTREAM_DEFAULT_LIST.len(), 60, "upstream's default list is sixty entries");
+        assert_eq!(
+            UPSTREAM_DEFAULT_LIST.len(),
+            60,
+            "upstream's default list is sixty entries"
+        );
         assert_eq!(UPSTREAM_LISTED.len(), 40, "forty of them have a codec here");
 
         for name in UPSTREAM_LISTED {
@@ -1638,7 +1853,10 @@ mod tests {
         }
 
         let listed: Vec<&str> = MENU.iter().map(|e| e.name).collect();
-        assert_eq!(listed, UPSTREAM_LISTED, "the menu is not upstream's list in order");
+        assert_eq!(
+            listed, UPSTREAM_LISTED,
+            "the menu is not upstream's list in order"
+        );
 
         let omitted: Vec<&str> = UPSTREAM_DEFAULT_LIST
             .iter()
@@ -1735,7 +1953,10 @@ mod tests {
         assert_eq!(groups.len(), MENU_GROUPS.len());
         assert_eq!(
             groups[0],
-            vec![FileEncoding::of(TextEncoding::UTF8), FileEncoding::utf8_with_bom()]
+            vec![
+                FileEncoding::of(TextEncoding::UTF8),
+                FileEncoding::utf8_with_bom()
+            ]
         );
         assert_eq!(
             groups[0][1].name(),
@@ -1745,7 +1966,14 @@ mod tests {
 
         // Every other group is the registry's, one for one.
         for (group, registry) in groups.iter().skip(1).zip(MENU_GROUPS.iter().skip(1)) {
-            assert_eq!(group, &registry.iter().copied().map(FileEncoding::of).collect::<Vec<_>>());
+            assert_eq!(
+                group,
+                &registry
+                    .iter()
+                    .copied()
+                    .map(FileEncoding::of)
+                    .collect::<Vec<_>>()
+            );
         }
     }
 
@@ -1802,9 +2030,17 @@ mod tests {
     /// the four endian-specific ones.
     #[test]
     fn the_unspecified_order_forms_are_written_with_a_mark() {
-        let native = if cfg!(target_endian = "little") { Bom::Utf16Le } else { Bom::Utf16Be };
+        let native = if cfg!(target_endian = "little") {
+            Bom::Utf16Le
+        } else {
+            Bom::Utf16Be
+        };
         assert_eq!(FileEncoding::of(TextEncoding::UTF16).bom(), native);
-        let native = if cfg!(target_endian = "little") { Bom::Utf32Le } else { Bom::Utf32Be };
+        let native = if cfg!(target_endian = "little") {
+            Bom::Utf32Le
+        } else {
+            Bom::Utf32Be
+        };
         assert_eq!(FileEncoding::of(TextEncoding::UTF32).bom(), native);
 
         assert_eq!(FileEncoding::of(TextEncoding::UTF16_LE).bom(), Bom::None);
@@ -1829,7 +2065,12 @@ mod tests {
             if mark == Bom::None {
                 continue;
             }
-            assert_eq!(mark.encoding(), Some(encoding), "{} lost its mark", encoding.name);
+            assert_eq!(
+                mark.encoding(),
+                Some(encoding),
+                "{} lost its mark",
+                encoding.name
+            );
         }
     }
 
@@ -1838,7 +2079,10 @@ mod tests {
     /// A list spelled the way a settings file spells it.
     fn list(names: &[Option<&str>]) -> EncodingList {
         EncodingList::from_identifiers(
-            &names.iter().map(|name| name.map(str::to_owned)).collect::<Vec<_>>(),
+            &names
+                .iter()
+                .map(|name| name.map(str::to_owned))
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -1924,13 +2168,31 @@ mod tests {
     #[test]
     fn a_list_round_trips_through_its_identifiers() {
         let defaults = EncodingList::defaults();
-        assert_eq!(EncodingList::from_identifiers(&defaults.identifiers()), defaults);
+        assert_eq!(
+            EncodingList::from_identifiers(&defaults.identifiers()),
+            defaults
+        );
 
-        let edited = list(&[Some("windows-1252"), None, Some("utf-8"), None, Some("koi8-r")]);
-        assert_eq!(EncodingList::from_identifiers(&edited.identifiers()), edited);
+        let edited = list(&[
+            Some("windows-1252"),
+            None,
+            Some("utf-8"),
+            None,
+            Some("koi8-r"),
+        ]);
+        assert_eq!(
+            EncodingList::from_identifiers(&edited.identifiers()),
+            edited
+        );
         assert_eq!(
             edited.identifiers(),
-            vec![Some("windows-1252"), None, Some("utf-8"), None, Some("koi8-r")]
+            vec![
+                Some("windows-1252"),
+                None,
+                Some("utf-8"),
+                None,
+                Some("koi8-r")
+            ]
         );
     }
 
@@ -1960,7 +2222,12 @@ mod tests {
     /// menu could not offer it and the detector could not decode with it.
     #[test]
     fn an_encoding_this_build_cannot_read_is_dropped() {
-        let list = list(&[Some("utf-8"), Some("no-such-encoding"), None, Some("shift_jis")]);
+        let list = list(&[
+            Some("utf-8"),
+            Some("no-such-encoding"),
+            None,
+            Some("shift_jis"),
+        ]);
         assert_eq!(
             list.identifiers(),
             vec![Some("utf-8"), None, Some("shift_jis")]
@@ -1973,7 +2240,10 @@ mod tests {
         let list = EncodingList::defaults();
         let utf8 = list.item(0).expect("in range").expect("an encoding");
         assert_eq!(utf8, TextEncoding::UTF8);
-        assert_eq!(list.can_remove(0, TextEncoding::UTF8), Some(RemovalError::Utf8));
+        assert_eq!(
+            list.can_remove(0, TextEncoding::UTF8),
+            Some(RemovalError::Utf8)
+        );
 
         let shift_jis = TextEncoding::from_identifier("shift_jis").expect("in the registry");
         let index = (0..list.len())
@@ -1991,7 +2261,10 @@ mod tests {
         assert_eq!(list.can_remove(1, TextEncoding::UTF8), None);
         assert_eq!(list.can_remove(list.len(), TextEncoding::UTF8), None);
 
-        assert_eq!(RemovalError::Utf8.message("Unicode (UTF-8)"), "Unicode (UTF-8) can’t be removed.");
+        assert_eq!(
+            RemovalError::Utf8.message("Unicode (UTF-8)"),
+            "Unicode (UTF-8) can’t be removed."
+        );
         assert_eq!(
             RemovalError::DefaultEncoding.message("Japanese (Shift JIS)"),
             "The encoding set as default can’t be removed."
@@ -2010,7 +2283,11 @@ mod tests {
         assert_eq!(list.item(1), Some(koi8));
         assert_eq!(list.len(), 3);
 
-        assert_eq!(list.insert_after(None, None), 0, "nothing selected means the top");
+        assert_eq!(
+            list.insert_after(None, None),
+            0,
+            "nothing selected means the top"
+        );
         assert_eq!(list.item(0), Some(None));
 
         // A selection past the end is treated as no selection rather than as a
@@ -2083,7 +2360,11 @@ mod tests {
         assert!(!addable.contains(&TextEncoding::UTF8));
 
         list.insert_after(None, Some(TextEncoding::from_identifier("koi8-r").unwrap()));
-        assert!(!list.addable().contains(&TextEncoding::from_identifier("koi8-r").unwrap()));
+        assert!(
+            !list
+                .addable()
+                .contains(&TextEncoding::from_identifier("koi8-r").unwrap())
+        );
     }
 
     // ---- the encoding declaration ----------------------------------------
@@ -2096,7 +2377,10 @@ mod tests {
         );
         // The same text one line in is a declaration no browser would honour,
         // and upstream's `prefixMatch` refuses it too.
-        assert_eq!(scan_declaration(b"/* a comment */\n@charset \"shift_jis\";"), None);
+        assert_eq!(
+            scan_declaration(b"/* a comment */\n@charset \"shift_jis\";"),
+            None
+        );
     }
 
     #[test]
@@ -2150,7 +2434,10 @@ mod tests {
         // And the other way round.
         let bytes = br#"<!-- charset="gb18030" -->
 # coding: shift_jis"#;
-        assert_eq!(scan_declaration(bytes), TextEncoding::from_identifier("gb18030"));
+        assert_eq!(
+            scan_declaration(bytes),
+            TextEncoding::from_identifier("gb18030")
+        );
     }
 
     #[test]
@@ -2186,18 +2473,29 @@ mod tests {
         let shift_jis = TextEncoding::from_identifier("shift_jis").unwrap();
 
         let utf8_first = [utf8, shift_jis];
-        let read = DecodedFile::decode(bytes, utf8, &DetectionOptions {
-            candidates: &utf8_first,
-            respects_declaration: false,
-        });
+        let read = DecodedFile::decode(
+            bytes,
+            utf8,
+            &DetectionOptions {
+                candidates: &utf8_first,
+                respects_declaration: false,
+            },
+        );
         assert_eq!(read.encoding, utf8);
 
         let shift_first = [shift_jis, utf8];
-        let read = DecodedFile::decode(bytes, utf8, &DetectionOptions {
-            candidates: &shift_first,
-            respects_declaration: false,
-        });
-        assert_eq!(read.encoding, shift_jis, "the list's order was not honoured");
+        let read = DecodedFile::decode(
+            bytes,
+            utf8,
+            &DetectionOptions {
+                candidates: &shift_first,
+                respects_declaration: false,
+            },
+        );
+        assert_eq!(
+            read.encoding, shift_jis,
+            "the list's order was not honoured"
+        );
         assert_eq!(read.detection, Detection::Candidate);
     }
 
@@ -2209,10 +2507,14 @@ mod tests {
         bytes.extend_from_slice(&encode_utf16("hi", true));
 
         let without = [TextEncoding::UTF8];
-        let read = DecodedFile::decode(&bytes, TextEncoding::UTF8, &DetectionOptions {
-            candidates: &without,
-            respects_declaration: false,
-        });
+        let read = DecodedFile::decode(
+            &bytes,
+            TextEncoding::UTF8,
+            &DetectionOptions {
+                candidates: &without,
+                respects_declaration: false,
+            },
+        );
         assert_ne!(read.detection, Detection::Bom);
         assert_ne!(read.encoding, TextEncoding::UTF16);
 
@@ -2220,10 +2522,14 @@ mod tests {
         // `Unicode.BOM.encoding` does — so a file that says "UTF-16 LE" comes
         // back as "Unicode (UTF-16)".
         let with = [TextEncoding::UTF8, TextEncoding::UTF16];
-        let read = DecodedFile::decode(&bytes, TextEncoding::UTF8, &DetectionOptions {
-            candidates: &with,
-            respects_declaration: false,
-        });
+        let read = DecodedFile::decode(
+            &bytes,
+            TextEncoding::UTF8,
+            &DetectionOptions {
+                candidates: &with,
+                respects_declaration: false,
+            },
+        );
         assert_eq!(read.encoding, TextEncoding::UTF16);
         assert_eq!(read.detection, Detection::Bom);
     }
@@ -2238,18 +2544,26 @@ mod tests {
         let candidates = [utf8, shift_jis];
 
         let bytes = b"# coding: shift_jis\nplain ASCII\n";
-        let read = DecodedFile::decode(bytes, utf8, &DetectionOptions {
-            candidates: &candidates,
-            respects_declaration: true,
-        });
+        let read = DecodedFile::decode(
+            bytes,
+            utf8,
+            &DetectionOptions {
+                candidates: &candidates,
+                respects_declaration: true,
+            },
+        );
         assert_eq!(read.encoding, shift_jis);
         assert_eq!(read.detection, Detection::Declared);
 
         // With the switch off the same bytes are valid UTF-8, so they are.
-        let read = DecodedFile::decode(bytes, utf8, &DetectionOptions {
-            candidates: &candidates,
-            respects_declaration: false,
-        });
+        let read = DecodedFile::decode(
+            bytes,
+            utf8,
+            &DetectionOptions {
+                candidates: &candidates,
+                respects_declaration: false,
+            },
+        );
         assert_eq!(read.encoding, utf8);
         assert_eq!(read.detection, Detection::Candidate);
     }
@@ -2262,10 +2576,14 @@ mod tests {
         let candidates = [utf8];
         let bytes = b"# coding: shift_jis\nplain ASCII\n";
 
-        let read = DecodedFile::decode(bytes, utf8, &DetectionOptions {
-            candidates: &candidates,
-            respects_declaration: true,
-        });
+        let read = DecodedFile::decode(
+            bytes,
+            utf8,
+            &DetectionOptions {
+                candidates: &candidates,
+                respects_declaration: true,
+            },
+        );
         assert_eq!(read.encoding, utf8);
         assert_eq!(read.detection, Detection::Candidate);
     }
@@ -2279,10 +2597,14 @@ mod tests {
         let bytes = [0x80, 0x81, 0x82];
         let candidates = [TextEncoding::from_identifier("utf-8").unwrap()];
 
-        let read = DecodedFile::decode(&bytes, TextEncoding::UTF8, &DetectionOptions {
-            candidates: &candidates,
-            respects_declaration: false,
-        });
+        let read = DecodedFile::decode(
+            &bytes,
+            TextEncoding::UTF8,
+            &DetectionOptions {
+                candidates: &candidates,
+                respects_declaration: false,
+            },
+        );
         assert_eq!(read.detection, Detection::Default);
         assert_eq!(read.encoding, TextEncoding::UTF8);
         assert!(read.text.contains('\u{fffd}'));

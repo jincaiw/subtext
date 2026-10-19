@@ -67,8 +67,11 @@ impl SurroundSheet {
         cx: &mut Context<Self>,
     ) -> Self {
         let begin_state = cx.new(|cx| InputState::new(window, cx).default_value(begin));
-        let end_state =
-            cx.new(|cx| InputState::new(window, cx).default_value(end).placeholder(begin));
+        let end_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(end)
+                .placeholder(begin)
+        });
 
         let mut sheet = Self {
             workspace,
@@ -156,7 +159,10 @@ impl Render for SurroundSheet {
                 h_flex()
                     .items_start()
                     .gap_4()
-                    .child(field("Begin:", Input::new(&self.begin).w(rems(FIELD_WIDTH))))
+                    .child(field(
+                        "Begin:",
+                        Input::new(&self.begin).w(rems(FIELD_WIDTH)),
+                    ))
                     .child(field("End:", Input::new(&self.end).w(rems(FIELD_WIDTH)))),
             )
             .child(self.render_buttons(can_submit, cx))
@@ -204,7 +210,10 @@ mod tests {
         assert_eq!(pair_from("\"", ""), Some(("\"".into(), "\"".into())));
         assert_eq!(pair_from("**", ""), Some(("**".into(), "**".into())));
         // Two different halves are kept as typed.
-        assert_eq!(pair_from("<!--", "-->"), Some(("<!--".into(), "-->".into())));
+        assert_eq!(
+            pair_from("<!--", "-->"),
+            Some(("<!--".into(), "-->".into()))
+        );
         // Whitespace is a delimiter like any other — upstream only asks whether
         // the string is empty.
         assert_eq!(pair_from(" ", ""), Some((" ".into(), " ".into())));

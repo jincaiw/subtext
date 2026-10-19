@@ -253,7 +253,8 @@ impl ScalarInfo {
     /// The Version row: `Unicode 1.1`, or nothing where Unicode has not
     /// assigned the scalar.
     pub fn version(&self) -> Option<String> {
-        self.age.map(|(major, minor)| format!("Unicode {major}.{minor}"))
+        self.age
+            .map(|(major, minor)| format!("Unicode {major}.{minor}"))
     }
 }
 
@@ -346,7 +347,10 @@ impl CharacterReport {
 
     /// The code points, in order, as the section's Code Point(s) row lists them.
     pub fn code_points(&self) -> Vec<&str> {
-        self.scalars.iter().map(|scalar| scalar.code_point.as_str()).collect()
+        self.scalars
+            .iter()
+            .map(|scalar| scalar.code_point.as_str())
+            .collect()
     }
 
     /// Whether the character is one scalar wearing a variant selector.
@@ -371,13 +375,22 @@ impl CharacterReport {
     /// of them. Upstream's `Character.localizedDescription`.
     pub fn description(&self) -> Option<String> {
         if self.is_complex() {
-            return Some(format!("<a letter consisting of {} characters>", self.scalars.len()));
+            return Some(format!(
+                "<a letter consisting of {} characters>",
+                self.scalars.len()
+            ));
         }
         let name = self.scalars.first()?.name.as_deref()?;
-        Some(match self.scalars.last().and_then(|scalar| scalar.variant_description) {
-            Some(variant) => format!("{name} ({variant})"),
-            None => name.to_string(),
-        })
+        Some(
+            match self
+                .scalars
+                .last()
+                .and_then(|scalar| scalar.variant_description)
+            {
+                Some(variant) => format!("{name} ({variant})"),
+                None => name.to_string(),
+            },
+        )
     }
 
     /// The big glyph the panel draws beside the detail.
@@ -387,7 +400,11 @@ impl CharacterReport {
     /// single-scalar character has one, which is the `ignore CRLF` note in its
     /// source. `None` means "draw the character itself".
     pub fn picture(&self) -> Option<char> {
-        if self.scalars.len() == 1 { self.scalars[0].picture } else { None }
+        if self.scalars.len() == 1 {
+            self.scalars[0].picture
+        } else {
+            None
+        }
     }
 }
 
@@ -419,8 +436,12 @@ impl CharacterInfo {
             .iter()
             .map(|u| format!("{u:04X}"))
             .collect();
-        let utf8: Vec<String> =
-            character.to_string().as_bytes().iter().map(|b| format!("{b:02X}")).collect();
+        let utf8: Vec<String> = character
+            .to_string()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect();
 
         Self {
             character,
@@ -500,7 +521,11 @@ const BLOCKS: &[(u32, u32, &str)] = &[
     (0x1760, 0x177F, "Tagbanwa"),
     (0x1780, 0x17FF, "Khmer"),
     (0x1800, 0x18AF, "Mongolian"),
-    (0x18B0, 0x18FF, "Unified Canadian Aboriginal Syllabics Extended"),
+    (
+        0x18B0,
+        0x18FF,
+        "Unified Canadian Aboriginal Syllabics Extended",
+    ),
     (0x1900, 0x194F, "Limbu"),
     (0x1950, 0x197F, "Tai Le"),
     (0x1980, 0x19DF, "New Tai Lue"),
@@ -694,7 +719,11 @@ const BLOCKS: &[(u32, u32, &str)] = &[
     (0x119A0, 0x119FF, "Nandinagari"),
     (0x11A00, 0x11A4F, "Zanabazar Square"),
     (0x11A50, 0x11AAF, "Soyombo"),
-    (0x11AB0, 0x11ABF, "Unified Canadian Aboriginal Syllabics Extended-A"),
+    (
+        0x11AB0,
+        0x11ABF,
+        "Unified Canadian Aboriginal Syllabics Extended-A",
+    ),
     (0x11AC0, 0x11AFF, "Pau Cin Hau"),
     (0x11B00, 0x11B5F, "Devanagari Extended-A"),
     (0x11B60, 0x11B7F, "Sharada Supplement"),
@@ -975,8 +1004,10 @@ pub struct CharacterCount {
 impl CharacterCount {
     pub fn of(text: &str, encoding: TextEncoding) -> Self {
         let characters = text.graphemes(true).count();
-        let paragraphs =
-            text.split(['\n', '\r', '\u{2029}']).filter(|p| !p.trim().is_empty()).count();
+        let paragraphs = text
+            .split(['\n', '\r', '\u{2029}'])
+            .filter(|p| !p.trim().is_empty())
+            .count();
 
         Self {
             characters,
@@ -1053,7 +1084,11 @@ fn count_lines(text: &str) -> usize {
             }
         }
     }
-    if text.is_empty() { 0 } else { endings + usize::from(!at_ending) }
+    if text.is_empty() {
+        0
+    } else {
+        endings + usize::from(!at_ending)
+    }
 }
 
 /// The number of words.
@@ -1065,7 +1100,9 @@ fn count_lines(text: &str) -> usize {
 /// holds a letter or a digit, which drops the whitespace and the punctuation
 /// word segmentation hands back between the words.
 fn count_words(text: &str) -> usize {
-    text.split_word_bounds().filter(|word| word.chars().any(char::is_alphanumeric)).count()
+    text.split_word_bounds()
+        .filter(|word| word.chars().any(char::is_alphanumeric))
+        .count()
 }
 
 // ---- the advanced character count ----------------------------------------
@@ -1108,15 +1145,11 @@ impl CharacterUnit {
                 "Count in the intuitive way defined in Unicode. A character consisting of \
                  multiple Unicode code points, such as emojis, is counted as one character."
             }
-            CharacterUnit::UnicodeScalar => {
-                "Count Unicode code points. Same as counting UTF-32."
-            }
+            CharacterUnit::UnicodeScalar => "Count Unicode code points. Same as counting UTF-32.",
             CharacterUnit::Utf16 => {
                 "Count Unicode code points but a surrogate pair as two characters."
             }
-            CharacterUnit::Byte => {
-                "Count bytes of the text encoded with the specified encoding."
-            }
+            CharacterUnit::Byte => "Count bytes of the text encoded with the specified encoding.",
         }
     }
 }
@@ -1248,7 +1281,10 @@ mod tests {
         assert_eq!(info.encoded_len, 3);
         // Unicode names the CJK ranges algorithmically, and both Swift and
         // `unicode_names2` spell that out rather than leaving it empty.
-        assert_eq!(info.scalar.name.as_deref(), Some("CJK UNIFIED IDEOGRAPH-6F22"));
+        assert_eq!(
+            info.scalar.name.as_deref(),
+            Some("CJK UNIFIED IDEOGRAPH-6F22")
+        );
     }
 
     #[test]
@@ -1280,7 +1316,10 @@ mod tests {
         // The C1 range is where the two tables could most easily disagree, so
         // its last entry is checked too.
         let apc = CharacterInfo::new('\u{9F}', TextEncoding::UTF8);
-        assert_eq!(apc.scalar.name.as_deref(), Some("APPLICATION PROGRAM COMMAND"));
+        assert_eq!(
+            apc.scalar.name.as_deref(),
+            Some("APPLICATION PROGRAM COMMAND")
+        );
     }
 
     #[test]
@@ -1303,12 +1342,27 @@ mod tests {
         assert_eq!(GeneralCategory::of('½'), GeneralCategory::OtherNumber);
         // `char::is_alphabetic` is true for these two, which differ as well.
         assert_eq!(GeneralCategory::of('漢'), GeneralCategory::OtherLetter);
-        assert_eq!(GeneralCategory::of('\u{2B0}'), GeneralCategory::ModifierLetter);
-        assert_eq!(GeneralCategory::of('\u{301}'), GeneralCategory::NonspacingMark);
-        assert_eq!(GeneralCategory::of('\u{20}'), GeneralCategory::SpaceSeparator);
-        assert_eq!(GeneralCategory::of('\u{2028}'), GeneralCategory::LineSeparator);
+        assert_eq!(
+            GeneralCategory::of('\u{2B0}'),
+            GeneralCategory::ModifierLetter
+        );
+        assert_eq!(
+            GeneralCategory::of('\u{301}'),
+            GeneralCategory::NonspacingMark
+        );
+        assert_eq!(
+            GeneralCategory::of('\u{20}'),
+            GeneralCategory::SpaceSeparator
+        );
+        assert_eq!(
+            GeneralCategory::of('\u{2028}'),
+            GeneralCategory::LineSeparator
+        );
         assert_eq!(GeneralCategory::of('\u{200B}'), GeneralCategory::Format);
-        assert_eq!(GeneralCategory::of('\u{1F600}'), GeneralCategory::OtherSymbol);
+        assert_eq!(
+            GeneralCategory::of('\u{1F600}'),
+            GeneralCategory::OtherSymbol
+        );
         assert_eq!(GeneralCategory::of('\u{0}'), GeneralCategory::Control);
     }
 
@@ -1328,7 +1382,10 @@ mod tests {
         }
         assert_eq!(BLOCKS.len(), 346, "Unicode 17.0 defines 346 blocks");
         assert_eq!(BLOCKS[0], (0x0000, 0x007F, "Basic Latin"));
-        assert_eq!(BLOCKS[345], (0x100000, 0x10FFFF, "Supplementary Private Use Area-B"));
+        assert_eq!(
+            BLOCKS[345],
+            (0x100000, 0x10FFFF, "Supplementary Private Use Area-B")
+        );
 
         // Spot checks across the table, including the gap Unicode really has
         // between the last CJK extension and the Tags block.
@@ -1338,10 +1395,16 @@ mod tests {
         assert_eq!(block_name(0x4E00), Some("CJK Unified Ideographs"));
         assert_eq!(block_name(0x1F600), Some("Emoticons"));
         assert_eq!(block_name(0xE0000), Some("Tags"));
-        assert_eq!(block_name(0x10FFFF), Some("Supplementary Private Use Area-B"));
+        assert_eq!(
+            block_name(0x10FFFF),
+            Some("Supplementary Private Use Area-B")
+        );
         // A hole Unicode really has: "CJK Unified Ideographs Extension J" ends
         // at 0x3347F and the next block does not start until 0xE0000.
-        assert_eq!(block_name(0x3347F), Some("CJK Unified Ideographs Extension J"));
+        assert_eq!(
+            block_name(0x3347F),
+            Some("CJK Unified Ideographs Extension J")
+        );
         assert_eq!(block_name(0x34000), None);
     }
 
@@ -1358,9 +1421,15 @@ mod tests {
         // the short one.
         let info = CharacterInfo::new('漢', TextEncoding::UTF8);
         assert_eq!(info.scalar.display_block(), "CJK Unified Ideographs");
-        assert_eq!(ScalarInfo::of('\u{E000}').display_block(), "Private Use Area");
+        assert_eq!(
+            ScalarInfo::of('\u{E000}').display_block(),
+            "Private Use Area"
+        );
         // A block with no display name of its own is drawn as-is.
-        assert_eq!(display_block_name("Transport and Map Symbols"), "Transport And Map Symbols");
+        assert_eq!(
+            display_block_name("Transport and Map Symbols"),
+            "Transport And Map Symbols"
+        );
     }
 
     #[test]
@@ -1383,7 +1452,10 @@ mod tests {
         assert!(CharacterReport::of("ab").is_empty());
         // A CRLF is one character, but of two scalars, so it lists two code
         // points and none of the single-scalar rows.
-        assert_eq!(CharacterReport::of("\r\n").code_points(), vec!["U+000D", "U+000A"]);
+        assert_eq!(
+            CharacterReport::of("\r\n").code_points(),
+            vec!["U+000D", "U+000A"]
+        );
         assert!(!CharacterReport::of("\r\n").is_single_scalar());
     }
 
@@ -1411,19 +1483,31 @@ mod tests {
         let check = CharacterReport::of("✔\u{FE0F}");
         assert!(check.is_variant());
         assert!(!check.is_complex());
-        assert_eq!(check.description().as_deref(), Some("HEAVY CHECK MARK (Emoji Style)"));
+        assert_eq!(
+            check.description().as_deref(),
+            Some("HEAVY CHECK MARK (Emoji Style)")
+        );
 
         // The text-style selector is the other half of that pair.
         let text = CharacterReport::of("✔\u{FE0E}");
-        assert_eq!(text.description().as_deref(), Some("HEAVY CHECK MARK (Text Style)"));
+        assert_eq!(
+            text.description().as_deref(),
+            Some("HEAVY CHECK MARK (Text Style)")
+        );
 
         // A skin-tone modifier is a variant too.
         let thumb = CharacterReport::of("👍🏻");
         assert!(thumb.is_variant());
-        assert_eq!(thumb.description().as_deref(), Some("THUMBS UP SIGN (Skin Tone I-II)"));
+        assert_eq!(
+            thumb.description().as_deref(),
+            Some("THUMBS UP SIGN (Skin Tone I-II)")
+        );
 
         // A general variation selector has no name of its own.
-        assert_eq!(CharacterReport::of("A\u{FE00}").description().as_deref(), Some("LATIN CAPITAL LETTER A (Variant)"));
+        assert_eq!(
+            CharacterReport::of("A\u{FE00}").description().as_deref(),
+            Some("LATIN CAPITAL LETTER A (Variant)")
+        );
     }
 
     #[test]
@@ -1433,12 +1517,18 @@ mod tests {
         assert_eq!(pirate.scalars.len(), 4);
         assert!(pirate.is_complex());
         assert!(!pirate.is_variant());
-        assert_eq!(pirate.description().as_deref(), Some("<a letter consisting of 4 characters>"));
+        assert_eq!(
+            pirate.description().as_deref(),
+            Some("<a letter consisting of 4 characters>")
+        );
 
         // Two regional indicators are two scalars, and neither is a variant.
         let flags = CharacterReport::of("🇦🇦");
         assert!(flags.is_complex());
-        assert_eq!(flags.description().as_deref(), Some("<a letter consisting of 2 characters>"));
+        assert_eq!(
+            flags.description().as_deref(),
+            Some("<a letter consisting of 2 characters>")
+        );
     }
 
     #[test]
@@ -1447,13 +1537,19 @@ mod tests {
         // `description` is what tells it to.
         assert_eq!(CharacterReport::of("\u{E000}").description(), None);
         // A control character does have one, by convention.
-        assert_eq!(CharacterReport::of("\n").description().as_deref(), Some("LINE FEED"));
+        assert_eq!(
+            CharacterReport::of("\n").description().as_deref(),
+            Some("LINE FEED")
+        );
     }
 
     #[test]
     fn the_code_point_row_shows_the_surrogate_pair() {
         let grinning = ScalarInfo::of('😀');
-        assert_eq!(grinning.surrogate_code_points, Some(("D83D".into(), "DE00".into())));
+        assert_eq!(
+            grinning.surrogate_code_points,
+            Some(("D83D".into(), "DE00".into()))
+        );
         assert_eq!(grinning.code_point_with_surrogates(), "U+1F600 (D83D DE00)");
 
         // A scalar that fits in one UTF-16 code unit has no pair to show.
@@ -1464,9 +1560,18 @@ mod tests {
 
     #[test]
     fn the_version_row_is_the_unicode_version_that_assigned_the_scalar() {
-        assert_eq!(ScalarInfo::of('A').version().as_deref(), Some("Unicode 1.1"));
-        assert_eq!(ScalarInfo::of('€').version().as_deref(), Some("Unicode 2.1"));
-        assert_eq!(ScalarInfo::of('😀').version().as_deref(), Some("Unicode 6.1"));
+        assert_eq!(
+            ScalarInfo::of('A').version().as_deref(),
+            Some("Unicode 1.1")
+        );
+        assert_eq!(
+            ScalarInfo::of('€').version().as_deref(),
+            Some("Unicode 2.1")
+        );
+        assert_eq!(
+            ScalarInfo::of('😀').version().as_deref(),
+            Some("Unicode 6.1")
+        );
         // An unassigned scalar has no version, which is the empty row. The
         // private-use planes are *assigned* — they are 2.0 — so the example has
         // to be a real gap in Unicode's coverage.
@@ -1483,8 +1588,22 @@ mod tests {
 
     #[test]
     fn the_count_formats_the_selection_the_way_upstream_does() {
-        assert_eq!(Count { entire: 12, selected: 0 }.formatted(), "12");
-        assert_eq!(Count { entire: 12, selected: 4 }.formatted(), "12 (4)");
+        assert_eq!(
+            Count {
+                entire: 12,
+                selected: 0
+            }
+            .formatted(),
+            "12"
+        );
+        assert_eq!(
+            Count {
+                entire: 12,
+                selected: 4
+            }
+            .formatted(),
+            "12 (4)"
+        );
     }
 
     #[test]
@@ -1535,7 +1654,10 @@ mod tests {
         // The scalar count is a different question with a different answer:
         // a grinning face is one, each regional indicator is one, and the
         // letter is one.
-        assert_eq!(CharacterCount::of("😀🇯🇵a", TextEncoding::UTF8).unicode_scalars, 4);
+        assert_eq!(
+            CharacterCount::of("😀🇯🇵a", TextEncoding::UTF8).unicode_scalars,
+            4
+        );
     }
 
     #[test]
@@ -1608,8 +1730,10 @@ mod tests {
         // before the last letter.
         assert_eq!(count(CharacterCountOptions::default()), 11);
 
-        let ignores_newlines =
-            CharacterCountOptions { ignores_newlines: true, ..Default::default() };
+        let ignores_newlines = CharacterCountOptions {
+            ignores_newlines: true,
+            ..Default::default()
+        };
         assert_eq!(count(ignores_newlines), 9);
 
         let ignores_both = CharacterCountOptions {
@@ -1620,8 +1744,10 @@ mod tests {
         assert_eq!(count(ignores_both), 5);
 
         // Whitespace without newlines leaves the line endings in.
-        let ignores_whitespaces =
-            CharacterCountOptions { ignores_whitespaces: true, ..Default::default() };
+        let ignores_whitespaces = CharacterCountOptions {
+            ignores_whitespaces: true,
+            ..Default::default()
+        };
         assert_eq!(count(ignores_whitespaces), 7);
 
         // Collapsing runs takes the three characters before the cat down to
@@ -1650,7 +1776,12 @@ mod tests {
     fn the_unit_changes_what_is_counted() {
         let text = "aaa \t \u{1F431}\n\r\n c";
         let count = |unit: CharacterUnit| {
-            CharacterCountOptions { unit, ..Default::default() }.count(text).expect("countable")
+            CharacterCountOptions {
+                unit,
+                ..Default::default()
+            }
+            .count(text)
+            .expect("countable")
         };
         assert_eq!(count(CharacterUnit::GraphemeCluster), 11);
         // The CRLF is two scalars where it was one cluster.
@@ -1676,7 +1807,9 @@ mod tests {
         assert_eq!(scalars(Some(Normalization::Nfc)), 1);
         // The grapheme count does not move either way.
         assert_eq!(
-            CharacterCountOptions::default().count(text).expect("countable"),
+            CharacterCountOptions::default()
+                .count(text)
+                .expect("countable"),
             1
         );
     }
@@ -1685,8 +1818,12 @@ mod tests {
     fn the_byte_unit_can_fail() {
         let text = "abc\u{72AC}\u{725B}";
         let bytes = |encoding| {
-            CharacterCountOptions { unit: CharacterUnit::Byte, encoding, ..Default::default() }
-                .count(text)
+            CharacterCountOptions {
+                unit: CharacterUnit::Byte,
+                encoding,
+                ..Default::default()
+            }
+            .count(text)
         };
         assert_eq!(bytes(TextEncoding::UTF8), Some(9));
         assert_eq!(
@@ -1694,10 +1831,16 @@ mod tests {
             Some(7)
         );
         // The one failure the count can report: ASCII cannot spell these.
-        assert_eq!(bytes(TextEncoding::from_identifier("us-ascii").unwrap()), None);
+        assert_eq!(
+            bytes(TextEncoding::from_identifier("us-ascii").unwrap()),
+            None
+        );
 
         // An empty document is zero bytes, not a failure.
-        assert_eq!(bytes(TextEncoding::from_identifier("us-ascii").unwrap()), None);
+        assert_eq!(
+            bytes(TextEncoding::from_identifier("us-ascii").unwrap()),
+            None
+        );
         let empty = CharacterCountOptions {
             unit: CharacterUnit::Byte,
             encoding: TextEncoding::from_identifier("us-ascii").unwrap(),
@@ -1710,13 +1853,18 @@ mod tests {
     fn the_line_endings_the_count_drops_are_icurs_r_not_the_editors_six() {
         // `\R` also covers the vertical tab and the form feed, which no
         // document can be *written* with but which a buffer can certainly hold.
-        let options = CharacterCountOptions { ignores_newlines: true, ..Default::default() };
+        let options = CharacterCountOptions {
+            ignores_newlines: true,
+            ..Default::default()
+        };
         for ending in ["\u{B}", "\u{C}", "\u{85}", "\u{2028}", "\u{2029}", "\r\n"] {
             let text = format!("a{ending}b");
             assert_eq!(options.count(&text), Some(2), "{ending:?} was not dropped");
             // Without the option it is three, so the difference is the ending.
             assert_eq!(
-                CharacterCountOptions::default().count(&text).expect("countable"),
+                CharacterCountOptions::default()
+                    .count(&text)
+                    .expect("countable"),
                 3,
                 "{ending:?}"
             );
@@ -1724,7 +1872,10 @@ mod tests {
 
         // …while *Ignore whitespace* takes the tab and the space separators
         // and leaves every line ending alone.
-        let spaces = CharacterCountOptions { ignores_whitespaces: true, ..Default::default() };
+        let spaces = CharacterCountOptions {
+            ignores_whitespaces: true,
+            ..Default::default()
+        };
         assert_eq!(spaces.count("a\tb"), Some(2));
         assert_eq!(spaces.count("a\u{3000}b"), Some(2));
         assert_eq!(spaces.count("a\u{A0}b"), Some(2));

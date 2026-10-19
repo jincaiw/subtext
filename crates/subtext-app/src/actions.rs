@@ -18,37 +18,43 @@ use gpui_kit::actions;
 
 pub mod app {
     use super::*;
-    actions!(subtext, [
-        ShowAboutPanel,
-        ShowDonationWindow,
-        ShowSettingsWindow,
-        ShowWhatsNew,
-        Hide,
-        HideOtherApplications,
-        UnhideAllApplications,
-        Terminate,
-        NoOp,
-    ]);
+    actions!(
+        subtext,
+        [
+            ShowAboutPanel,
+            ShowDonationWindow,
+            ShowSettingsWindow,
+            ShowWhatsNew,
+            Hide,
+            HideOtherApplications,
+            UnhideAllApplications,
+            Terminate,
+            NoOp,
+        ]
+    );
 }
 
 pub mod file {
     use super::*;
-    actions!(subtext, [
-        NewDocument,
-        NewDocumentAsWindow,
-        NewDocumentAsTab,
-        OpenDocument,
-        ClearRecentDocuments,
-        PerformClose,
-        SaveDocument,
-        SaveDocumentAs,
-        RevertDocumentToSaved,
-        ShowInFinder,
-        CopyPath,
-        ShareDocument,
-        RunPageLayout,
-        PrintDocument,
-    ]);
+    actions!(
+        subtext,
+        [
+            NewDocument,
+            NewDocumentAsWindow,
+            NewDocumentAsTab,
+            OpenDocument,
+            ClearRecentDocuments,
+            PerformClose,
+            SaveDocument,
+            SaveDocumentAs,
+            RevertDocumentToSaved,
+            ShowInFinder,
+            CopyPath,
+            ShareDocument,
+            RunPageLayout,
+            PrintDocument,
+        ]
+    );
 
     /// Open the document at this path.
     ///
@@ -75,77 +81,86 @@ pub mod file {
 
 pub mod edit {
     use super::*;
-    actions!(subtext, [
-        Undo,
-        Redo,
-        Cut,
-        Copy,
-        CopyWithStyle,
-        Paste,
-        PasteAsIs,
-        Delete,
-        SelectAll,
-        SelectParagraph,
-        SelectWord,
-        SelectEnclosingSymbols,
-        SelectColumnUp,
-        SelectColumnDown,
-        SplitSelectionByLines,
-        Complete,
-        InputBackSlash,
-        InputYenMark,
-        ShowUnicodeInputPanel,
-    ]);
+    actions!(
+        subtext,
+        [
+            Undo,
+            Redo,
+            Cut,
+            Copy,
+            CopyWithStyle,
+            Paste,
+            PasteAsIs,
+            Delete,
+            SelectAll,
+            SelectParagraph,
+            SelectWord,
+            SelectEnclosingSymbols,
+            SelectColumnUp,
+            SelectColumnDown,
+            SplitSelectionByLines,
+            Complete,
+            InputBackSlash,
+            InputYenMark,
+            ShowUnicodeInputPanel,
+        ]
+    );
 }
 
 pub mod spelling {
     use super::*;
-    actions!(subtext, [
-        ShowGuessPanel,
-        CheckSpelling,
-        ToggleContinuousSpellChecking,
-        ToggleGrammarChecking,
-        ToggleAutomaticSpellingCorrection,
-        ToggleAutomaticQuoteSubstitution,
-        ToggleAutomaticDashSubstitution,
-        ToggleAutomaticTextReplacement,
-        ToggleSmartInsertDelete,
-        OrderFrontSubstitutionsPanel,
-        StraightenQuotesInSelection,
-        ReplaceQuotesInSelection,
-        ReplaceDashesInSelection,
-        ReplaceTextInSelection,
-        StartSpeaking,
-        StopSpeaking,
-    ]);
+    actions!(
+        subtext,
+        [
+            ShowGuessPanel,
+            CheckSpelling,
+            ToggleContinuousSpellChecking,
+            ToggleGrammarChecking,
+            ToggleAutomaticSpellingCorrection,
+            ToggleAutomaticQuoteSubstitution,
+            ToggleAutomaticDashSubstitution,
+            ToggleAutomaticTextReplacement,
+            ToggleSmartInsertDelete,
+            OrderFrontSubstitutionsPanel,
+            StraightenQuotesInSelection,
+            ReplaceQuotesInSelection,
+            ReplaceDashesInSelection,
+            ReplaceTextInSelection,
+            StartSpeaking,
+            StopSpeaking,
+        ]
+    );
 }
 
 pub mod format {
     use super::*;
-    actions!(subtext, [
-        RecolorAll,
-        CustomizeEncodings,
-        MakeFontStandard,
-        MakeFontMonospaced,
-        BiggerFont,
-        SmallerFont,
-        ResetFont,
-        OrderFrontFontPanel,
-        ToggleAntialias,
-        ToggleLigatures,
-        ChangeTabWidth,
-        CustomizeTabWidth,
-        ToggleAutoTabExpand,
-        ToggleInvisibleChars,
-        ToggleIndentGuides,
-        TogglePageGuide,
-        MakeWritingDirectionLeftToRight,
-        MakeWritingDirectionRightToLeft,
-        MakeLayoutOrientationHorizontal,
-        MakeLayoutOrientationVertical,
-        ToggleLineWrap,
-        ToggleEditable,
-    ]);
+    actions!(
+        subtext,
+        [
+            RecolorAll,
+            CustomizeEncodings,
+            MakeFontStandard,
+            MakeFontMonospaced,
+            BiggerFont,
+            SmallerFont,
+            ResetFont,
+            OrderFrontFontPanel,
+            ToggleAntialias,
+            ToggleLigatures,
+            ChangeTabWidth,
+            CustomizeTabWidth,
+            ToggleAutoTabExpand,
+            ToggleInvisibleChars,
+            ToggleIndentGuides,
+            TogglePageGuide,
+            MakeWritingDirectionLeftToRight,
+            MakeWritingDirectionRightToLeft,
+            MakeLayoutOrientationHorizontal,
+            MakeLayoutOrientationVertical,
+            ToggleLineWrap,
+            ToggleEditable,
+        ]
+    );
 
     /// Set the frontmost document's line endings.
     ///
@@ -204,73 +219,79 @@ pub mod format {
 
 pub mod view {
     use super::*;
-    actions!(subtext, [
-        ToggleTabBar,
-        ToggleToolbarShown,
-        RunToolbarCustomizationPalette,
-        ShowQuickActions,
-        ShowFileBrowser,
-        ShowFolderFinder,
-        ToggleSidebar,
-        ToggleInspector,
-        ShowDocumentInspector,
-        ShowOutlineInspector,
-        ShowWarningsInspector,
-        ToggleNavigationBar,
-        ToggleLineNumber,
-        ToggleStatusBar,
-        FocusNextEditor,
-        FocusPreviousEditor,
-        OpenSplitTextView,
-        CloseSplitTextView,
-        ToggleSplitOrientation,
-        ToggleFullScreen,
-        ToggleKeepOnTop,
-    ]);
+    actions!(
+        subtext,
+        [
+            ToggleTabBar,
+            ToggleToolbarShown,
+            RunToolbarCustomizationPalette,
+            ShowQuickActions,
+            ShowFileBrowser,
+            ShowFolderFinder,
+            ToggleSidebar,
+            ToggleInspector,
+            ShowDocumentInspector,
+            ShowOutlineInspector,
+            ShowWarningsInspector,
+            ToggleNavigationBar,
+            ToggleLineNumber,
+            ToggleStatusBar,
+            FocusNextEditor,
+            FocusPreviousEditor,
+            OpenSplitTextView,
+            CloseSplitTextView,
+            ToggleSplitOrientation,
+            ToggleFullScreen,
+            ToggleKeepOnTop,
+        ]
+    );
 }
 
 pub mod text {
     use super::*;
-    actions!(subtext, [
-        ShowSnippetEditor,
-        ToggleComment,
-        InlineCommentOut,
-        BlockCommentOut,
-        Uncomment,
-        ShiftRight,
-        ShiftLeft,
-        ConvertIndentationToSpaces,
-        ConvertIndentationToTabs,
-        SurroundSelectionWithSingleQuotes,
-        SurroundSelectionWithDoubleQuotes,
-        SurroundSelectionWithParentheses,
-        SurroundSelectionWithBraces,
-        SurroundSelectionWithSquareBrackets,
-        SurroundSelection,
-        TrimTrailingWhitespace,
-        MoveLineUp,
-        MoveLineDown,
-        PatternSort,
-        SortLinesAscending,
-        ReverseLines,
-        ShuffleLines,
-        DeleteDuplicateLine,
-        DuplicateLine,
-        DeleteLine,
-        JoinLines,
-        UppercaseWord,
-        LowercaseWord,
-        CapitalizeWord,
-        ExchangeFullwidth,
-        ExchangeHalfwidth,
-        ExchangeFullwidthRoman,
-        ExchangeHalfwidthRoman,
-        EncodeUrl,
-        DecodeUrl,
-        ShowSelectionInfo,
-        ToggleAdvancedCounter,
-        EditColorCode,
-    ]);
+    actions!(
+        subtext,
+        [
+            ShowSnippetEditor,
+            ToggleComment,
+            InlineCommentOut,
+            BlockCommentOut,
+            Uncomment,
+            ShiftRight,
+            ShiftLeft,
+            ConvertIndentationToSpaces,
+            ConvertIndentationToTabs,
+            SurroundSelectionWithSingleQuotes,
+            SurroundSelectionWithDoubleQuotes,
+            SurroundSelectionWithParentheses,
+            SurroundSelectionWithBraces,
+            SurroundSelectionWithSquareBrackets,
+            SurroundSelection,
+            TrimTrailingWhitespace,
+            MoveLineUp,
+            MoveLineDown,
+            PatternSort,
+            SortLinesAscending,
+            ReverseLines,
+            ShuffleLines,
+            DeleteDuplicateLine,
+            DuplicateLine,
+            DeleteLine,
+            JoinLines,
+            UppercaseWord,
+            LowercaseWord,
+            CapitalizeWord,
+            ExchangeFullwidth,
+            ExchangeHalfwidth,
+            ExchangeFullwidthRoman,
+            ExchangeHalfwidthRoman,
+            EncodeUrl,
+            DecodeUrl,
+            ShowSelectionInfo,
+            ToggleAdvancedCounter,
+            EditColorCode,
+        ]
+    );
 
     /// Normalize the selection in `form`.
     ///
@@ -287,48 +308,57 @@ pub mod text {
 
 pub mod find {
     use super::*;
-    actions!(subtext, [
-        PerformTextFinderAction,
-        ShowReplaceInterface,
-        FindNext,
-        FindPrevious,
-        FindAll,
-        SelectAllFindMatches,
-        UseSelectionForFind,
-        UseSelectionForReplace,
-        CenterSelectionInVisibleArea,
-        ReplaceAndFindNext,
-        ReplaceAll,
-        ShowMultipleReplace,
-        HighlightAll,
-        RemoveHighlights,
-        OpenOutlineMenu,
-        SelectPrevItemOfOutlineMenu,
-        SelectNextItemOfOutlineMenu,
-        GotoLocation,
-    ]);
+    actions!(
+        subtext,
+        [
+            PerformTextFinderAction,
+            ShowReplaceInterface,
+            FindNext,
+            FindPrevious,
+            FindAll,
+            SelectAllFindMatches,
+            UseSelectionForFind,
+            UseSelectionForReplace,
+            CenterSelectionInVisibleArea,
+            ReplaceAndFindNext,
+            ReplaceAll,
+            ShowMultipleReplace,
+            HighlightAll,
+            RemoveHighlights,
+            OpenOutlineMenu,
+            SelectPrevItemOfOutlineMenu,
+            SelectNextItemOfOutlineMenu,
+            GotoLocation,
+        ]
+    );
 }
 
 pub mod window {
     use super::*;
-    actions!(subtext, [
-        PerformMiniaturize,
-        PerformZoom,
-        ArrangeInFront,
-        ShowConsolePanel,
-    ]);
+    actions!(
+        subtext,
+        [
+            PerformMiniaturize,
+            PerformZoom,
+            ArrangeInFront,
+            ShowConsolePanel,
+        ]
+    );
 }
 
 pub mod help {
     use super::*;
-    actions!(subtext, [
-        ShowHelp,
-        OpenHelpAnchor,
-        OpenAppleScriptDictionary,
-        OpenWebSite,
-        ReportBug,
-        CreateBugReport,
-    ]);
+    actions!(
+        subtext,
+        [
+            ShowHelp,
+            OpenHelpAnchor,
+            OpenAppleScriptDictionary,
+            OpenWebSite,
+            ReportBug,
+            CreateBugReport,
+        ]
+    );
 }
 
 pub mod snippet {
@@ -353,9 +383,7 @@ pub mod snippet {
 
 pub mod script {
     use super::*;
-    actions!(subtext, [
-        OpenScriptsFolder,
-    ]);
+    actions!(subtext, [OpenScriptsFolder,]);
 
     /// Run the script at this path over the document in front.
     ///

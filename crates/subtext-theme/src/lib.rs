@@ -32,7 +32,9 @@ impl Rgba {
         match hex.len() {
             3 => {
                 let nibble = |index: usize| {
-                    u8::from_str_radix(&hex[index..index + 1], 16).ok().map(|v| v * 17)
+                    u8::from_str_radix(&hex[index..index + 1], 16)
+                        .ok()
+                        .map(|v| v * 17)
                 };
                 Some(Self::new(nibble(0)?, nibble(1)?, nibble(2)?, 255))
             }
@@ -46,7 +48,11 @@ impl Rgba {
     pub fn luminance(self) -> f32 {
         let channel = |value: u8| {
             let v = value as f32 / 255.0;
-            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
         };
         0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
     }
@@ -66,7 +72,11 @@ pub struct ColorEntry {
 impl ColorEntry {
     /// The colour, or `fallback` when the theme defers to the system.
     pub fn resolve(self, fallback: Rgba) -> Rgba {
-        if self.uses_system_setting { fallback } else { self.color.unwrap_or(fallback) }
+        if self.uses_system_setting {
+            fallback
+        } else {
+            self.color.unwrap_or(fallback)
+        }
     }
 }
 
@@ -220,7 +230,9 @@ impl Theme {
 
     /// The background colour, defaulting to white.
     pub fn background_color(&self) -> Rgba {
-        self.background.color.unwrap_or(Rgba::new(255, 255, 255, 255))
+        self.background
+            .color
+            .unwrap_or(Rgba::new(255, 255, 255, 255))
     }
 
     /// The body text colour, defaulting to near-black.
@@ -252,7 +264,10 @@ impl Theme {
     /// A theme that is always available, used when no resource directory is
     /// readable — a build running from a bare binary, for instance.
     pub fn builtin_light() -> Self {
-        let entry = |hex: &str| ColorEntry { color: Rgba::parse(hex), uses_system_setting: false };
+        let entry = |hex: &str| ColorEntry {
+            color: Rgba::parse(hex),
+            uses_system_setting: false,
+        };
         Self {
             name: "SubText Light".into(),
             source: None,
@@ -285,7 +300,10 @@ impl Theme {
 
     /// The dark counterpart of [`Self::builtin_light`].
     pub fn builtin_dark() -> Self {
-        let entry = |hex: &str| ColorEntry { color: Rgba::parse(hex), uses_system_setting: false };
+        let entry = |hex: &str| ColorEntry {
+            color: Rgba::parse(hex),
+            uses_system_setting: false,
+        };
         Self {
             name: "SubText Dark".into(),
             source: None,
@@ -343,7 +361,9 @@ impl ThemeManager {
 
     /// A manager holding only the two built-in themes.
     pub fn builtin() -> Self {
-        Self { themes: vec![Theme::builtin_light(), Theme::builtin_dark()] }
+        Self {
+            themes: vec![Theme::builtin_light(), Theme::builtin_dark()],
+        }
     }
 
     /// A manager over themes that were already collected.
@@ -361,10 +381,11 @@ impl ThemeManager {
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Theme> {
-        self.themes
-            .iter()
-            .find(|t| t.name == name)
-            .or_else(|| self.themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)))
+        self.themes.iter().find(|t| t.name == name).or_else(|| {
+            self.themes
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(name))
+        })
     }
 
     /// The default theme: a light one if there is one, otherwise the first.
@@ -402,7 +423,11 @@ mod tests {
     #[test]
     fn loads_every_bundled_theme() {
         let manager = ThemeManager::load_from_directory(resources()).unwrap();
-        assert_eq!(manager.all().len(), 14, "expected the full CotEditor theme set");
+        assert_eq!(
+            manager.all().len(),
+            14,
+            "expected the full CotEditor theme set"
+        );
         assert!(manager.by_name("Anura").is_some());
     }
 
@@ -417,9 +442,18 @@ mod tests {
     fn token_colors_come_from_the_right_key() {
         let manager = ThemeManager::load_from_directory(resources()).unwrap();
         let theme = manager.by_name("Anura").unwrap();
-        assert_eq!(theme.token_color(HighlightToken::Keywords).color, Rgba::parse("#1b556b"));
-        assert_eq!(theme.token_color(HighlightToken::Comments).color, Rgba::parse("#66747a"));
-        assert_eq!(theme.token_color(HighlightToken::Strings).color, Rgba::parse("#4d6629"));
+        assert_eq!(
+            theme.token_color(HighlightToken::Keywords).color,
+            Rgba::parse("#1b556b")
+        );
+        assert_eq!(
+            theme.token_color(HighlightToken::Comments).color,
+            Rgba::parse("#66747a")
+        );
+        assert_eq!(
+            theme.token_color(HighlightToken::Strings).color,
+            Rgba::parse("#4d6629")
+        );
     }
 
     #[test]

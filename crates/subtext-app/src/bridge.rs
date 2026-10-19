@@ -90,7 +90,9 @@ pub fn register(workspace: WeakEntity<Workspace>, window: AnyWindowHandle, cx: &
 /// The command's name is the last segment of its action path, which is the
 /// vocabulary [`Workspace::dispatch`] speaks.
 pub fn dispatch(name: &'static str, cx: &mut App) {
-    run(cx, move |workspace, window, cx| workspace.dispatch(name, window, cx));
+    run(cx, move |workspace, window, cx| {
+        workspace.dispatch(name, window, cx)
+    });
 }
 
 /// The name a command is run by: the last segment of its action's path.
@@ -405,4 +407,3 @@ pub fn install(cx: &mut App) {
         actions::script::OpenScriptsFolder => "OpenScriptsFolder",
     };
 }
-

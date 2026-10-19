@@ -23,7 +23,10 @@ pub struct Edit {
 impl Edit {
     /// A no-op, used when an operation does not apply.
     pub fn unchanged(text: impl Into<String>, selection: Range<usize>) -> Self {
-        Self { text: text.into(), selection }
+        Self {
+            text: text.into(),
+            selection,
+        }
     }
 }
 
@@ -41,7 +44,10 @@ pub struct CommentDelimiters {
 /// A selection that ends exactly at the start of a line does not include that
 /// line — the same rule NSTextView and CotEditor use.
 pub fn selected_line_ranges(text: &str, selection: &Range<usize>) -> Vec<Range<usize>> {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
@@ -55,7 +61,9 @@ pub fn selected_line_ranges(text: &str, selection: &Range<usize>) -> Vec<Range<u
 
 /// Index of the first line wholly or partially covered by `offset`.
 fn line_index_at(text: &str, offset: usize) -> usize {
-    text[..floor_char_boundary(text, offset)].matches('\n').count()
+    text[..floor_char_boundary(text, offset)]
+        .matches('\n')
+        .count()
 }
 
 pub(crate) fn floor_char_boundary(text: &str, mut index: usize) -> usize {
@@ -88,7 +96,9 @@ pub fn shift_right(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
 pub fn shift_left(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
     let range = selection.clone();
     let (start, end) = (range.start.min(text.len()), range.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
 
     let mut out = String::with_capacity(text.len());
@@ -108,7 +118,10 @@ pub fn shift_left(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
     let removed_before = removed_before(&text[..start], &text[block_start..start], indent);
     let new_start = start.saturating_sub(removed_before).max(block_start);
     let new_end = (end.saturating_sub(removed_before)).min(out.len());
-    Edit { text: out, selection: new_start..new_end.max(new_start) }
+    Edit {
+        text: out,
+        selection: new_start..new_end.max(new_start),
+    }
 }
 
 fn removed_before(_prefix: &str, before_cursor: &str, indent: &str) -> usize {
@@ -134,12 +147,21 @@ fn strip_one_indent<'a>(line: &'a str, indent: &'a str) -> Option<&'a str> {
             break;
         }
     }
-    if taken > 0 { Some(&line[taken..]) } else { None }
+    if taken > 0 {
+        Some(&line[taken..])
+    } else {
+        None
+    }
 }
 
 fn indent_lines(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
 
     let mut out = String::with_capacity(text.len() + indent.len() * 4);
@@ -156,10 +178,17 @@ fn indent_lines(text: &str, selection: &Range<usize>, indent: &str) -> Edit {
     }
     out.push_str(&text[block_end..]);
 
-    let extra = if start == block_start { 0 } else { indent.len() };
+    let extra = if start == block_start {
+        0
+    } else {
+        indent.len()
+    };
     let new_start = start + extra;
     let new_end = (end + count).min(out.len());
-    Edit { text: out, selection: new_start..new_end }
+    Edit {
+        text: out,
+        selection: new_start..new_end,
+    }
 }
 
 fn block_end_of(text: &str, end: usize) -> usize {
@@ -187,7 +216,11 @@ fn split_inclusive_newline(text: &str) -> Vec<&str> {
 }
 
 /// Convert the leading whitespace of the selection to spaces.
-pub fn convert_indentation_to_spaces(text: &str, selection: &Range<usize>, tab_width: usize) -> Edit {
+pub fn convert_indentation_to_spaces(
+    text: &str,
+    selection: &Range<usize>,
+    tab_width: usize,
+) -> Edit {
     map_selected_lines(text, selection, |line| {
         let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
         let mut column = 0;
@@ -216,7 +249,12 @@ pub fn convert_indentation_to_tabs(text: &str, selection: &Range<usize>, tab_wid
         }
         let tabs = column / tab_width;
         let spaces = column % tab_width;
-        format!("{}{}{}", "\t".repeat(tabs), " ".repeat(spaces), &line[leading..])
+        format!(
+            "{}{}{}",
+            "\t".repeat(tabs),
+            " ".repeat(spaces),
+            &line[leading..]
+        )
     })
 }
 
@@ -249,7 +287,10 @@ pub fn surround(text: &str, selection: &Range<usize>, begin: &str, end: &str) ->
     out.push_str(&text[end_of_selection..]);
 
     let offset = start + begin.len();
-    Edit { text: out, selection: offset..offset + (end_of_selection - start) }
+    Edit {
+        text: out,
+        selection: offset..offset + (end_of_selection - start),
+    }
 }
 
 /// Trim whitespace at the end of every selected line.
@@ -262,8 +303,13 @@ fn map_selected_lines(
     selection: &Range<usize>,
     mut map: impl FnMut(&str) -> String,
 ) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
 
     let mut out = String::with_capacity(text.len());
@@ -278,7 +324,10 @@ fn map_selected_lines(
     let delta = out.len() as isize - text.len() as isize;
     let new_end = (end as isize + delta).max(start as isize) as usize;
     let new_end = new_end.min(out.len());
-    Edit { text: out, selection: start..new_end }
+    Edit {
+        text: out,
+        selection: start..new_end,
+    }
 }
 
 /// Toggle line or block comments over the selection.
@@ -293,8 +342,13 @@ pub fn toggle_comment(
     delimiters: &CommentDelimiters,
 ) -> Edit {
     if let Some(inline) = &delimiters.inline {
-        let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-        let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+        let (start, end) = (
+            selection.start.min(text.len()),
+            selection.end.min(text.len()),
+        );
+        let block_start = text[..floor_char_boundary(text, start)]
+            .rfind('\n')
+            .map_or(0, |i| i + 1);
         let block_end = block_end_of(text, end);
         let lines = split_inclusive_newline(&text[block_start..block_end]);
 
@@ -315,7 +369,9 @@ pub fn toggle_comment(
             }
             if all_commented {
                 let indent = body.len() - body.trim_start().len();
-                let stripped = body[indent..].strip_prefix(inline.as_str()).unwrap_or(&body[indent..]);
+                let stripped = body[indent..]
+                    .strip_prefix(inline.as_str())
+                    .unwrap_or(&body[indent..]);
                 // also eat the single space CotEditor inserts after the marker
                 let stripped = stripped.strip_prefix(' ').unwrap_or(stripped);
                 out.push_str(&body[..indent]);
@@ -331,11 +387,17 @@ pub fn toggle_comment(
         }
         out.push_str(&text[block_end..]);
         let new_end = out.len().min(text.len() + lines.len() * (inline.len() + 1));
-        return Edit { text: out, selection: start..new_end };
+        return Edit {
+            text: out,
+            selection: start..new_end,
+        };
     }
 
     if let Some((open, close)) = &delimiters.block {
-        let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+        let (start, end) = (
+            selection.start.min(text.len()),
+            selection.end.min(text.len()),
+        );
         let selected = &text[start..end];
         let trimmed = selected.trim();
         let (new_text, delta) = if trimmed.starts_with(open.as_str())
@@ -353,14 +415,20 @@ pub fn toggle_comment(
             let delta = -(open.len() as isize + close.len() as isize);
             (replaced, delta)
         } else {
-            (format!("{open}{selected}{close}"), (open.len() + close.len()) as isize)
+            (
+                format!("{open}{selected}{close}"),
+                (open.len() + close.len()) as isize,
+            )
         };
         let mut out = String::with_capacity(text.len() + 4);
         out.push_str(&text[..start]);
         out.push_str(&new_text);
         out.push_str(&text[end..]);
         let new_end = (end as isize + delta).max(start as isize) as usize;
-        return Edit { text: out, selection: start..new_end };
+        return Edit {
+            text: out,
+            selection: start..new_end,
+        };
     }
 
     Edit::unchanged(text.to_string(), selection.clone())
@@ -368,8 +436,13 @@ pub fn toggle_comment(
 
 /// Move the selected lines up one line, or down one line.
 pub fn move_lines(text: &str, selection: &Range<usize>, up: bool) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
 
     if up {
@@ -387,12 +460,17 @@ pub fn move_lines(text: &str, selection: &Range<usize>, up: bool) -> Edit {
         let shift = block.len() as isize - previous.len() as isize;
         let new_start = (start as isize + shift) as usize;
         let new_end = (end as isize + shift) as usize;
-        Edit { text: out, selection: new_start..new_end }
+        Edit {
+            text: out,
+            selection: new_start..new_end,
+        }
     } else {
         if block_end >= text.len() {
             return Edit::unchanged(text.to_string(), selection.clone());
         }
-        let next_end = text[block_end..].find('\n').map_or(text.len(), |i| block_end + i + 1);
+        let next_end = text[block_end..]
+            .find('\n')
+            .map_or(text.len(), |i| block_end + i + 1);
         let next = &text[block_end..next_end];
         let block = &text[block_start..block_end];
         let mut out = String::with_capacity(text.len());
@@ -403,14 +481,22 @@ pub fn move_lines(text: &str, selection: &Range<usize>, up: bool) -> Edit {
         let shift = next.len() as isize;
         let new_start = (start as isize + shift) as usize;
         let new_end = (end as isize + shift) as usize;
-        Edit { text: out, selection: new_start..new_end }
+        Edit {
+            text: out,
+            selection: new_start..new_end,
+        }
     }
 }
 
 /// Duplicate every selected line.
 pub fn duplicate_lines(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
     let block = text[block_start..block_end].to_string();
     let needs_newline = !block.ends_with('\n');
@@ -425,7 +511,10 @@ pub fn duplicate_lines(text: &str, selection: &Range<usize>) -> Edit {
     out.push_str(&text[block_end..]);
     let new_start = start + inserted.len();
     let new_end = end + inserted.len();
-    Edit { text: out, selection: new_start..new_end }
+    Edit {
+        text: out,
+        selection: new_start..new_end,
+    }
 }
 
 /// Delete the selection, or the character before the caret when there is none.
@@ -451,7 +540,10 @@ pub fn delete_backward(text: &str, selection: &Range<usize>) -> Edit {
         let mut out = String::with_capacity(text.len());
         out.push_str(&text[..start]);
         out.push_str(&text[end..]);
-        return Edit { text: out, selection: start..start };
+        return Edit {
+            text: out,
+            selection: start..start,
+        };
     }
 
     // A bare caret deletes the character before it, and does nothing at the
@@ -462,25 +554,41 @@ pub fn delete_backward(text: &str, selection: &Range<usize>) -> Edit {
     let mut out = String::with_capacity(text.len());
     out.push_str(&text[..previous.0]);
     out.push_str(&text[start..]);
-    Edit { text: out, selection: previous.0..previous.0 }
+    Edit {
+        text: out,
+        selection: previous.0..previous.0,
+    }
 }
 
 /// Delete every selected line.
 pub fn delete_lines(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
     let mut out = String::with_capacity(text.len());
     out.push_str(&text[..block_start]);
     out.push_str(&text[block_end..]);
     let caret = block_start.min(out.len());
-    Edit { text: out, selection: caret..caret }
+    Edit {
+        text: out,
+        selection: caret..caret,
+    }
 }
 
 /// Join the selected lines into one, collapsing the whitespace at each break.
 pub fn join_lines(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
     let block = text[block_start..block_end].trim_end_matches('\n');
     let joined = block
@@ -493,7 +601,10 @@ pub fn join_lines(text: &str, selection: &Range<usize>) -> Edit {
     out.push_str(&text[..block_start]);
     out.push_str(&joined);
     out.push_str(&text[block_end..]);
-    Edit { text: out, selection: block_start..block_start + joined.len() }
+    Edit {
+        text: out,
+        selection: block_start..block_start + joined.len(),
+    }
 }
 
 /// Options for [`sort_lines`], mirroring CotEditor's *Sort Lines by Pattern*
@@ -512,7 +623,12 @@ pub struct SortOptions {
 
 impl Default for SortOptions {
     fn default() -> Self {
-        Self { descending: false, ignores_case: true, numeric: true, keeps_first_line: false }
+        Self {
+            descending: false,
+            ignores_case: true,
+            numeric: true,
+            keeps_first_line: false,
+        }
     }
 }
 
@@ -524,7 +640,11 @@ impl SortOptions {
     /// the one part of this we cannot reproduce without an ICU dependency; the
     /// rest of the shape is the same.
     pub fn whole_line() -> Self {
-        Self { ignores_case: false, numeric: false, ..Self::default() }
+        Self {
+            ignores_case: false,
+            numeric: false,
+            ..Self::default()
+        }
     }
 }
 
@@ -536,7 +656,11 @@ pub enum SortKey {
     /// One field of a delimited record, numbered from 1.
     Column { delimiter: String, column: usize },
     /// The text a regular expression matches, or one of its capture groups.
-    RegularExpression { pattern: String, ignore_case: bool, group: Option<usize> },
+    RegularExpression {
+        pattern: String,
+        ignore_case: bool,
+        group: Option<usize>,
+    },
 }
 
 impl SortKey {
@@ -560,7 +684,11 @@ impl SortKey {
                 let field = line.split(delimiter.as_str()).nth(index)?;
                 Some(field.trim().to_string())
             }
-            SortKey::RegularExpression { pattern, ignore_case, group } => {
+            SortKey::RegularExpression {
+                pattern,
+                ignore_case,
+                group,
+            } => {
                 let pattern = if *ignore_case {
                     format!("(?i){pattern}")
                 } else {
@@ -585,7 +713,11 @@ impl SortKey {
         match self {
             SortKey::EntireLine => None,
             SortKey::Column { column, .. } => (*column == 0).then_some(SortKeyError::EmptyColumn),
-            SortKey::RegularExpression { pattern, ignore_case, group } => {
+            SortKey::RegularExpression {
+                pattern,
+                ignore_case,
+                group,
+            } => {
                 if pattern.is_empty() {
                     return Some(SortKeyError::EmptyPattern);
                 }
@@ -636,7 +768,11 @@ impl SortKey {
                 let tail = end - (field.len() - field.trim_end().len());
                 (head < tail).then_some(head..tail)
             }
-            SortKey::RegularExpression { pattern, ignore_case, group } => {
+            SortKey::RegularExpression {
+                pattern,
+                ignore_case,
+                group,
+            } => {
                 let pattern = if *ignore_case {
                     format!("(?i){pattern}")
                 } else {
@@ -778,8 +914,13 @@ pub fn join_logical_lines(
 
 /// The whole lines `selection` touches, terminator included.
 fn line_block(text: &str, selection: &Range<usize>) -> Range<usize> {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
     block_start..block_end
 }
@@ -816,7 +957,10 @@ fn reorder_lines(
     out.push_str(&text[..block.start]);
     out.push_str(&joined);
     out.push_str(&text[block.end..]);
-    Edit { text: out, selection: block.start..block.start + head }
+    Edit {
+        text: out,
+        selection: block.start..block.start + head,
+    }
 }
 
 /// Compare two sort keys under `options`.
@@ -902,19 +1046,36 @@ fn leading_number(value: &str) -> Option<f64> {
 }
 
 /// Remove duplicate lines, keeping the first occurrence.
-pub fn delete_duplicate_lines(text: &str, selection: &Range<usize>, case_insensitive: bool) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
-    let block_start = text[..floor_char_boundary(text, start)].rfind('\n').map_or(0, |i| i + 1);
+pub fn delete_duplicate_lines(
+    text: &str,
+    selection: &Range<usize>,
+    case_insensitive: bool,
+) -> Edit {
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
+    let block_start = text[..floor_char_boundary(text, start)]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
     let block_end = block_end_of(text, end);
     let block = &text[block_start..block_end];
     let trailing_newline = block.ends_with('\n');
     let body = block.trim_end_matches('\n');
-    let lines: Vec<&str> = if body.is_empty() { Vec::new() } else { body.split('\n').collect() };
+    let lines: Vec<&str> = if body.is_empty() {
+        Vec::new()
+    } else {
+        body.split('\n').collect()
+    };
 
     let mut seen = std::collections::HashSet::new();
     let mut kept = Vec::with_capacity(lines.len());
     for line in lines {
-        let key = if case_insensitive { line.to_lowercase() } else { line.to_string() };
+        let key = if case_insensitive {
+            line.to_lowercase()
+        } else {
+            line.to_string()
+        };
         if seen.insert(key) {
             kept.push(line);
         }
@@ -928,7 +1089,10 @@ pub fn delete_duplicate_lines(text: &str, selection: &Range<usize>, case_insensi
     out.push_str(&text[..block_start]);
     out.push_str(&joined);
     out.push_str(&text[block_end..]);
-    Edit { text: out, selection: block_start..block_start + joined.len() }
+    Edit {
+        text: out,
+        selection: block_start..block_start + joined.len(),
+    }
 }
 
 /// Which case transformation to apply.
@@ -941,7 +1105,10 @@ pub enum CaseTransform {
 
 /// Change the case of the selection.
 pub fn transform_case(text: &str, selection: &Range<usize>, transform: CaseTransform) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -957,7 +1124,10 @@ pub fn transform_case(text: &str, selection: &Range<usize>, transform: CaseTrans
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 /// Uppercase the first letter of each word, leaving the rest untouched —
@@ -996,7 +1166,10 @@ fn capitalize_words(input: &str) -> String {
 /// need a selection. The empty case here is therefore the no-op it is for every
 /// other transform in this module; the caller is what tells the user.
 pub fn straighten_quotes(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -1018,7 +1191,10 @@ pub fn straighten_quotes(text: &str, selection: &Range<usize>) -> Edit {
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 /// Which width conversion to apply.
@@ -1034,7 +1210,10 @@ pub enum WidthTransform {
 
 /// Convert between full-width and half-width forms.
 pub fn transform_width(text: &str, selection: &Range<usize>, transform: WidthTransform) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -1051,7 +1230,10 @@ pub fn transform_width(text: &str, selection: &Range<usize>, transform: WidthTra
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 fn to_full_width(input: &str, include_kana: bool) -> String {
@@ -1091,22 +1273,69 @@ fn to_half_width(input: &str, include_kana: bool) -> String {
 /// Half-width katakana, with the dakuten/handakuten forms expanded.
 fn half_kana_to_full(c: char) -> String {
     const TABLE: [(char, &str); 63] = [
-        ('\u{FF61}', "。"), ('\u{FF62}', "「"), ('\u{FF63}', "」"), ('\u{FF64}', "、"),
-        ('\u{FF65}', "・"), ('\u{FF66}', "ヲ"), ('\u{FF67}', "ァ"), ('\u{FF68}', "ィ"),
-        ('\u{FF69}', "ゥ"), ('\u{FF6A}', "ェ"), ('\u{FF6B}', "ォ"), ('\u{FF6C}', "ャ"),
-        ('\u{FF6D}', "ュ"), ('\u{FF6E}', "ョ"), ('\u{FF6F}', "ッ"), ('\u{FF70}', "ー"),
-        ('\u{FF71}', "ア"), ('\u{FF72}', "イ"), ('\u{FF73}', "ウ"), ('\u{FF74}', "エ"),
-        ('\u{FF75}', "オ"), ('\u{FF76}', "カ"), ('\u{FF77}', "キ"), ('\u{FF78}', "ク"),
-        ('\u{FF79}', "ケ"), ('\u{FF7A}', "コ"), ('\u{FF7B}', "サ"), ('\u{FF7C}', "シ"),
-        ('\u{FF7D}', "ス"), ('\u{FF7E}', "セ"), ('\u{FF7F}', "ソ"), ('\u{FF80}', "タ"),
-        ('\u{FF81}', "チ"), ('\u{FF82}', "ツ"), ('\u{FF83}', "テ"), ('\u{FF84}', "ト"),
-        ('\u{FF85}', "ナ"), ('\u{FF86}', "ニ"), ('\u{FF87}', "ヌ"), ('\u{FF88}', "ネ"),
-        ('\u{FF89}', "ノ"), ('\u{FF8A}', "ハ"), ('\u{FF8B}', "ヒ"), ('\u{FF8C}', "フ"),
-        ('\u{FF8D}', "ヘ"), ('\u{FF8E}', "ホ"), ('\u{FF8F}', "マ"), ('\u{FF90}', "ミ"),
-        ('\u{FF91}', "ム"), ('\u{FF92}', "メ"), ('\u{FF93}', "モ"), ('\u{FF94}', "ヤ"),
-        ('\u{FF95}', "ユ"), ('\u{FF96}', "ヨ"), ('\u{FF97}', "ラ"), ('\u{FF98}', "リ"),
-        ('\u{FF99}', "ル"), ('\u{FF9A}', "レ"), ('\u{FF9B}', "ロ"), ('\u{FF9C}', "ワ"),
-        ('\u{FF9D}', "ン"), ('\u{FF9E}', "\u{3099}"), ('\u{FF9F}', "\u{309A}"),
+        ('\u{FF61}', "。"),
+        ('\u{FF62}', "「"),
+        ('\u{FF63}', "」"),
+        ('\u{FF64}', "、"),
+        ('\u{FF65}', "・"),
+        ('\u{FF66}', "ヲ"),
+        ('\u{FF67}', "ァ"),
+        ('\u{FF68}', "ィ"),
+        ('\u{FF69}', "ゥ"),
+        ('\u{FF6A}', "ェ"),
+        ('\u{FF6B}', "ォ"),
+        ('\u{FF6C}', "ャ"),
+        ('\u{FF6D}', "ュ"),
+        ('\u{FF6E}', "ョ"),
+        ('\u{FF6F}', "ッ"),
+        ('\u{FF70}', "ー"),
+        ('\u{FF71}', "ア"),
+        ('\u{FF72}', "イ"),
+        ('\u{FF73}', "ウ"),
+        ('\u{FF74}', "エ"),
+        ('\u{FF75}', "オ"),
+        ('\u{FF76}', "カ"),
+        ('\u{FF77}', "キ"),
+        ('\u{FF78}', "ク"),
+        ('\u{FF79}', "ケ"),
+        ('\u{FF7A}', "コ"),
+        ('\u{FF7B}', "サ"),
+        ('\u{FF7C}', "シ"),
+        ('\u{FF7D}', "ス"),
+        ('\u{FF7E}', "セ"),
+        ('\u{FF7F}', "ソ"),
+        ('\u{FF80}', "タ"),
+        ('\u{FF81}', "チ"),
+        ('\u{FF82}', "ツ"),
+        ('\u{FF83}', "テ"),
+        ('\u{FF84}', "ト"),
+        ('\u{FF85}', "ナ"),
+        ('\u{FF86}', "ニ"),
+        ('\u{FF87}', "ヌ"),
+        ('\u{FF88}', "ネ"),
+        ('\u{FF89}', "ノ"),
+        ('\u{FF8A}', "ハ"),
+        ('\u{FF8B}', "ヒ"),
+        ('\u{FF8C}', "フ"),
+        ('\u{FF8D}', "ヘ"),
+        ('\u{FF8E}', "ホ"),
+        ('\u{FF8F}', "マ"),
+        ('\u{FF90}', "ミ"),
+        ('\u{FF91}', "ム"),
+        ('\u{FF92}', "メ"),
+        ('\u{FF93}', "モ"),
+        ('\u{FF94}', "ヤ"),
+        ('\u{FF95}', "ユ"),
+        ('\u{FF96}', "ヨ"),
+        ('\u{FF97}', "ラ"),
+        ('\u{FF98}', "リ"),
+        ('\u{FF99}', "ル"),
+        ('\u{FF9A}', "レ"),
+        ('\u{FF9B}', "ロ"),
+        ('\u{FF9C}', "ワ"),
+        ('\u{FF9D}', "ン"),
+        ('\u{FF9E}', "\u{3099}"),
+        ('\u{FF9F}', "\u{309A}"),
     ];
     for (from, to) in TABLE {
         if from == c {
@@ -1119,25 +1348,92 @@ fn half_kana_to_full(c: char) -> String {
 fn full_kana_to_half(c: char) -> String {
     // Reverse of the table above, applied to the voiced forms first.
     const VOICED: [(char, &str); 21] = [
-        ('ガ', "ｶﾞ"), ('ギ', "ｷﾞ"), ('グ', "ｸﾞ"), ('ゲ', "ｹﾞ"), ('ゴ', "ｺﾞ"),
-        ('ザ', "ｻﾞ"), ('ジ', "ｼﾞ"), ('ズ', "ｽﾞ"), ('ゼ', "ｾﾞ"), ('ゾ', "ｿﾞ"),
-        ('ダ', "ﾀﾞ"), ('ヂ', "ﾁﾞ"), ('ヅ', "ﾂﾞ"), ('デ', "ﾃﾞ"), ('ド', "ﾄﾞ"),
-        ('バ', "ﾊﾞ"), ('ビ', "ﾋﾞ"), ('ブ', "ﾌﾞ"), ('ベ', "ﾍﾞ"), ('ボ', "ﾎﾞ"),
+        ('ガ', "ｶﾞ"),
+        ('ギ', "ｷﾞ"),
+        ('グ', "ｸﾞ"),
+        ('ゲ', "ｹﾞ"),
+        ('ゴ', "ｺﾞ"),
+        ('ザ', "ｻﾞ"),
+        ('ジ', "ｼﾞ"),
+        ('ズ', "ｽﾞ"),
+        ('ゼ', "ｾﾞ"),
+        ('ゾ', "ｿﾞ"),
+        ('ダ', "ﾀﾞ"),
+        ('ヂ', "ﾁﾞ"),
+        ('ヅ', "ﾂﾞ"),
+        ('デ', "ﾃﾞ"),
+        ('ド', "ﾄﾞ"),
+        ('バ', "ﾊﾞ"),
+        ('ビ', "ﾋﾞ"),
+        ('ブ', "ﾌﾞ"),
+        ('ベ', "ﾍﾞ"),
+        ('ボ', "ﾎﾞ"),
         ('ヴ', "ｳﾞ"),
     ];
-    const SEMI: [(char, &str); 5] =
-        [('パ', "ﾊﾟ"), ('ピ', "ﾋﾟ"), ('プ', "ﾌﾟ"), ('ペ', "ﾍﾟ"), ('ポ', "ﾎﾟ")];
+    const SEMI: [(char, &str); 5] = [
+        ('パ', "ﾊﾟ"),
+        ('ピ', "ﾋﾟ"),
+        ('プ', "ﾌﾟ"),
+        ('ペ', "ﾍﾟ"),
+        ('ポ', "ﾎﾟ"),
+    ];
     const PLAIN: [(char, &str); 56] = [
-        ('。', "｡"), ('「', "｢"), ('」', "｣"), ('、', "､"), ('・', "･"), ('ヲ', "ｦ"),
-        ('ァ', "ｧ"), ('ィ', "ｨ"), ('ゥ', "ｩ"), ('ェ', "ｪ"), ('ォ', "ｫ"), ('ャ', "ｬ"),
-        ('ュ', "ｭ"), ('ョ', "ｮ"), ('ッ', "ｯ"), ('ー', "ｰ"), ('ア', "ｱ"), ('イ', "ｲ"),
-        ('ウ', "ｳ"), ('エ', "ｴ"), ('オ', "ｵ"), ('カ', "ｶ"), ('キ', "ｷ"), ('ク', "ｸ"),
-        ('ケ', "ｹ"), ('コ', "ｺ"), ('サ', "ｻ"), ('シ', "ｼ"), ('ス', "ｽ"), ('セ', "ｾ"),
-        ('ソ', "ｿ"), ('タ', "ﾀ"), ('チ', "ﾁ"), ('ツ', "ﾂ"), ('テ', "ﾃ"), ('ト', "ﾄ"),
-        ('ナ', "ﾅ"), ('ニ', "ﾆ"), ('ヌ', "ﾇ"), ('ネ', "ﾈ"), ('ノ', "ﾉ"), ('ハ', "ﾊ"),
-        ('ヒ', "ﾋ"), ('フ', "ﾌ"), ('ヘ', "ﾍ"), ('ホ', "ﾎ"), ('マ', "ﾏ"), ('ミ', "ﾐ"),
-        ('ム', "ﾑ"), ('メ', "ﾒ"), ('モ', "ﾓ"), ('ヤ', "ﾔ"), ('ユ', "ﾕ"), ('ヨ', "ﾖ"),
-        ('ラ', "ﾗ"), ('リ', "ﾘ"),
+        ('。', "｡"),
+        ('「', "｢"),
+        ('」', "｣"),
+        ('、', "､"),
+        ('・', "･"),
+        ('ヲ', "ｦ"),
+        ('ァ', "ｧ"),
+        ('ィ', "ｨ"),
+        ('ゥ', "ｩ"),
+        ('ェ', "ｪ"),
+        ('ォ', "ｫ"),
+        ('ャ', "ｬ"),
+        ('ュ', "ｭ"),
+        ('ョ', "ｮ"),
+        ('ッ', "ｯ"),
+        ('ー', "ｰ"),
+        ('ア', "ｱ"),
+        ('イ', "ｲ"),
+        ('ウ', "ｳ"),
+        ('エ', "ｴ"),
+        ('オ', "ｵ"),
+        ('カ', "ｶ"),
+        ('キ', "ｷ"),
+        ('ク', "ｸ"),
+        ('ケ', "ｹ"),
+        ('コ', "ｺ"),
+        ('サ', "ｻ"),
+        ('シ', "ｼ"),
+        ('ス', "ｽ"),
+        ('セ', "ｾ"),
+        ('ソ', "ｿ"),
+        ('タ', "ﾀ"),
+        ('チ', "ﾁ"),
+        ('ツ', "ﾂ"),
+        ('テ', "ﾃ"),
+        ('ト', "ﾄ"),
+        ('ナ', "ﾅ"),
+        ('ニ', "ﾆ"),
+        ('ヌ', "ﾇ"),
+        ('ネ', "ﾈ"),
+        ('ノ', "ﾉ"),
+        ('ハ', "ﾊ"),
+        ('ヒ', "ﾋ"),
+        ('フ', "ﾌ"),
+        ('ヘ', "ﾍ"),
+        ('ホ', "ﾎ"),
+        ('マ', "ﾏ"),
+        ('ミ', "ﾐ"),
+        ('ム', "ﾑ"),
+        ('メ', "ﾒ"),
+        ('モ', "ﾓ"),
+        ('ヤ', "ﾔ"),
+        ('ユ', "ﾕ"),
+        ('ヨ', "ﾖ"),
+        ('ラ', "ﾗ"),
+        ('リ', "ﾘ"),
     ];
     for (from, to) in VOICED.iter().chain(SEMI.iter()).chain(PLAIN.iter()) {
         if *from == c {
@@ -1153,8 +1449,18 @@ fn full_kana_to_half(c: char) -> String {
     }
     // The tail of the katakana block that the table above omits.
     const TAIL: [(char, &str); 13] = [
-        ('ル', "ﾙ"), ('レ', "ﾚ"), ('ロ', "ﾛ"), ('ワ', "ﾜ"), ('ン', "ﾝ"), ('゛', "ﾞ"),
-        ('゜', "ﾟ"), ('ヮ', "ﾜ"), ('ヰ', "ｲ"), ('ヱ', "ｴ"), ('ヵ', "ｶ"), ('ヶ', "ｹ"),
+        ('ル', "ﾙ"),
+        ('レ', "ﾚ"),
+        ('ロ', "ﾛ"),
+        ('ワ', "ﾜ"),
+        ('ン', "ﾝ"),
+        ('゛', "ﾞ"),
+        ('゜', "ﾟ"),
+        ('ヮ', "ﾜ"),
+        ('ヰ', "ｲ"),
+        ('ヱ', "ｴ"),
+        ('ヵ', "ｶ"),
+        ('ヶ', "ｹ"),
         ('ヽ', "ﾂ"),
     ];
     for (from, to) in TAIL {
@@ -1167,7 +1473,10 @@ fn full_kana_to_half(c: char) -> String {
 
 /// Percent-encode the selection (RFC 3986 unreserved characters are kept).
 pub fn url_encode(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -1186,12 +1495,18 @@ pub fn url_encode(text: &str, selection: &Range<usize>) -> Edit {
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 /// Decode percent-escapes in the selection.
 pub fn url_decode(text: &str, selection: &Range<usize>) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -1217,7 +1532,10 @@ pub fn url_decode(text: &str, selection: &Range<usize>) -> Edit {
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 /// Which Unicode normalization form to apply.
@@ -1369,9 +1687,8 @@ fn canonical_order(characters: &mut [char]) {
         }
         let mut position = index;
         while position > 0 {
-            let previous = unicode_normalization::char::canonical_combining_class(
-                characters[position - 1],
-            );
+            let previous =
+                unicode_normalization::char::canonical_combining_class(characters[position - 1]);
             if previous == 0 || previous <= class {
                 break;
             }
@@ -1449,7 +1766,10 @@ fn is_full_composition_exclusion(character: char) -> bool {
 /// algorithm; the table is now generated (see [`unicode_tables`]), so there is
 /// nothing left to refuse.
 pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> Edit {
-    let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
+    let (start, end) = (
+        selection.start.min(text.len()),
+        selection.end.min(text.len()),
+    );
     let start = floor_char_boundary(text, start);
     let end = floor_char_boundary(text, end);
     if start == end {
@@ -1469,7 +1789,10 @@ pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> E
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
-    Edit { text: out, selection: start..start + replaced.len() }
+    Edit {
+        text: out,
+        selection: start..start + replaced.len(),
+    }
 }
 
 /// NFKC Case-Fold — upstream's `precomposedStringWithCompatibilityMappingWithCaseFold`.
@@ -1828,7 +2151,11 @@ fn line_bounds(text: &str) -> Vec<(usize, usize)> {
         match bytes[i] {
             b'\r' => {
                 bounds.push((start, i));
-                i += if bytes.get(i + 1) == Some(&b'\n') { 2 } else { 1 };
+                i += if bytes.get(i + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
                 start = i;
             }
             b'\n' => {
@@ -1956,7 +2283,10 @@ impl LineIndex {
             }
         }
         bounds.push((start, text.len()));
-        Self { bounds, len: text.len() }
+        Self {
+            bounds,
+            len: text.len(),
+        }
     }
 
     /// The 1-based line number holding `offset`, and that line's content range.
@@ -1969,7 +2299,10 @@ impl LineIndex {
         let offset = offset.min(self.len);
         // The last line whose start is at or before `offset`. `bounds` is
         // sorted by start, so this is a partition point.
-        let index = self.bounds.partition_point(|(start, _)| *start <= offset).saturating_sub(1);
+        let index = self
+            .bounds
+            .partition_point(|(start, _)| *start <= offset)
+            .saturating_sub(1);
         let (start, end) = self.bounds[index];
         (index + 1, start..end)
     }
@@ -2021,8 +2354,14 @@ mod tests {
         let text = "é(ß)é";
         let open = text.find('(').expect("the opener");
         let close = text.find(')').expect("the closer");
-        assert_eq!(matching_symbol_pair(text, open, &braces), Some(close..close + 1));
-        assert_eq!(matching_symbol_pair(text, close, &braces), Some(open..open + 1));
+        assert_eq!(
+            matching_symbol_pair(text, open, &braces),
+            Some(close..close + 1)
+        );
+        assert_eq!(
+            matching_symbol_pair(text, close, &braces),
+            Some(open..open + 1)
+        );
         assert_eq!(&text[open + 1..close], "ß");
     }
 
@@ -2055,7 +2394,10 @@ mod tests {
 
     #[test]
     fn comment_toggle_adds_then_removes() {
-        let delimiters = CommentDelimiters { inline: Some("//".into()), block: None };
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
         let text = "let a = 1;\nlet b = 2;";
         let commented = toggle_comment(text, &all(text), &delimiters);
         assert_eq!(commented.text, "// let a = 1;\n// let b = 2;");
@@ -2065,7 +2407,10 @@ mod tests {
 
     #[test]
     fn comment_toggle_preserves_indentation() {
-        let delimiters = CommentDelimiters { inline: Some("#".into()), block: None };
+        let delimiters = CommentDelimiters {
+            inline: Some("#".into()),
+            block: None,
+        };
         let text = "def f():\n    return 1";
         assert_eq!(
             toggle_comment(text, &all(text), &delimiters).text,
@@ -2075,7 +2420,10 @@ mod tests {
 
     #[test]
     fn block_comment_wraps_and_unwraps() {
-        let delimiters = CommentDelimiters { inline: None, block: Some(("/*".into(), "*/".into())) };
+        let delimiters = CommentDelimiters {
+            inline: None,
+            block: Some(("/*".into(), "*/".into())),
+        };
         let text = "abc";
         let wrapped = toggle_comment(text, &(0..3), &delimiters);
         assert_eq!(wrapped.text, "/*abc*/");
@@ -2115,7 +2463,10 @@ mod tests {
             sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
             "apple\nbanana\ncherry"
         );
-        let desc = SortOptions { descending: true, ..options };
+        let desc = SortOptions {
+            descending: true,
+            ..options
+        };
         assert_eq!(
             sort_lines(text, &all(text), &SortKey::EntireLine, &desc).text,
             "cherry\nbanana\napple"
@@ -2125,7 +2476,10 @@ mod tests {
     #[test]
     fn sort_lines_numeric_orders_by_value() {
         let text = "10\n9\n100";
-        let options = SortOptions { numeric: true, ..SortOptions::whole_line() };
+        let options = SortOptions {
+            numeric: true,
+            ..SortOptions::whole_line()
+        };
         assert_eq!(
             sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
             "9\n10\n100"
@@ -2137,7 +2491,10 @@ mod tests {
         // CotEditor's own fixture: `dog, 🐕, 2, イヌ` and friends, sorted by the
         // third field.
         let text = "dog, 🐕, 2, イヌ\ncat, 🐈, 1, ねこ\ncow, 🐄, 3, ｳｼ\n";
-        let key = SortKey::Column { delimiter: String::new(), column: 3 };
+        let key = SortKey::Column {
+            delimiter: String::new(),
+            column: 3,
+        };
         assert_eq!(
             sort_lines(text, &all(text), &key, &SortOptions::default()).text,
             "cat, 🐈, 1, ねこ\ndog, 🐕, 2, イヌ\ncow, 🐄, 3, ｳｼ\n"
@@ -2145,7 +2502,10 @@ mod tests {
 
         // A row with no such field has no key, so it sorts to the end.
         let ragged = "a,b,c\nx\ny,b,z\n";
-        let key = SortKey::Column { delimiter: String::new(), column: 3 };
+        let key = SortKey::Column {
+            delimiter: String::new(),
+            column: 3,
+        };
         assert_eq!(
             sort_lines(ragged, &all(ragged), &key, &SortOptions::default()).text,
             "a,b,c\ny,b,z\nx\n"
@@ -2155,7 +2515,10 @@ mod tests {
     #[test]
     fn sort_by_column_understands_an_escaped_delimiter() {
         let text = "b\t2\na\t1\n";
-        let key = SortKey::Column { delimiter: "\\t".to_string(), column: 2 };
+        let key = SortKey::Column {
+            delimiter: "\\t".to_string(),
+            column: 2,
+        };
         assert_eq!(
             sort_lines(text, &all(text), &key, &SortOptions::default()).text,
             "a\t1\nb\t2\n"
@@ -2192,15 +2555,24 @@ mod tests {
     fn a_line_without_a_key_keeps_out_of_the_way() {
         // Nothing matches `^x`, so every line has no key and the order stands.
         let text = "b\na\nc\n";
-        let key =
-            SortKey::RegularExpression { pattern: "^x".to_string(), ignore_case: true, group: None };
-        assert_eq!(sort_lines(text, &all(text), &key, &SortOptions::default()).text, text);
+        let key = SortKey::RegularExpression {
+            pattern: "^x".to_string(),
+            ignore_case: true,
+            group: None,
+        };
+        assert_eq!(
+            sort_lines(text, &all(text), &key, &SortOptions::default()).text,
+            text
+        );
     }
 
     #[test]
     fn sort_keeps_the_first_line_when_asked() {
         let text = "3\n12\n1\n";
-        let options = SortOptions { keeps_first_line: true, ..SortOptions::whole_line() };
+        let options = SortOptions {
+            keeps_first_line: true,
+            ..SortOptions::whole_line()
+        };
         assert_eq!(
             sort_lines(text, &all(text), &SortKey::EntireLine, &options).text,
             "3\n1\n12\n"
@@ -2239,7 +2611,12 @@ mod tests {
     #[test]
     fn sort_hands_back_the_first_line_as_the_selection() {
         let text = "banana\napple\n";
-        let edit = sort_lines(text, &all(text), &SortKey::EntireLine, &SortOptions::whole_line());
+        let edit = sort_lines(
+            text,
+            &all(text),
+            &SortKey::EntireLine,
+            &SortOptions::whole_line(),
+        );
         assert_eq!(edit.text, "apple\nbanana\n");
         // "apple" — the first line of the result, not the whole block.
         assert_eq!(edit.selection, 0..5);
@@ -2303,7 +2680,11 @@ mod tests {
         assert_eq!(key(2).validate(), None);
         assert_eq!(key(3).validate(), Some(SortKeyError::InvalidPattern));
         assert_eq!(
-            SortKey::Column { delimiter: String::new(), column: 0 }.validate(),
+            SortKey::Column {
+                delimiter: String::new(),
+                column: 0
+            }
+            .validate(),
             Some(SortKeyError::EmptyColumn)
         );
     }
@@ -2311,7 +2692,10 @@ mod tests {
     #[test]
     fn delete_duplicates_keeps_first() {
         let text = "a\nb\na\nB";
-        assert_eq!(delete_duplicate_lines(text, &all(text), false).text, "a\nb\nB");
+        assert_eq!(
+            delete_duplicate_lines(text, &all(text), false).text,
+            "a\nb\nB"
+        );
         assert_eq!(delete_duplicate_lines(text, &all(text), true).text, "a\nb");
     }
 
@@ -2430,7 +2814,10 @@ mod tests {
     #[test]
     fn every_form_round_trips_through_its_identifier() {
         for form in Normalization::ALL {
-            assert_eq!(Normalization::from_identifier(form.identifier()), Some(form));
+            assert_eq!(
+                Normalization::from_identifier(form.identifier()),
+                Some(form)
+            );
         }
         assert_eq!(Normalization::from_identifier("nfkccf"), None);
     }
@@ -2536,7 +2923,8 @@ mod tests {
     /// `CFStringGetFileSystemRepresentation` — the call upstream makes.
     #[test]
     fn the_hfs_decomposition_keeps_the_ranges_apple_keeps() {
-        let decompose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
+        let decompose =
+            |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
 
         // Outside the excluded ranges, the canonical decomposition happens.
         assert_eq!(decompose("é"), "e\u{301}");
@@ -2565,7 +2953,8 @@ mod tests {
     /// across the assembled output rather than inside each character.
     #[test]
     fn the_hfs_decomposition_orders_its_combining_marks() {
-        let decompose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
+        let decompose =
+            |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfd).text;
         // The mark below (ccc 220) sorts before the acute (ccc 230).
         assert_eq!(decompose("a\u{301}\u{316}"), "a\u{316}\u{301}");
         // An excluded character is a barrier, so the acute stays after it.
@@ -2576,7 +2965,8 @@ mod tests {
     /// `precomposedStringWithHFSPlusMapping` run on this machine.
     #[test]
     fn the_hfs_composition_composes_around_the_excluded_characters() {
-        let compose = |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfc).text;
+        let compose =
+            |text: &str| normalize(text, &(0..text.len()), Normalization::ModifiedNfc).text;
         assert_eq!(compose("e\u{301}"), "é");
         assert_eq!(compose("\u{1100}\u{1161}"), "가");
         // U+2126 is a composition exclusion, so the run on either side of it
@@ -2675,7 +3065,10 @@ mod tests {
         // means "the same as the beginning" — upstream's `submit`.
         let text = "let x";
         assert_eq!(surround(text, &(4..5), "**", "**").text, "let **x**");
-        assert_eq!(surround(text, &all(text), "```\n", "\n```").text, "```\nlet x\n```");
+        assert_eq!(
+            surround(text, &all(text), "```\n", "\n```").text,
+            "```\nlet x\n```"
+        );
     }
 
     /// The three status-bar counts, against CotEditor's own test vectors.
@@ -2718,7 +3111,11 @@ mod tests {
         let text = "aaa \r\n🐱 ";
         // Character 3 is the space, 4 the CRLF, 5 the cat, 6 the last space.
         for (offset, column) in [(3, 3), (4, 4), (6, 0), (10, 1), (11, 2)] {
-            assert_eq!(status_position(text, offset).1, column, "column at {offset}");
+            assert_eq!(
+                status_position(text, offset).1,
+                column,
+                "column at {offset}"
+            );
         }
 
         // …and `Location` is the same unit, from the start of the text.
@@ -2739,9 +3136,17 @@ mod tests {
             let text = format!("a{ending}b");
             let after = 1 + ending.len();
             assert_eq!(status_position(&text, 0).0, 1, "{ending:?} at the start");
-            assert_eq!(status_position(&text, 1).0, 1, "{ending:?} inside the ending");
+            assert_eq!(
+                status_position(&text, 1).0,
+                1,
+                "{ending:?} inside the ending"
+            );
             assert_eq!(status_position(&text, after).0, 2, "{ending:?} behind us");
-            assert_eq!(status_position(&text, after + 1).0, 2, "{ending:?} at the end");
+            assert_eq!(
+                status_position(&text, after + 1).0,
+                2,
+                "{ending:?} at the end"
+            );
         }
     }
 
@@ -2776,7 +3181,10 @@ mod tests {
 
         // Outside every pair, and past the end of the text.
         assert_eq!(range_of_enclosing_symbol_pair(text, &(1..2), &pairs), None);
-        assert_eq!(range_of_enclosing_symbol_pair(text, &(24..24), &pairs), None);
+        assert_eq!(
+            range_of_enclosing_symbol_pair(text, &(24..24), &pairs),
+            None
+        );
         // The outer braces, not the inner ones the caret sits between.
         assert_eq!(
             range_of_enclosing_symbol_pair(text, &(13..14), &pairs),
@@ -2826,7 +3234,10 @@ mod tests {
         assert_eq!(line_content_ranges("foo\nbar", &(1..1)), vec![1..1]);
         // A selection reaching into two lines is cut at the line start, and
         // stops before the line whose start is its own end.
-        assert_eq!(line_content_ranges("foo\nbar\nbaz", &(1..8)), vec![1..3, 4..7]);
+        assert_eq!(
+            line_content_ranges("foo\nbar\nbaz", &(1..8)),
+            vec![1..3, 4..7]
+        );
     }
 
     #[test]

@@ -162,7 +162,11 @@ impl Syntax {
         let directory = directory.as_ref().to_path_buf();
         let name = directory
             .file_name()
-            .map(|n| n.to_string_lossy().trim_end_matches(".cotsyntax").to_string())
+            .map(|n| {
+                n.to_string_lossy()
+                    .trim_end_matches(".cotsyntax")
+                    .to_string()
+            })
             .unwrap_or_else(|| "Plain Text".to_string());
 
         let info: InfoFile = read_json(directory.join("Info.json"))?.unwrap_or_default();
@@ -170,9 +174,10 @@ impl Syntax {
 
         // CotEditor stores regex-based rules under `Regex/`; the plain files
         // sit at the bundle root. Prefer whichever exists.
-        let highlights: BTreeMap<String, Vec<RawRule>> = read_json(directory.join("Regex/Highlights.json"))?
-            .or(read_json(directory.join("Highlights.json"))?)
-            .unwrap_or_default();
+        let highlights: BTreeMap<String, Vec<RawRule>> =
+            read_json(directory.join("Regex/Highlights.json"))?
+                .or(read_json(directory.join("Highlights.json"))?)
+                .unwrap_or_default();
         let has_highlight_file = !highlights.is_empty();
         let outlines: Vec<OutlineItem> = read_json(directory.join("Regex/Outlines.json"))?
             .or(read_json(directory.join("Outlines.json"))?)
@@ -187,7 +192,9 @@ impl Syntax {
             let Some(token) = HighlightToken::from_key(&key) else {
                 continue;
             };
-            let usable = rules.into_iter().filter_map(|rule| HighlightRule::compile(rule).ok());
+            let usable = rules
+                .into_iter()
+                .filter_map(|rule| HighlightRule::compile(rule).ok());
             compiled.entry(token).or_default().extend(usable);
         }
 
@@ -197,7 +204,10 @@ impl Syntax {
         // seventy highlight files, and `strings` in a handful.
         for pair in &edit.comment.inlines {
             if let Ok(rule) = HighlightRule::inline_comment(&pair.begin) {
-                compiled.entry(HighlightToken::Comments).or_default().push(rule);
+                compiled
+                    .entry(HighlightToken::Comments)
+                    .or_default()
+                    .push(rule);
             }
         }
         for pair in &edit.comment.blocks {
@@ -209,35 +219,53 @@ impl Syntax {
                     true,
                     pair.is_nestable,
                     Vec::new(),
-                ) {
-                    compiled.entry(HighlightToken::Comments).or_default().push(rule);
-                }
+                )
+            {
+                compiled
+                    .entry(HighlightToken::Comments)
+                    .or_default()
+                    .push(rule);
+            }
         }
         for delimiter in &edit.string_delimiters {
             if let Some(end) = &delimiter.end
                 && let Ok(rule) = HighlightRule::delimited(
                     &delimiter.begin,
                     end,
-                    delimiter.escape_character.as_deref().and_then(|e| e.chars().next()),
+                    delimiter
+                        .escape_character
+                        .as_deref()
+                        .and_then(|e| e.chars().next()),
                     delimiter.is_multiline,
                     false,
                     delimiter.prefixes.clone(),
-                ) {
-                    compiled.entry(HighlightToken::Strings).or_default().push(rule);
-                }
+                )
+            {
+                compiled
+                    .entry(HighlightToken::Strings)
+                    .or_default()
+                    .push(rule);
+            }
         }
         for delimiter in &edit.character_delimiters {
             if let Some(end) = &delimiter.end
                 && let Ok(rule) = HighlightRule::delimited(
                     &delimiter.begin,
                     end,
-                    delimiter.escape_character.as_deref().and_then(|e| e.chars().next()),
+                    delimiter
+                        .escape_character
+                        .as_deref()
+                        .and_then(|e| e.chars().next()),
                     false,
                     false,
                     delimiter.prefixes.clone(),
-                ) {
-                    compiled.entry(HighlightToken::Characters).or_default().push(rule);
-                }
+                )
+            {
+                compiled
+                    .entry(HighlightToken::Characters)
+                    .or_default()
+                    .push(rule);
+            }
         }
 
         Ok(Self {
@@ -285,8 +313,17 @@ impl Syntax {
 
     /// Whether `path` looks like a file this syntax handles.
     pub fn matches_path(&self, path: &Path) -> bool {
-        let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if self.info.file_map.filenames.iter().any(|f| f.to_lowercase() == name) {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if self
+            .info
+            .file_map
+            .filenames
+            .iter()
+            .any(|f| f.to_lowercase() == name)
+        {
             return true;
         }
         let extension = path
@@ -305,7 +342,11 @@ impl Syntax {
     /// Whether this syntax handles files run by `interpreter`.
     pub fn matches_interpreter(&self, interpreter: &str) -> bool {
         let interpreter = interpreter.to_lowercase();
-        self.info.file_map.interpreters.iter().any(|i| i.to_lowercase() == interpreter)
+        self.info
+            .file_map
+            .interpreters
+            .iter()
+            .any(|i| i.to_lowercase() == interpreter)
     }
 }
 
@@ -329,8 +370,7 @@ pub struct SyntaxManager {
 }
 
 /// The fallback used when no `.cotsyntax` bundle could be read.
-static PLAIN_TEXT: std::sync::LazyLock<Syntax> =
-    std::sync::LazyLock::new(Syntax::plain_text);
+static PLAIN_TEXT: std::sync::LazyLock<Syntax> = std::sync::LazyLock::new(Syntax::plain_text);
 
 impl SyntaxManager {
     /// Load every `.cotsyntax` bundle in `directory`.
@@ -381,10 +421,11 @@ impl SyntaxManager {
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Syntax> {
-        self.syntaxes
-            .iter()
-            .find(|s| s.name == name)
-            .or_else(|| self.syntaxes.iter().find(|s| s.name.eq_ignore_ascii_case(name)))
+        self.syntaxes.iter().find(|s| s.name == name).or_else(|| {
+            self.syntaxes
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(name))
+        })
     }
 
     /// The syntax to use for a file, falling back to Plain Text.
@@ -392,12 +433,17 @@ impl SyntaxManager {
     /// A more specific match beats a less specific one: a full filename beats
     /// an extension, and an extension beats nothing.
     pub fn syntax_for_path(&self, path: &Path) -> &Syntax {
-        let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if let Some(found) = self
-            .syntaxes
-            .iter()
-            .find(|s| s.info.file_map.filenames.iter().any(|f| f.to_lowercase() == name))
-        {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if let Some(found) = self.syntaxes.iter().find(|s| {
+            s.info
+                .file_map
+                .filenames
+                .iter()
+                .any(|f| f.to_lowercase() == name)
+        }) {
             return found;
         }
         if let Some(found) = self.syntaxes.iter().find(|s| s.matches_path(path)) {
@@ -440,7 +486,11 @@ mod tests {
     #[test]
     fn loads_the_bundled_syntax_set() {
         let manager = manager();
-        assert!(manager.all().len() >= 60, "expected the full CotEditor set, got {}", manager.all().len());
+        assert!(
+            manager.all().len() >= 60,
+            "expected the full CotEditor set, got {}",
+            manager.all().len()
+        );
         assert!(manager.by_name("Plain Text").is_some());
         assert!(manager.by_name("Python").is_some());
     }
@@ -450,15 +500,27 @@ mod tests {
         let manager = manager();
         assert_eq!(manager.syntax_for_path(Path::new("main.rs")).name, "Rust");
         assert_eq!(manager.syntax_for_path(Path::new("app.py")).name, "Python");
-        assert_eq!(manager.syntax_for_path(Path::new("index.html")).name, "HTML");
-        assert_eq!(manager.syntax_for_path(Path::new("notes.unknownext")).name, "Plain Text");
+        assert_eq!(
+            manager.syntax_for_path(Path::new("index.html")).name,
+            "HTML"
+        );
+        assert_eq!(
+            manager.syntax_for_path(Path::new("notes.unknownext")).name,
+            "Plain Text"
+        );
     }
 
     #[test]
     fn full_filename_beats_extension() {
         let manager = manager();
-        assert_eq!(manager.syntax_for_path(Path::new("Makefile")).name, "Makefile");
-        assert_eq!(manager.syntax_for_path(Path::new("Dockerfile")).name, "Dockerfile");
+        assert_eq!(
+            manager.syntax_for_path(Path::new("Makefile")).name,
+            "Makefile"
+        );
+        assert_eq!(
+            manager.syntax_for_path(Path::new("Dockerfile")).name,
+            "Dockerfile"
+        );
     }
 
     #[test]
@@ -528,10 +590,20 @@ mod tests {
     #[test]
     fn the_two_syntax_populations_are_both_large() {
         let manager = manager();
-        let with_rules = manager.all().iter().filter(|s| s.has_highlight_file).count();
+        let with_rules = manager
+            .all()
+            .iter()
+            .filter(|s| s.has_highlight_file)
+            .count();
         let without = manager.all().len() - with_rules;
-        assert!(with_rules >= 40, "expected the regex population, got {with_rules}");
-        assert!(without >= 20, "expected the tree-sitter population, got {without}");
+        assert!(
+            with_rules >= 40,
+            "expected the regex population, got {with_rules}"
+        );
+        assert!(
+            without >= 20,
+            "expected the tree-sitter population, got {without}"
+        );
     }
 
     #[test]
@@ -548,13 +620,19 @@ mod tests {
     fn rust_outlines_are_loaded() {
         let manager = manager();
         let rust = manager.by_name("Rust").unwrap();
-        assert!(!rust.outlines.is_empty(), "Rust should define outline rules");
+        assert!(
+            !rust.outlines.is_empty(),
+            "Rust should define outline rules"
+        );
     }
 
     #[test]
     fn completions_are_loaded_for_languages_that_have_them() {
         let manager = manager();
         let python = manager.by_name("Python").unwrap();
-        assert!(!python.completions.is_empty(), "Python ships a completion list");
+        assert!(
+            !python.completions.is_empty(),
+            "Python ships a completion list"
+        );
     }
 }
