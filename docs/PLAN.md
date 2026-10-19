@@ -2529,6 +2529,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 14.1 | `.github/workflows/ci.yml`：push 到 `main` 与 PR 时，在 **macos-14** 上跑 `cargo test --workspace --locked` 与 `cargo clippy --workspace --all-targets --locked -- -D warnings`，带 `Swatinem/rust-cache` | ✅ |
 | 14.2 | 只挂 macOS：那是唯一验证过的平台。Linux / Windows 的 GPUI 后端没跑过，挂一个必然红的 job 只会教人忽略红叉。这一条要等真做过交叉验证再改 | ✅（有意为之） |
 | 14.3 | README 顶部加 CI 徽章；`Cargo.toml` 里占位的 `repository` 地址改成真实仓库 | ✅ |
+| 14.4 | 跨目标类型检查：三个纯 Rust crate（core / syntax / theme）不依赖 GPUI，而 `cargo check` 不链接，所以在同一个 macos-14 job 里为 `x86_64-unknown-linux-gnu` 与 `x86_64-pc-windows-msvc` 各做一次检查 —— 覆盖它们里面的 `cfg(unix)` / `cfg(macos)` 与回退分支（例如 Finder 标签的 macOS 专属读取与非 macOS 的空返回）。**明确不覆盖 `subtext-app`**：那需要 Linux/Windows 的 C 工具链，Mac runner 给不了 | ✅ |
 
 **第一次跑就抓到一个本地看不见的问题**：runner 的 `stable` 比本机的 1.96.1 新，clippy 报了
 `chunks_exact` 的常量块宽（`subtext-core` 三处：UTF-16 两处、UTF-32 一处）。改用
@@ -2574,7 +2575,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
-| Windows / Linux 未编译验证（主机缺交叉工具链，不是代码问题） | 两个目标都试过 `cargo check --workspace --target …`，都在**依赖的构建脚本**上停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
+| `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **三个纯 Rust crate 已由 CI 跨目标检查**（§14.4）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
