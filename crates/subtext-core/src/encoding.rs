@@ -255,15 +255,18 @@ impl fmt::Display for TextEncoding {
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
-    let units: Vec<u16> = bytes
-        .chunks_exact(2)
+    // `as_chunks` rather than `chunks_exact`: clippy asks for it when the width
+    // is a constant, and it hands back the remainder instead of making the
+    // caller work out that there is one.
+    let (pairs, remainder) = bytes.as_chunks::<2>();
+    let units: Vec<u16> = pairs
+        .iter()
         .map(|pair| {
-            let (a, b) = (pair[0], pair[1]);
-            if little_endian { u16::from_le_bytes([a, b]) } else { u16::from_be_bytes([a, b]) }
+            if little_endian { u16::from_le_bytes(*pair) } else { u16::from_be_bytes(*pair) }
         })
         .collect();
     let mut out = String::with_capacity(bytes.len() / 2);
-    let mut lossy = !bytes.len().is_multiple_of(2);
+    let mut lossy = !remainder.is_empty();
     for decoded in char::decode_utf16(units) {
         match decoded {
             Ok(c) => out.push(c),
@@ -277,13 +280,14 @@ fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
 }
 
 fn decode_utf32(bytes: &[u8], little_endian: bool) -> (String, bool) {
+    let (chunks, remainder) = bytes.as_chunks::<4>();
     let mut out = String::with_capacity(bytes.len() / 4);
-    let mut lossy = !bytes.len().is_multiple_of(4);
-    for chunk in bytes.chunks_exact(4) {
+    let mut lossy = !remainder.is_empty();
+    for chunk in chunks {
         let value = if little_endian {
-            u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+            u32::from_le_bytes(*chunk)
         } else {
-            u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+            u32::from_be_bytes(*chunk)
         };
         match char::from_u32(value) {
             Some(c) => out.push(c),

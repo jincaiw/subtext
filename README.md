@@ -5,6 +5,8 @@
 
 支持 **macOS / Windows / Linux**，菜单、快捷键、语法定义、主题与 CotEditor 保持一致。
 
+[![CI](https://github.com/jincaiw/subtext/actions/workflows/ci.yml/badge.svg)](https://github.com/jincaiw/subtext/actions/workflows/ci.yml)
+
 ---
 
 ## 它是什么
