@@ -27,3 +27,18 @@ jobs:
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The three crates below the UI do not depend on GPUI, and `cargo check`
+      # does not link — so their platform branches (`cfg(unix)`, `cfg(macos)` and
+      # the fallbacks) can be type-checked for Linux and Windows from a Mac
+      # runner. What this does NOT cover is `subtext-app`: GPUI needs a Linux or
+      # Windows C toolchain to build, which a Mac runner has no way to supply.
+      - name: Install cross targets
+        run: rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+      - name: Check for Linux
+        run: >
+          cargo check --locked --target x86_64-unknown-linux-gnu
+          -p subtext-core -p subtext-syntax -p subtext-theme
+      - name: Check for Windows
+        run: >
+          cargo check --locked --target x86_64-pc-windows-msvc
+          -p subtext-core -p subtext-syntax -p subtext-theme
