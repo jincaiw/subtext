@@ -1221,7 +1221,32 @@ impl Workspace {
     /// Save the active document, asking for a path when it has none or when
     /// Save As was chosen.
     pub fn save(&mut self, as_new_path: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.documents.get(self.active).map(|_| self.active) else {
+        let Some(id) = self.documents.get(self.active).map(|document| document.id) else {
+            return;
+        };
+        self.save_document(id, as_new_path, false, window, cx);
+    }
+
+    /// Save one document by identity, asking for a path when it has none or
+    /// when Save As was chosen.
+    ///
+    /// Identity rather than position because the close flow saves the tab the
+    /// reader asked to close, which is not necessarily the one in front — and
+    /// because the save panel answers after the list may have moved.
+    ///
+    /// `close_after` is upstream's close flow, which continues once the save
+    /// panel answers. It travels *with the write* rather than being parked on
+    /// the workspace: a dismissed panel then leaves nothing behind that could
+    /// close the tab on some later save.
+    fn save_document(
+        &mut self,
+        id: DocumentId,
+        as_new_path: bool,
+        close_after: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.find_document(id) else {
             return;
         };
 
@@ -1241,13 +1266,14 @@ impl Workspace {
             let receiver = cx.prompt_for_new_path(&directory, Some(&name));
             let handle = window.window_handle();
             cx.spawn(async move |this, cx| {
-                let chosen = match receiver.await {
-                    Ok(Ok(Some(path))) => path,
-                    _ => return,
+                // A dismissed panel is a cancelled save: no write, and so no
+                // close either. Nothing is left behind to remember otherwise.
+                let Ok(Ok(Some(path))) = receiver.await else {
+                    return;
                 };
                 let _ = handle.update(cx, move |_, window, cx| {
                     this.update(cx, |workspace, cx| {
-                        workspace.write_to(Some(chosen), window, cx);
+                        workspace.write_document(id, Some(path), close_after, window, cx);
                     })
                     .ok();
                 });
@@ -1256,18 +1282,25 @@ impl Workspace {
             return;
         }
 
-        self.write_to(None, window, cx);
+        self.write_document(id, None, close_after, window, cx);
     }
 
-    /// Write the active document, to `target` when one was chosen.
-    fn write_to(&mut self, target: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.documents.get(self.active).map(|_| self.active) else {
+    /// Write one document, to `target` when one was chosen.
+    fn write_document(
+        &mut self,
+        id: DocumentId,
+        target: Option<PathBuf>,
+        close_after: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.find_document(id) else {
             return;
         };
         let text = self.documents[index].editor().read(cx).value().to_string();
         self.documents[index].document.set_text(text, true);
 
-        match self.documents[index].document.save(target.clone()) {
+        let written = match self.documents[index].document.save(target.clone()) {
             Ok(()) => {
                 if let Some(path) = self.documents[index].document.path() {
                     let path = path.to_path_buf();
@@ -1279,14 +1312,36 @@ impl Workspace {
                 self.documents[index].modified_on_disk = false;
                 let name = self.documents[index].document.display_name();
                 self.set_status(format!("Saved {name}"), cx);
+                true
             }
             Err(subtext_core::DocumentError::LossyEncoding(name)) => {
-                self.ask_lossy_saving(name, target, window, cx);
+                // The alert asks, so the write may yet happen — and with it the
+                // close this save was asked to complete, which is why the
+                // intent is handed to the alert.
+                self.ask_lossy_saving(id, name, target, close_after, window, cx);
+                return;
             }
-            Err(error) => self.set_status(error.to_string(), cx),
+            Err(error) => {
+                self.set_status(error.to_string(), cx);
+                false
+            }
+        };
+        // A save the reader started from the close alert is also the answer to
+        // that alert: upstream closes the window once the write returns. A
+        // failed write closes nothing — the tab stays up with the message.
+        if written && close_after {
+            if let Some(index) = self.find_document(id) {
+                self.close_document_now(index, window, cx);
+            }
+            return;
         }
         let _ = window;
         cx.notify();
+    }
+
+    /// The position of a document by identity.
+    fn find_document(&self, id: DocumentId) -> Option<usize> {
+        self.documents.iter().position(|document| document.id == id)
     }
 
     /// The lossy-save alert — upstream's `DocumentSavingError(code:
@@ -1295,8 +1350,10 @@ impl Workspace {
     /// opens the Warnings inspector without saving; *Cancel* does nothing.
     fn ask_lossy_saving(
         &mut self,
+        id: DocumentId,
         name: &'static str,
         target: Option<PathBuf>,
+        close_after: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1341,12 +1398,19 @@ impl Workspace {
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     save.update(cx, |workspace, cx| {
-                                        if let Some(open) =
-                                            workspace.documents.get_mut(workspace.active)
-                                        {
-                                            open.document.set_allows_lossy_saving(true);
-                                        }
-                                        workspace.write_to(save_target.clone(), window, cx);
+                                        let Some(index) = workspace.find_document(id) else {
+                                            return;
+                                        };
+                                        workspace.documents[index]
+                                            .document
+                                            .set_allows_lossy_saving(true);
+                                        workspace.write_document(
+                                            id,
+                                            save_target.clone(),
+                                            close_after,
+                                            window,
+                                            cx,
+                                        );
                                     })
                                     .ok();
                                     window.close_dialog(cx);
@@ -1473,19 +1537,21 @@ impl Workspace {
             let save_button = Button::new("close-save").label(save_label).on_click(
                 move |_, window, cx| {
                     save.update(cx, |workspace, cx| {
-                        let index = workspace
-                            .documents
-                            .iter()
-                            .position(|document| document.id == id);
-                        let Some(index) = index else { return };
+                        let Some(index) = workspace.find_document(id) else {
+                            return;
+                        };
+                        // The alert's button *is* "save the available text":
+                        // upstream permits lossy saving from here rather than
+                        // asking a second question.
                         workspace.documents[index]
                             .document
                             .set_allows_lossy_saving(true);
-                        workspace.write_to(None, window, cx);
-                        let clean = !workspace.documents[index].document.is_dirty();
-                        if clean {
-                            workspace.close_document_now(index, window, cx);
-                        }
+                        // Save this very document and close it once the write
+                        // returns. An untitled one has no path yet, so the
+                        // panel opens and the close waits for its answer —
+                        // which is the whole reason this is one call rather
+                        // than a save followed by an unrelated close.
+                        workspace.save_document(id, false, true, window, cx);
                     })
                     .ok();
                     window.close_dialog(cx);

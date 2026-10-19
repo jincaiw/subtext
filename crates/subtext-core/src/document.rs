@@ -487,9 +487,22 @@ mod tests {
         assert_eq!(document.display_name(), "Untitled");
     }
 
+    /// The invariant behind a real bug: an untitled document has nowhere to
+    /// write, so `save(None)` refuses instead of inventing a path. A caller
+    /// that means to save one has to supply a path — which is why the close
+    /// alert has to go through the save panel rather than straight to a write.
     #[test]
-    fn external_modification_is_detected() {
-        let path = temp_path("external.txt");
+    fn an_untitled_document_refuses_to_save_without_a_path() {
+        let mut document = Document::untitled(FileEncoding::of(TextEncoding::UTF8), LineEnding::LF);
+        document.set_text("draft", true);
+        assert!(matches!(document.save(None), Err(DocumentError::Write { .. })));
+        // Nothing reached a disk, so the buffer is still unsaved.
+        assert!(document.is_dirty());
+        assert!(document.is_untitled());
+    }
+
+    #[test]
+    fn external_modification_is_detected() {        let path = temp_path("external.txt");
         std::fs::write(&path, "original").unwrap();
         let document = Document::open(&path, TextEncoding::UTF8, &DetectionOptions::defaults()).unwrap();
         assert_eq!(document.file_status(), FileStatus::Unchanged);

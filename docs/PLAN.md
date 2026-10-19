@@ -2538,6 +2538,31 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ---
 
+## 阶段 15 — 关闭流程的保存，与三行说谎的记账
+
+**重估（2026-10-19）**：阶段 14 之后又逐条核对缺口表，抓到两类问题。
+
+1. **一条真 bug**：关闭一个有未保存改动的文档时选 *Save*，对**未命名**文档什么都不写 ——
+   处理器调的是 `write_to(None)`，而 `Document::save(None)` 对没有路径的文档返回
+   `Write { path: "Untitled", "no path" }`，只在状态栏留一句错误。对**有名**文档它会写，
+   但写的是 `self.active` 那一个，而被关闭的标签不一定是前台那个。
+2. **三行假缺口**：自动补全（§11.1 已做，开关也已接上）、*Straighten Quotes* 置灰
+   （§13.5 已做）、大纲 `title` 层级（上游那段 `normalize` 生产代码根本不调用）。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 15.1 | 保存与关闭按**文档身份**走：`save_document(id, as_new_path, close_after)` / `write_document(id, target, close_after)`，`save()` 只是「对前台那个调用它」。关闭弹窗的 *Save* 现在调 `save_document(id, false, true)`：有名文档同步写完即关，未命名文档把 `close_after` 一路带进保存面板的回调，面板给出路径后才写、才关；面板被取消就什么都不发生（意图不落盘、不留状态，所以之后的 ⌘S 不会被「顺手关掉」） | ✅ |
+| 15.2 | lossy 弹窗同样接 `id` 与 `close_after`：*Save Available Text* 写的是那个文档而不是前台那个，写完仍会完成关闭 | ✅ |
+| 15.3 | 缺口表三行假账改真：删两条已做的，`title` 那条改成带证据的「不是缺口」 | ✅ |
+
+**验证**：探针开了两个文件、把前台切到第一个、弄脏第二个，再走 `save_document(id, false, true)`。
+日志 `docs=4 → 3`、`disk="two changed\n"`、`still_open=false` —— 写的是**被关闭的那个**（按位置保存会写错文档），
+写盘与关闭都发生。未命名分支要真的弹系统保存面板，本机无法自动应答，只做了「取消即无动作」的代码路径核对。
+另加一条 core 测试 `an_untitled_document_refuses_to_save_without_a_path`：把一个未命名文档
+交给 `save(None)` 必须被拒绝且仍是脏的 —— 这正是旧代码静默失败的那条不变量。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
@@ -2557,9 +2582,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
 | 警告检查器的表格在窄检查器里横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器。§11.4 之后表格在面板剩余高度内**双向**滚动（不再溢出到下一节），但上游的 SwiftUI `Table` 是压缩并截断列宽。 |
-| 关闭未命名文档时保存不会自动关闭标签 | 上游保存面板确认后继续关闭流程；SubText 的保存面板结果异步到达，标签保持打开，需要再关一次（此时不再询问）。其余关闭语义已与上游一致（阶段 10）。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
-| 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
 | 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
@@ -2569,9 +2592,8 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的（上游的 `.creationDate` 在 APFS 上总有值）。 |
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
-| `Straighten Quotes` 不随选区置灰 | 上游在空选区时禁用它（`validateUserInterfaceItem`，见 §8.9h）；GPUI 的菜单项只有固定 `disabled`，要跟着光标动就得每次选区变化重建 258 项菜单栏。SubText 保持可用、空选区时在状态栏说明，两种情况都不改文本。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
-| 大纲里 `title` 类条目在 `heading` 之后的层级 | 上游 `normalizedLevels` 有一条 `title` 特例：前一个非分隔项是 `heading` 时，`title` 落在它**下一层**（`lastNormalizedLevel + 1`），否则与前一项目同级。SubText 的 `indent_for` 一律给 `Level(0)`。**38 个内置语法里够不到这个分支**：`title` 只出现在 iCalendar（唯一一条规则，前一项也是 `title`）与 SVG（前一个非分隔项是 `value`，其缩进是捕获空白，走 `guard` 分支、不更新 `lastNormalizedLevel`），两者都取不到 `heading` 那一支。只有用户自写的、同时含 `heading` 与 `title` 规则的语法才会碰到。 |
+| ~~大纲里 `title` 类条目在 `heading` 之后的层级~~ | **不是缺口（证据已核）**：`OutlinePolicy.normalizedLevels` 那条 `title` 特例只出现在 `Packages/Syntax/Tests/SyntaxParsersTests/OutlinePolicyTests.swift` 与它自己的定义里，**生产代码没有任何调用点** —— `OutlineInspectorView.rebuildOutline()` 走的是 `OutlineBuildNode.build(from: self.items)`，直接吃提取结果，`title` 就是 `.level(0)`，与 SubText 的 `indent_for` 完全一致。此前把「库里有这段代码」当成了「应用会跑这段代码」。 |
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | 「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁 | 这条规则目前由一个仓库外的手工探针验证（直接 `import generate_menu` 复用选择器→动作名的真规则，再扫 `dispatch` 的字符串字面量）。要变成常设门禁，得先能静态读出 `dispatch` 认领的名字集合——在 Rust 测试里重写那条转换规则就是 8.9g 那次误报的老路。 |
