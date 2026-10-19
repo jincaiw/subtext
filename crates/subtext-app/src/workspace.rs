@@ -4105,8 +4105,7 @@ impl Workspace {
         // The glyph is drawn large, and greyed when it is a *picture* of an
         // invisible control character rather than the character itself —
         // upstream's `textColor = pictureCharacter != nil ? .tertiaryLabelColor
-        // : .labelColor`. It is a serif face upstream; the theme has one
-        // proportional family and no serif, so the interface font is used.
+        // : .labelColor`. The face is the serif one upstream asks AppKit for.
         let glyph = report.picture().map_or_else(
             || (report.character.clone(), false),
             |picture| (picture.to_string(), true),
@@ -4122,6 +4121,7 @@ impl Workspace {
                     .flex_none()
                     .min_w(rems(4.))
                     .text_size(rems(4.))
+                    .font_family(serif_family())
                     .text_color(if glyph.1 {
                         cx.theme().muted_foreground
                     } else {
@@ -7141,6 +7141,28 @@ fn inspector_row(
                 .child(label.into()),
         )
         .child(div().min_w_0().text_xs().truncate().child(value))
+}
+
+/// A serif face for the character the inspector draws large.
+///
+/// Upstream asks AppKit for the system font with `.serif` design, which is
+/// *New York* on macOS. GPUI takes a family name rather than a design, so this
+/// names the face each platform ships: New York where it exists, Georgia on
+/// Windows, DejaVu Serif on the rest. A machine that has none of them falls
+/// back to the interface font — which is what this was before.
+fn serif_family() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "New York"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Georgia"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "DejaVu Serif"
+    }
 }
 
 /// A labelled row whose value wraps instead of truncating.

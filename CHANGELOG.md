@@ -10,6 +10,8 @@
 
 ### 新增
 
+- **Inspect Character 的大字形是衬线体**：与 CotEditor 一样用系统衬线（macOS 的
+  *New York*、Windows 的 Georgia、其它平台的 DejaVu Serif），64pt。
 - ***Find All* 的下拉里可以 *Select All***：一次把所有匹配选中（编辑器的多重选择），
   状态栏报出选了几个。此前那一项是灰的。
 - **检查器里的 code point 有了描边框**：每个码位一个小圆角方框、等宽数字，

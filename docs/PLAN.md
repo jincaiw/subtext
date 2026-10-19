@@ -2542,7 +2542,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
 | 自动补全（*Suggest completions while typing*）未做 | 上游在插入文本后 250ms 防抖，并要求光标前是词字符、词长 ≥ 3、光标后不是字母数字。SubText 只做了 ⌥⎋ 这一半，那个开关在面板里仍是禁用的。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
-| Inspect Character 的大字形不是衬线体 | 上游 `.fontDescriptor.withDesign(.serif)`、64pt。主题只有 `font_family` 与 `mono_font_family`，没有衬线一族，所以用界面字体画那个大字。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
 | 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
