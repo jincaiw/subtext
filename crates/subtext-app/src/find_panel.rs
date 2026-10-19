@@ -1118,11 +1118,18 @@ impl FindPanel {
                                     .ok();
                             }),
                         )
-                        .item(
-                            // Upstream selects every match in one go; SubText's
-                            // editor has no multi-selection to put them in.
-                            PopupMenuItem::new("Select All").disabled(true),
-                        )
+                        .item({
+                            // Upstream's `selectAllMatches`: every match becomes
+                            // a selection, which the editor can hold several of.
+                            let select = menu_workspace.clone();
+                            PopupMenuItem::new("Select All").on_click(move |_, _, cx| {
+                                select
+                                    .update(cx, |workspace, cx| {
+                                        workspace.select_all_find_matches(cx)
+                                    })
+                                    .ok();
+                            })
+                        })
                     }),
             )
             .child(

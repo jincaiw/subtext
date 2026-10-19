@@ -2931,6 +2931,37 @@ impl Workspace {
         self.set_status(label, cx);
     }
 
+    /// `Find All ▸ Select All` — put every match into the editor's selections.
+    ///
+    /// Upstream's `selectAllMatches`: it re-runs the search, assigns every
+    /// matched range as a selection, and reports the count. The editor has
+    /// supported multiple selections all along (`add_selection`); what was
+    /// missing was a command that fills them, which is why this item spent its
+    /// first rounds greyed out.
+    pub fn select_all_find_matches(&mut self, cx: &mut Context<Self>) {
+        self.run_search(cx);
+        let matches = self.find.matches.clone();
+        if matches.is_empty() {
+            self.set_status("No matches", cx);
+            return;
+        }
+        let count = matches.len();
+        let Some(document) = self.active_document() else {
+            return;
+        };
+        let editor = document.editor().clone();
+        editor.update(cx, |state, cx| {
+            // The first one replaces whatever was selected; the rest are added,
+            // which is how the editor models several ranges at once.
+            state.set_selected_range(matches[0].clone(), cx);
+            for range in &matches[1..] {
+                state.add_selection(range.clone(), cx);
+            }
+        });
+        self.note_find_history(cx);
+        self.set_status(format!("{count} match(es) selected"), cx);
+    }
+
     /// Select every match, which is what "Find All" does in CotEditor.
     ///
     /// It is also the only command that fills the result table, and the only

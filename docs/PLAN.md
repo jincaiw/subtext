@@ -2465,7 +2465,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
 | 11.1 | 自动补全 *Suggest completions while typing*：`on_pane_changed` 在缓冲区**变长**时重启 250ms 定时器（`Task` 丢弃即取消 = 上游 `Debouncer`），到点后重跑同一组守卫再开列表；守卫是 core 的 `should_complete_automatically`，按上游 `performCompletion` 的四条（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字），且长度改为量**词**而不是整段前缀（此前把 `a bc` 判成可补全）。接受补全后取消待触发的定时器（上游 `insertCompletion` 不重新装弹），Esc 同样取消。Mode 面板的 *Suggest completions while typing* 开关解除禁用，*Standard words* 补上禁用 + 理由 | ✅ |
-| 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（编辑器无多选，禁用） | ✅ |
+| 11.2 | Find All 按钮的下拉：`DropdownButton`（上游 SwiftUI `Menu(primaryAction:)` 的等价物）——主体点击查找，caret 菜单给 *Highlight All*（`highlight_all`）与 *Select All*（§13.8 起可用：把每个匹配放进编辑器的多重选择） | ✅ |
 | 11.3 | 查找面板记住窗口位置与大小：`Settings.find_panel_frame`（x/y/w/h），`show_find` 新建路径以 `WindowBounds::Windowed` 恢复、激活与 `resize_find_panel` 时记录（上游由 macOS 自动存，SubText 在 workspace 触碰面板的时刻存）。探针实测：存储帧 [700,422,520,222] 重启后 origin/size 逐一恢复 | ✅ |
 | 11.4 | 警告检查器按列排序与窄窗布局：两张表各自记 `sort`（上游两个 `@State sortOrder`，互不影响），点表头同列反向、换列从升序开始；活动列带 ▲/▼；排序是**稳定排序 + 反转**（等于上游的 `KeyPathComparator` 降序，平局也一致），Line 按**数字**比较（`2` 在 `10` 前，字符串比会反）；*Character* 列对不可见类别（控制/空白/行段分隔）显示 `U+XXXX`（上游按 Unicode general category，Rust 侧用 `is_control/is_whitespace` 覆盖同样四类）；点行高亮并选中编辑器（上游 `Table(selection:)`）。**窄窗**：表格改为在面板剩余高度内双向滚动，行不再溢出到下一节 | ✅ |
 | 11.5 | 查找指示器（上游 `showFindIndicator`）：每处编辑器一个 `TextDecorationCollection`，闪一下就是把匹配范围设成 `theme().yellow` α0.55 的**文字背景**（在字形之后，文字保持本色），700 ms 后清掉；每次闪带一个编号，旧计时器不会抹掉新标记。接在上游的四条路径上：查找下一个/上一个、点 *Find All* 结果行（都经 `select_match`）、文件夹查找跳转（`open_and_select`）、Inspect Character（先闪再弹 popover）。**顺带补上增量搜索漏掉的一半**：上游 `find(forward:isIncremental:)` 会选中匹配并闪，SubText 之前只更新计数；现在停止输入 200 ms 后跑一遍（上游 `Task.sleep(0.2)` 去抖）、把光标移到光标处或之后的匹配（`includingSelection`）并在无匹配时按 wrap 设置回到第一个，`find.current` 仍不设（上游增量传 `matchedRange = nil`） | ✅ |
@@ -2515,6 +2515,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 13.5 | 菜单项按状态置灰（*Straighten Quotes*）：`MenuItem` 没有名称访问器，构造后认不出条目，所以由**生成器**把条件烘进去 —— `tools/generate_menu.py` 的 `GATED_ACTIONS` 表把 action 名映射到条件表达式，生成 `app_menus(state: &MenuGates)` 与 `.disabled(state.selection_empty)`。工作区用 `menu_selection_empty` 这一个布尔跟踪，`sync_menu_gates` 每帧只比较、**翻转时才重建菜单栏**（重建会重读脚本目录）。**关键发现**：编辑器只在 `InputEvent` 里报 Change/PressEnter/Focus/Blur，不报选区移动，但它在重绘时会 notify —— 于是 `cx.observe(editor, …)` 能看到光标与选区变化。**踩坑**：observe 是在我们**正在更新**编辑器时同步触发的，直接 `weak.update` 会撞 GPUI 的重入保护（探针一跑就 panic）；改成「排队 + 合并」（`cx.defer` + `Rc<Cell<bool>>`），一串重绘只比较一次。静态契约测试锁住「生成表里恰好一处按状态置灰、且是这条命令、且测的是工作区维护的字段」，注入验证过会红。**未做**：大纲导航两项的置灰 —— 它要判断「大纲有没有条目」，而每次 refresh 都解析一遍缓冲区不划算 | ✅（一条） |
 | 13.6 | 查找指示器淡出：文字装饰不能逐帧动画（编辑器按状态重绘、不按时钟），所以做成**分步**淡出 —— `paint_find_indicator(range, factor)` 在 1 / 0.75 / 0.5 / 0.25 / 0 五档上重设同一个装饰，每档 175 ms，总时长仍是 700 ms（与原来「亮 700ms 后消失」一致）；每次闪仍带编号，旧计时器不会把新标记淡掉。探针把每档 factor 打到 stderr，实测序列 `1 → 0.75 → 0.5 → 0.25 → 0` | ✅ |
 | 13.7 | 高级计数的胶囊可拖动：上游 `DraggableHostingView` 让读者把它拖到正文任何位置。胶囊锚在**右上角**，所以拖动的两个轴方向相反（右移减小右内边距、下移增大上偏移），算术抽成纯函数 `drag_capsule_offset` 并测试；位移按**指针在窗口里的前后位置差**累加，不做坐标系换算。停止计数后回到默认角落（上游也是新建一颗）。未做：拖出窗口边缘（上游可拖到窗口边），现由编辑区裁剪 | ✅ |
+| 13.8 | `Find All ▸ Select All`：上游 `selectAllMatches` 把每个匹配范围赋给 `selectedRanges`。编辑器的 `add_selection` 一直存在，缺的只是填它的命令 —— 现在 `select_all_find_matches` 先重跑搜索，再把第一个匹配设为选区、其余逐个 *添加*，状态栏报 `N match(es) selected`，并把查询记入历史（与上游一致）。下拉里那项从禁用改为可点 | ✅ |
 
 ---
 
@@ -2532,7 +2533,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
-| `Find All` 没有下拉 | 上游是「点击即查找、下拉给 *Highlight All* / *Select All*」的菜单；SubText 的编辑器没有多选，所以按钮是单动作的。 |
 | 正则速查弹层在窗口内限高滚动 | 上游的 `detachablePopover` 可以拖出窗口自由悬浮，内容完整展开；GPUI 的 overlay 无法离开窗口，弹层限高 9rem 内容滚动（§8.26）。上游尾部还有指向本地帮助的 HelpLink（`about_regex` 锚点），SubText 没有帮助系统，省略。 |
 | 高级选项的四个开关在 SubText 里是禁用的 | 上游 *Distinguish characters strictly* / *Ignore diacritical marks* / *Ignore width differences* / *Use Unicode word boundaries*（TR#29）需要 ICU 的对应能力，regex 引擎没有；开关照列、禁用 + tooltip 说明（§8.26b）。 |
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
