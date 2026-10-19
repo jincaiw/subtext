@@ -1,0 +1,25 @@
+name: CI
+
+# The gates the project holds itself to are `cargo test --workspace` and a clean
+# clippy; this runs exactly those, on the one platform the build has been
+# verified on. Linux and Windows are deliberately absent rather than red: GPUI's
+# platform backends have not been exercised here, and a workflow that fails on
+# push teaches people to ignore it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # `--locked` keeps CI on the versions the lockfile pins, so a released
+      # combination is the one that gets tested.
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings

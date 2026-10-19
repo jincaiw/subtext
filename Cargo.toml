@@ -12,7 +12,7 @@ default-members = ["crates/subtext-app"]
 version = "0.3.3"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/local/subtext"
+repository = "https://github.com/jincaiw/subtext"
 description = "SubText — a cross-platform plain text editor, a faithful reimplementation of CotEditor on GPUI."
 
 [workspace.dependencies]
