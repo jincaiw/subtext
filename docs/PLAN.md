@@ -1852,7 +1852,7 @@ Character       Code Point(s) · Name · Block · Category
 | ~~没有 `Tags` 行~~ | **§11.7 关掉了**：`getxattr` 读扩展属性 + 自带的 bplist 读取器，`Tags` 行已画。非 macOS 上属性不存在，行显示 `–`（与「没有打标签」同形）。 |
 | `Words` 与 ICU 不同 | 见上。规则内的用例全对，差别只在「词之间不写空格」的文字。 |
 | `Full Path` 是尾部截断 | 上游 `truncationMode(.middle)` 截中间，还带 `help` tooltip 且文本可选。GPUI 只有尾部截断，`div` 没有 tooltip，`div` 也不可选。 |
-| code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle.strokeBorder` 的方框里；SubText 用空格连起来。 |
+| ~~code point 没有描边框~~ | **已做**：每个码位一个 3.5pt 圆角描边方框（`inspector_wrapping_row` + 等宽字体），多标量自动换行。 |
 | 四段没有展开动画 | 上游的 `DisclosureGroup` 带 SwiftUI 的默认动画。`Accordion` 的 item 用 `spring` + `MotionReveal` 动画，但它的 chevron 在**后**、标签样式也不对，所以这一轮用的是同一套基元里无样式的那一个（`AccordionTrigger`），动画一并舍去。 |
 | 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的。 |
 | 检查器的宽度是固定的 | 上游 `inspectorViewItem.minimumThickness = 200`，SubText 是 12–26 rem 可拖。§8.13 已记账。 |
@@ -2547,7 +2547,6 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
 | 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
-| 检查器的 code point 没有描边框 | 上游把每个 code point 放进 `RoundedRectangle(cornerRadius: 3.5).strokeBorder` 的方框里；SubText 用空格连成一串。 |
 | 检查器的四段没有展开动画 | 上游 `DisclosureGroup` 带 SwiftUI 的默认展开动画。组件库的 `Accordion` 用 `spring` + `MotionReveal` 做动画，但它的 chevron 在**后**、标签样式也不是上游那一套；这一轮用的是同一套基元里无样式的那一个（`AccordionTrigger`），动画一并舍去。 |
 | 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的（上游的 `.creationDate` 在 APFS 上总有值）。 |
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |

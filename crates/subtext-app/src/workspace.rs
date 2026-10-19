@@ -5521,7 +5521,23 @@ impl Workspace {
                 // plural — upstream asks `scalars.count == 1` for the same two
                 // strings.
                 let label = if character.is_single_scalar() { "Code Point" } else { "Code Points" };
-                rows = rows.child(inspector_row(label, character.code_points().join(" "), cx));
+                // Upstream draws each code point in a rounded box: monospaced
+                // digits, two points of horizontal padding, and a
+                // `RoundedRectangle(cornerRadius: 3.5).strokeBorder(.tertiary)`
+                // around it. A selection of several scalars wraps.
+                let mut chips = h_flex().flex_wrap().justify_end().gap_x(px(2.)).gap_y_1();
+                for point in character.code_points() {
+                    chips = chips.child(
+                        div()
+                            .px(px(2.))
+                            .rounded(px(3.5))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .child(point.to_string()),
+                    );
+                }
+                rows = rows.child(inspector_wrapping_row(label, chips, cx));
                 if character.is_single_scalar() {
                     let scalar = &character.scalars[0];
                     rows = rows
@@ -7094,6 +7110,32 @@ fn inspector_row(
                 .child(label.into()),
         )
         .child(div().min_w_0().text_xs().truncate().child(value))
+}
+
+/// A labelled row whose value wraps instead of truncating.
+///
+/// The inspector's rows are one line each, which is what the File and Count
+/// sections want. The code points are a row of chips that has to break when the
+/// selection has more scalars than fit — upstream puts them in a
+/// `WrappingHStack`, so this is the same shape without the truncation.
+fn inspector_wrapping_row(
+    label: impl Into<SharedString>,
+    value: impl IntoElement,
+    cx: &App,
+) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .items_start()
+        .justify_between()
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.into()),
+        )
+        .child(div().min_w_0().text_xs().child(value))
 }
 
 /// The File section's *Tags* row.
