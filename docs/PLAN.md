@@ -899,7 +899,8 @@ GPUI 的菜单 API 既没有「隐藏项」也没有修饰键状态，所以 6 �
   菜单的「5 项 + 分隔符 + 2 项」直接由这三个常量铺出来，不是硬编码。
 - 每个形态带 `name()`（菜单标签）、`identifier()`（动作载荷）、`from_identifier()`、
   `is_supported()`。
-- **后 3 种（NFKC Case-Fold / Modified NFD / Modified NFC）本构建做不了**，如实标注：
+- **后 3 种（NFKC Case-Fold / Modified NFD / Modified NFC）当时本构建做不了**，如实标注
+  （§11.8 做出了两个 HFS+ 形态，NFKC Case-Fold 由 §16 补上，七个现在全部可用）：
   - `nfkcCaseFold` = 去默认可忽略码点 → NFKC → 全量 case fold → NFC → 再去。
     「默认可忽略码点」是 `Default_Ignorable_Code_Point` 属性，「全量 case fold」是
     `CaseFolding.txt`（`ß → ss` 这种，不是 `str::to_lowercase`）。`unicode-normalization`
@@ -2080,7 +2081,7 @@ SubText 原来调用的是自己写的 `textops::surround_lines` —— 「把�
 
 | 偏差 | 说明 |
 | --- | --- |
-| 规范化菜单只有 4 项，上游 7 项 | NFKC Case-Fold 与两个 HFS+ 形态是 SubText 没有的 Unicode 数据，`normalize` 对它们是**拒绝而不是近似**。列出来会得到一个静默错误的计数，所以不列。Text ▸ Unicode Normalizations **菜单**仍然列全 7 项并说明那三项为什么不可用。 |
+| ~~规范化菜单只有 4 项，上游 7 项~~ | **§16 关掉了**：case fold 表与 `Default_Ignorable_Code_Point` 由 `tools/generate_unicode_tables.swift` 从 Foundation 生成，七种形态全部可用，计数面板与菜单都列全七项。 |
 | ~~胶囊不能拖动~~ | **§13.7 关掉了**：拖动已做（纯函数 `drag_capsule_offset` + 指针位置差累加）；拖到窗口外仍未做，现由编辑区裁剪。 |
 | 没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 
@@ -2471,7 +2472,7 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 | 11.5 | 查找指示器（上游 `showFindIndicator`）：每处编辑器一个 `TextDecorationCollection`，闪一下就是把匹配范围设成 `theme().yellow` α0.55 的**文字背景**（在字形之后，文字保持本色），700 ms 后清掉；每次闪带一个编号，旧计时器不会抹掉新标记。接在上游的四条路径上：查找下一个/上一个、点 *Find All* 结果行（都经 `select_match`）、文件夹查找跳转（`open_and_select`）、Inspect Character（先闪再弹 popover）。**顺带补上增量搜索漏掉的一半**：上游 `find(forward:isIncremental:)` 会选中匹配并闪，SubText 之前只更新计数；现在停止输入 200 ms 后跑一遍（上游 `Task.sleep(0.2)` 去抖）、把光标移到光标处或之后的匹配（`includingSelection`）并在无匹配时按 wrap 设置回到第一个，`find.current` 仍不设（上游增量传 `matchedRange = nil`） | ✅ |
 | 11.6 | **命令覆盖门禁**（`menu_contract.rs`，随 `cargo test` 常设）：把三段链条读成文本并两两比对 —— 生成表点名的 action ⊆ bridge 的绑定表 ⊆ dispatch 的分支名。四条断言：① 解析器读到的东西有下限（解析器改形态时**响亮失败**而不是空差分）② 每个菜单 action 都有绑定 ③ 每个绑定名都有分支 ④ 只作例外的清单**不得变成化石**（第一次运行它就判定我为引擎命令写的例外表是多余的 —— 那些名字在 dispatch 里确有分支）。注入验证两向：改掉一个分支名 ⇒ ③ 红；删一条绑定 ⇒ ② 红。**置灰这半未做**：GPUI 的 `MenuItem::Action` 字段私有、也没有 action 访问器，构造后的条目无法按命令定位，`disabled(bool)` 只能在构造时给 —— 要按选区状态置灰，只能让生成表接收状态（改生成器），属设计决定，见缺口表 | ✅ |
 | 11.7 | 文档检查器 `Tags` 行：core 新增 `FinderTag` / `FinderColor` 与 `parse_finder_tags` —— 读 `com.apple.metadata:_kMDItemUserTags` 扩展属性（`getxattr` 两次：先问长度再取值），值是 **binary plist** 的字符串数组，每条 `"名字"` 或 `"名字\n颜色序号"`；自带一个只认「根为字符串数组」的 bplist 读取器（`bplist00` 头 + trailer 四个数 + 偏移表 + `0x5n`/`0x6n` 两种字符串），**不加依赖**。颜色序号 1..7 对应灰绿紫蓝黄红橙，越界一律无色（上游同）。UI：File 段在 Size 与 Permissions 之间，右侧右对齐**可换行**的「圆点 + 名字」，圆点 = 82% 不透明填充 + 同色描边，无色标签画空心圈；无标签画 tertiary 色的 `–`（上游 `Text.none`）。标签颜色是 Finder 调色板而非主题色，记为第 4 处颜色字面量例外 | ✅ |
-| 11.8 | Unicode 规范化的 Apple 形态：**Modified NFD** 与 **Modified NFC** 已做 —— 前者 = 逐字符 NFD **但跳过** HFS+ 保留原样的三段（U+2000–2FFF / U+F900–FAFF / U+2F800–2FA1F），再规范排序；后者 = 上游 `precomposedStringWithHFSPlusMapping` 的规则本身：把「非 Full_Composition_Exclusion」的**极大连续段**各做一次 NFC，排除字符原样穿过。两个算法都先用 swift 探针实测 `CFStringGetFileSystemRepresentation` 与上游那段正则的输出来对齐（Ω/K/Å/CJK 兼容汉字不分解、排除字符是屏障、`a U+0301 U+0316` 要重排）。`Full_Composition_Exclusion` 不查表而是**推**：无分解 → 不算；单例分解 / 首字符非起始符 / 分解后组合不回自己 → 算。**NFKC Case-Fold 仍拒做**：全量 case fold 是 `CaseFolding.txt` 那张表，`to_lowercase` 是另一个映射（`ß` 不会变成 `ss`） | ✅（2/3） |
+| 11.8 | Unicode 规范化的 Apple 形态：**Modified NFD** 与 **Modified NFC** 已做 —— 前者 = 逐字符 NFD **但跳过** HFS+ 保留原样的三段（U+2000–2FFF / U+F900–FAFF / U+2F800–2FA1F），再规范排序；后者 = 上游 `precomposedStringWithHFSPlusMapping` 的规则本身：把「非 Full_Composition_Exclusion」的**极大连续段**各做一次 NFC，排除字符原样穿过。两个算法都先用 swift 探针实测 `CFStringGetFileSystemRepresentation` 与上游那段正则的输出来对齐（Ω/K/Å/CJK 兼容汉字不分解、排除字符是屏障、`a U+0301 U+0316` 要重排）。`Full_Composition_Exclusion` 不查表而是**推**：无分解 → 不算；单例分解 / 首字符非起始符 / 分解后组合不回自己 → 算。**NFKC Case-Fold 当时拒做**（全量 case fold 是 `CaseFolding.txt` 那张表，`to_lowercase` 是另一个映射 —— `ß` 不会变成 `ss`）；**§16 用生成的表补上了** | ✅（3/3） |
 | 11.9 | 补全候选列表虚拟化与 IME 合成态：**两项都判定不做，调查结论入账（工作树无残留）**。IME：编辑器内部确有 `ime_marked_range`，但字段是 `pub(super)`、没有任何访问器，`InputEvent` 也只有 `Change` / `PressEnter` / `Focus` / `Blur` —— 应用侧无从询问是否正在拼字。虚拟化：改用 `uniform_list` 后，它按首个条目的**测量高度**布局，而在弹窗里测到的是内边距高度（4px、内容高度 0），行全部重叠；显式给行 `.h(1.25rem)` 与让内容自然测量两版都试过，表现相同，已回退到原来的普通列。共享前缀的候选通常只有几十条，不值得为它改造布局 | 不做（记账） |
 
 ---
@@ -2565,12 +2566,43 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
 
 ---
 
+## 阶段 16 — 第七种规范化形态（NFKC Case-Fold）
+
+上游的 `Text ▸ Unicode Normalizations` 有七项，SubText 的菜单也列七项，但最后一项
+自 §11.8 起是**空壳**：点了只在状态栏说明「需要 CaseFolding.txt」。这一阶段把它做实。
+
+**数据从哪来。** 全量 case fold 是表不是算法（`ß → ss`，`to_lowercase` 给的是 `ß`），
+`Default_Ignorable_Code_Point` 是属性表。两者 Foundation 都有，而 Foundation 正是上游用的那一个：
+`tools/generate_unicode_tables.swift` 现在额外产出
+
+- `CASE_FOLD`：**1552 条**，逐标量测 `String.folding(options: .caseInsensitive)`（0.4 s）；
+- `DEFAULT_IGNORABLE`：**17 段**，逐标量测 `\p{Default_Ignorable_Code_Point}`（0.5 s）。
+
+**算法照上游的步骤，一步不省**：去默认可忽略 → NFKC → case fold → NFC → 再去。
+两次去除不是冗余：NFKC 会把藏在一个簇里的默认可忽略码点组合出来。
+
+**一个必须踩到的坑**：`\p{Default_Ignorable_Code_Point}` 的**默认语义按字素簇匹配**，
+而 ZWJ 会粘在前一个字符上 —— 于是 `a ZWJ b` 里的 ZWJ 不会被删。上游写的是
+`.matchingSemantics(.unicodeScalar)`，这里也必须按标量删，否则 emoji 序列会与上游不一致。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 16.1 | 生成器补两张表，重新生成 `unicode_tables.rs`（1903 → 3539 行），带 run 顺序与折叠表严格递增的自检 | ✅ |
+| 16.2 | core 实现 `nfkc_case_fold`（`normalize` 的一个分支），删掉 `Normalization::is_supported` 与两处调用点 —— 没有「列了但不能用」的形态了 | ✅ |
+| 16.3 | `tools/generate_nfkc_fixture.swift` + `tests/fixtures/nfkc-case-fold.tsv`（401 条，输入是十六进制码点，期望值由 Foundation 算出），测试逐行比对；工具可重复运行，重跑后文件逐字节相同 | ✅ |
+| 16.4 | 计数面板的形态列表去掉过滤，模块文档里那段「只列四项」的过时说明改写 | ✅ |
+
+**验证**：400 条随机语料（折叠对、兼容字符、默认可忽略、组合符号、谚文字母、emoji）
+与 Foundation 逐条一致；应用侧探针走完整链路
+`Straße ﬁ ① ＡＢＣ a<U+00AD>b` → `strasse fi 1 abc ab`。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
 | `cargo fmt` 未接入 | 全仓 20+ 个文件与 rustfmt 默认风格不一致（`actions!` 等宏调用的换行方式无法用 `rustfmt.toml` 对齐）。`menu.rs` / `keymap.rs` 是生成文件，要接入 fmt 得先让 `tools/generate_menu.py` 输出 rustfmt-clean 的代码（`actions.rs` 只被生成器**读取**，不写入）。当前门禁是 **clippy 零警告 + 测试全绿**，不含 fmt。 |
-| Unicode 规范化的 NFKC Case-Fold | 七种形态里只剩这一种没做：它要 `Default_Ignorable_Code_Point`（可推）与**全量 case fold 表**（`CaseFolding.txt`，约 1.5k 条），`unicode-normalization` 0.1.25 不带这张表。菜单照列、触发时在状态栏说明为什么不做，不拿 `to_lowercase` 糊弄（`ß` 折成 `ss`、小写仍是 `ß`）。两个 HFS+ 形态已在 §11.8 做完。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **38 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；以及 Unicode (UTF-16)/(UTF-32)）。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 缺 `Unicode (UTF-16)` 与 `Unicode (UTF-32)` 两条菜单项 | 上游这两条的意思是「让 BOM 决定字节序」，写出时用哪个字节序由 Foundation 决定（跟平台原生字节序，不跨平台可复现）。SubText 的 `FileEncoding` 把字节序做成显式的（`utf-16le` / `utf-16be`），`Bom` 是文件的属性。要补这两条，先得给 `FileEncoding` 一个「未指定字节序」态并定义写出规则，是一个独立改动，不在 §8.9f 里猜。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |

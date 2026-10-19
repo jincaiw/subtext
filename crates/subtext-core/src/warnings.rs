@@ -263,3 +263,31 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod debug_probe {
+    use super::*;
+
+    #[test]
+    fn print_converted() {
+        for id in ["shift_jis", "windows-1252", "us-ascii", "euc-jp"] {
+            let encoding = TextEncoding::from_identifier(id).unwrap();
+            for text in ["👾", "あ", "é", "€"] {
+                let found = incompatible_characters(text, encoding);
+                println!("{id} {text:?} -> {:?}", found.iter().map(|f| f.converted.clone()).collect::<Vec<_>>());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod debug_list {
+    use crate::encoding;
+
+    #[test]
+    fn print_available() {
+        for e in encoding::AVAILABLE.iter() {
+            println!("ENC\t{}\t{}", e.name, e.identifier());
+        }
+    }
+}

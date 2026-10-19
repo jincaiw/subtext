@@ -23,13 +23,11 @@
 //!
 //! # Deliberate differences
 //!
-//! *The normalization menu lists four forms, not seven.* Upstream offers
-//! `standardForms` + `modifiedForms`; three of those seven — NFKC Case-Fold and
-//! the two HFS+ forms — are Unicode data SubText does not carry, and its
-//! `normalize` refuses rather than approximates them. A form that silently does
-//! nothing would make the count quietly wrong, so they are not offered here.
-//! The Text ▸ Unicode Normalizations *menu* still lists all seven and says why
-//! the three are unavailable; see the gap table in `docs/PLAN.md`.
+//! *The normalization menu offers all seven forms.* Upstream splits them into
+//! `standardForms` and `modifiedForms`, and so does this menu — five, a
+//! separator, two. NFKC Case-Fold used to be withheld because its case-fold
+//! table was missing; the table is generated from Foundation now (see
+//! `subtext_core::unicode_tables`), so every form listed is a form applied.
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IndexPath, Sizable as _, Size, WindowExt as _,
@@ -195,9 +193,9 @@ fn units() -> OptionsDelegate {
     SearchableVec::new(unit_labels())
 }
 
-/// The normalization forms this build can actually apply, in upstream's order.
+/// The normalization forms, in upstream's order.
 fn normalization_labels() -> Vec<&'static str> {
-    Normalization::ALL.iter().filter(|form| form.is_supported()).map(|form| form.name()).collect()
+    Normalization::ALL.iter().map(|form| form.name()).collect()
 }
 
 fn normalizations() -> OptionsDelegate {
@@ -487,16 +485,24 @@ mod tests {
     }
 
     #[test]
-    fn the_normalization_menu_offers_only_the_forms_this_build_can_apply() {
-        // One of upstream's seven is Unicode data SubText does not carry —
-        // case folding — and `normalize` refuses it rather than approximating:
-        // offering it would make the count quietly wrong.
+    fn the_normalization_menu_offers_every_form_upstream_lists() {
+        // All seven, in upstream's order — the five standard forms and the two
+        // modified ones. NFKC Case-Fold used to be left out because the case
+        // fold table was missing; the table is generated now, so there is
+        // nothing left to leave out.
         let labels = normalization_labels();
-        assert_eq!(labels.len(), 6);
-        assert!(labels.contains(&"NFC"));
-        assert!(labels.contains(&"Modified NFD"));
-        assert!(labels.contains(&"Modified NFC"));
-        assert!(!labels.contains(&"NFKC Case-Fold"));
+        assert_eq!(
+            labels,
+            [
+                "NFD",
+                "NFC",
+                "NFKD",
+                "NFKC",
+                "NFKC Case-Fold",
+                "Modified NFD",
+                "Modified NFC",
+            ]
+        );
     }
 
     #[test]

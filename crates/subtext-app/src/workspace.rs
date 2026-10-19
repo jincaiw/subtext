@@ -1669,31 +1669,12 @@ impl Workspace {
     // ---- text operations -------------------------------------------------
 
     /// Text ▸ Unicode Normalizations, for the form the menu named.
-    ///
-    /// Three of upstream's seven forms come from Apple's own Unicode tables,
-    /// which SubText does not carry — see
-    /// [`Normalization`](subtext_core::Normalization). The menu lists them
-    /// anyway, because a form that exists upstream and is missing here is worth
-    /// naming; what it must not do is look like it worked.
     pub fn normalize_unicode(
         &mut self,
         form: Normalization,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !form.is_supported() {
-            // Only NFKC Case-Fold is left, and its reason is specific: full
-            // case folding is a table (`CaseFolding.txt`), not an algorithm —
-            // lower-casing `ß` gives `ß`, folding it gives `ss`.
-            let reason = match form {
-                textops::Normalization::NfkcCaseFold => {
-                    "case folding needs Unicode's CaseFolding.txt, which SubText does not carry"
-                }
-                _ => "that form needs a Unicode table SubText does not carry",
-            };
-            self.set_status(format!("{}: {reason}", form.name()), cx);
-            return;
-        }
         self.text_op(window, cx, move |text, selection, _| {
             textops::normalize(text, selection, form)
         });

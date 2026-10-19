@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use crate::line_ending::line_ending_at;
+use crate::unicode_tables;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1228,15 +1229,16 @@ pub fn url_decode(text: &str, selection: &Range<usize>) -> Edit {
 /// * `NfkcCaseFold` is NFKC with a full case fold, and with the
 ///   default-ignorable code points taken out before and after — upstream calls
 ///   `removingDefaultIgnorableCodePoints`, which is a regular expression over
-///   the `Default_Ignorable_Code_Point` property.
+///   the `Default_Ignorable_Code_Point` property. Both pieces are Unicode data,
+///   so [`unicode_tables`] carries them: the fold table and the property are
+///   generated from Foundation, which is where upstream gets them.
 /// * `ModifiedNfd` / `ModifiedNfc` are the forms HFS+ used. They are not
 ///   normalization forms at all: they are Apple's frozen tables, and the only
 ///   way to produce them is `CFStringGetFileSystemRepresentation` and the
 ///   composition-exclusion set behind `precomposedStringWithHFSPlusMapping`.
 ///
-/// Both halves of that are Unicode data SubText does not carry, so
-/// [`is_supported`](Self::is_supported) answers for the last three — see the
-/// note on [`normalize`].
+/// All seven are applied. Upstream lists five under *Standard Forms* and two
+/// under *Modified Forms*; so does the menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Normalization {
     /// Canonical decomposition.
@@ -1311,17 +1313,6 @@ impl Normalization {
         Self::ALL
             .into_iter()
             .find(|form| form.identifier() == identifier)
-    }
-
-    /// Whether this build can actually apply the form.
-    ///
-    /// False for NFKC Case-Fold alone: full case folding is a table
-    /// (`CaseFolding.txt`) SubText does not carry, and `char::to_lowercase` is a
-    /// *different* mapping — it leaves `ß` as `ß` where folding turns it into
-    /// `ss`. Reporting a form we cannot apply is better than applying a
-    /// near-miss the user cannot tell from the real thing.
-    pub fn is_supported(self) -> bool {
-        !matches!(self, Normalization::NfkcCaseFold)
     }
 }
 
@@ -1453,11 +1444,10 @@ fn is_full_composition_exclusion(character: char) -> bool {
 
 /// Apply `form` to the selection.
 ///
-/// A form [`is_supported`](Normalization::is_supported) says no to leaves the
-/// selection exactly as it found it — the caller is expected to have asked, and
-/// to have said why in the status bar if the answer was no. Doing something
-/// *close* instead would be worse than doing nothing: a half-normalized document
-/// is one the user cannot tell from a normalized one.
+/// Every one of upstream's seven forms is applied. An earlier revision refused
+/// NFKC Case-Fold because full case folding is a table rather than an
+/// algorithm; the table is now generated (see [`unicode_tables`]), so there is
+/// nothing left to refuse.
 pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> Edit {
     let (start, end) = (selection.start.min(text.len()), selection.end.min(text.len()));
     let start = floor_char_boundary(text, start);
@@ -1471,16 +1461,56 @@ pub fn normalize(text: &str, selection: &Range<usize>, form: Normalization) -> E
         Normalization::Nfc => selected.nfc().collect(),
         Normalization::Nfkd => selected.nfkd().collect(),
         Normalization::Nfkc => selected.nfkc().collect(),
+        Normalization::NfkcCaseFold => nfkc_case_fold(selected),
         Normalization::ModifiedNfd => modified_nfd(selected),
         Normalization::ModifiedNfc => modified_nfc(selected),
-        // See the note above: not a fallback, a refusal.
-        Normalization::NfkcCaseFold => selected.to_string(),
     };
     let mut out = String::with_capacity(text.len() + replaced.len());
     out.push_str(&text[..start]);
     out.push_str(&replaced);
     out.push_str(&text[end..]);
     Edit { text: out, selection: start..start + replaced.len() }
+}
+
+/// NFKC Case-Fold — upstream's `precomposedStringWithCompatibilityMappingWithCaseFold`.
+///
+/// The sequence is upstream's, step for step:
+///
+/// ```text
+/// remove default-ignorables
+/// NFKC
+/// case fold
+/// NFC
+/// remove default-ignorables
+/// ```
+///
+/// The removal happens on both sides because composition moves things around:
+/// NFKC can pull a default-ignorable out of a cluster it was hiding in, and the
+/// fold itself can produce one. Doing it once would leave a document that is
+/// normalized by one implementation and not by the other.
+///
+/// The case fold is the **full** mapping, not lower-casing: `ß` folds to `ss`,
+/// `ς` to `σ`, `İ` to `i` plus a combining dot. That distinction is why this
+/// form needed a table at all.
+fn nfkc_case_fold(text: &str) -> String {
+    let stripped = remove_default_ignorable(text);
+    let compatible: String = stripped.nfkc().collect();
+    let mut folded = String::with_capacity(compatible.len());
+    for character in compatible.chars() {
+        match unicode_tables::case_fold(character as u32) {
+            Some(fold) => folded.push_str(fold),
+            None => folded.push(character),
+        }
+    }
+    let composed: String = folded.nfc().collect();
+    remove_default_ignorable(&composed)
+}
+
+/// Drop the default-ignorable code points, as upstream's regular expression does.
+fn remove_default_ignorable(text: &str) -> String {
+    text.chars()
+        .filter(|character| !unicode_tables::is_default_ignorable(*character as u32))
+        .collect()
 }
 
 // ---- enclosing symbols --------------------------------------------------
@@ -2405,33 +2435,101 @@ mod tests {
         assert_eq!(Normalization::from_identifier("nfkccf"), None);
     }
 
-    /// Every form but NFKC Case-Fold is applied; that one is refused rather
-    /// than approximated, because full case folding is a table this build does
-    /// not carry and a near-miss would be invisible in the result.
+    /// NFKC Case-Fold, which is the one that needed a table: full case folding
+    /// is `CaseFolding.txt`, and lower-casing is a different mapping — `ß`
+    /// stays `ß` where folding makes it `ss`.
     #[test]
-    fn only_the_case_fold_form_is_refused() {
-        let supported: Vec<Normalization> = Normalization::ALL
-            .into_iter()
-            .filter(|form| form.is_supported())
-            .collect();
-        assert_eq!(
-            supported,
-            [
-                Normalization::Nfd,
-                Normalization::Nfc,
-                Normalization::Nfkd,
-                Normalization::Nfkc,
-                Normalization::ModifiedNfd,
-                Normalization::ModifiedNfc,
-            ]
-        );
+    fn the_case_fold_form_folds_instead_of_lowercasing() {
+        let fold = |text: &str| normalize(text, &(0..text.len()), Normalization::NfkcCaseFold).text;
 
-        // `ß` is the case this hangs on: folding turns it into `ss`, while
-        // lower-casing leaves it alone — so an approximation would show up
-        // here as text that changed when it should not have.
-        let text = "ß";
-        let edit = normalize(text, &(0..text.len()), Normalization::NfkcCaseFold);
-        assert_eq!(edit.text, text);
+        // The three cases lower-casing gets wrong.
+        assert_eq!(fold("ß"), "ss");
+        assert_eq!(fold("ẞ"), "ss");
+        assert_eq!(fold("ς"), "σ");
+        // `İ` folds to `i` plus a combining dot, which is not `i`.
+        assert_eq!(fold("İ"), "i\u{307}");
+
+        // NFKC's half: compatibility characters become their composed forms.
+        assert_eq!(fold("ﬁ"), "fi");
+        assert_eq!(fold("①"), "1");
+        assert_eq!(fold("ＡＢＣ"), "abc");
+
+        // Default-ignorables go, before and after — a soft hyphen, a zero-width
+        // joiner and a byte-order mark leave nothing behind.
+        assert_eq!(fold("a\u{AD}b\u{200D}c\u{FEFF}d"), "abcd");
+        // …and one that is hiding inside a compatibility composition still goes.
+        assert_eq!(fold("\u{212B}\u{FEFF}"), "å");
+
+        // Ordinary text is only folded, not otherwise touched.
+        assert_eq!(fold("Hello, World!"), "hello, world!");
+        assert_eq!(fold(""), "");
+    }
+
+    /// The whole form against the implementation it is measured from:
+    /// Foundation's `precomposedStringWithCompatibilityMappingWithCaseFold`,
+    /// which is what CotEditor calls. Each expected value was produced by
+    /// running that method — not by reading a table.
+    #[test]
+    fn the_case_fold_form_matches_foundation() {
+        let fold = |text: &str| normalize(text, &(0..text.len()), Normalization::NfkcCaseFold).text;
+        assert_eq!(fold("Ｈｅｌｌｏ　Ｗｏｒｌｄ"), "hello world");
+        assert_eq!(fold("Straße"), "strasse");
+        assert_eq!(fold("ΣΊΣΥΦΟΣ"), "σίσυφοσ");
+        assert_eq!(fold("İstanbul"), "i\u{307}stanbul");
+        assert_eq!(fold("ℌ𝔢𝔩𝔩𝔬"), "hello");
+        assert_eq!(fold("㍿"), "株式会社");
+        assert_eq!(fold("ǅ"), "dž");
+        assert_eq!(fold("ẛ"), "ṡ");
+    }
+
+    /// The same form against Foundation, row by row.
+    ///
+    /// The fixture's second column was produced by running
+    /// `precomposedStringWithCompatibilityMappingWithCaseFold` — the method
+    /// upstream calls — over the first column;
+    /// `tools/generate_nfkc_fixture.swift` re-measures it. This test is what
+    /// keeps the two implementations honest between those runs, and it is the
+    /// reason the hand-written cases above can be short.
+    #[test]
+    fn the_case_fold_form_matches_the_measured_fixture() {
+        let fixture = include_str!("../tests/fixtures/nfkc-case-fold.tsv");
+        let mut checked = 0;
+        let mut failures = Vec::new();
+        for line in fixture.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (input, want) = line.split_once('\t').expect("two columns");
+            let got = points_of(&nfkc_case_fold(&text_of(input)));
+            if got != want {
+                failures.push(format!("in={input:?}\n  want={want:?}\n  got ={got:?}"));
+            }
+            checked += 1;
+        }
+        assert!(checked > 300, "the fixture looks truncated: {checked} rows");
+        assert!(
+            failures.is_empty(),
+            "{} of {checked} rows differ from Foundation:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+    /// The corpus's two encodings: space-separated hex code points, and back.
+    fn text_of(points: &str) -> String {
+        points
+            .split(' ')
+            .filter(|part| !part.is_empty())
+            .filter_map(|part| u32::from_str_radix(part, 16).ok())
+            .filter_map(char::from_u32)
+            .collect()
+    }
+
+    fn points_of(text: &str) -> String {
+        text.chars()
+            .map(|character| format!("{:X}", character as u32))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// The HFS+ decomposition, measured against

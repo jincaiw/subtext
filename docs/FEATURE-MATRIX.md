@@ -181,7 +181,7 @@
 | 转大写 / 小写 / 首字母大写 | `transform_case` | ✅ |
 | 全角 / 半角 / 全角罗马字 / 半角罗马字 | `transform_width` | ✅ 4 种 |
 | URL 编码 / 解码 | `url_encode` / `url_decode` | ✅ |
-| Unicode 规范化 | `normalize_unicode` | ✅ 经 Text ▸ Unicode Normalizations 菜单（5 项 + 分隔符 + 2 项）；上游 7 种里 6 种可用（含 **Modified NFD / Modified NFC** 两个 HFS+ 形态，按 Apple 的实测行为实现），只有 NFKC Case-Fold 触发时在状态栏说明要 `CaseFolding.txt` |
+| Unicode 规范化 | `normalize_unicode` | ✅ 经 Text ▸ Unicode Normalizations 菜单（5 项 + 分隔符 + 2 项），**七种全部可用**：四种 Unicode 形态、**NFKC Case-Fold**（case fold 表与 Default_Ignorable 由 Foundation 生成，§16）、两个 HFS+ 形态（按 Apple 的实测行为实现） |
 | 显示选区信息 | `inspect_selection` | ✅ 上游的 **popover**（锚在选中字符上方、点外面或 Escape 关、选区不是一个字符就不弹），内容按 `CharacterInspectorView` 重排：大字形 · 名字 · Code Point（含代理对与 deprecated 徽标）· Block（可切换 `Blocks.txt` 的名字）· Category · Version；多标量改成每个标量一个可折叠行。大字形不是衬线体，见缺口表 |
 | 高级计数 | `advanced_counter` | ✅ 上游的三件：**Start sheet**（三个空白复选框 + *Unit* / *Encoding* / *Normalization* 选项）→ **正文里的胶囊**（默认右上角，可用指针拖到任意位置——§13.7；有选区数选区，否则数整篇；随打字更新）→ 齿轮 **popover** 里的同一份选项面板；右键 *Copy* / *Stop Count*。算法照上游 `String.count(options:)`：忽略换行去 `\R`、忽略空白去 `[\t\p{Zs}]`、连续空白折成一个、规范化、再按字形簇 / 标量 / UTF-16 / 字节数。规范化菜单只有 4 项、胶囊不能拖动，见缺口表 |
 | 编辑颜色代码 | `color_code_dialog` | ✅ 11 种记法 |
