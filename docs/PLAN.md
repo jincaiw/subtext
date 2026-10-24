@@ -1187,10 +1187,11 @@ SubText 之前把这两层混成一层，于是菜单里多了 6 条上游默认
 降级层恰好是那 7 条 id。于是任何一次改名、增删、或「把缺席的悄悄加回来」都会让测试红。
 命名与上游不一致这件事从「靠人记得」变成了「编译期+运行期都拦得住」。
 
-**残余近似（记账）**：38 条里有 8 条是超集近似 —— ISO Latin 1 → windows-1252、
-ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、
+**残余近似（记账）**：40 条里有 5 条是超集近似 —— 两条 Shift JIS → cp932、
 GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点）。
 都是「解码不会漏、只会多接受几个字节序列」的方向，名字与实现不一致这点在缺口表里。
+另外三条（ISO Latin 1 / Latin 5 / Thai 8859-11）原本也在这里，§19 用自带的严格表
+换掉了它们的 Windows code page 替身。
 
 **8.9g File ▸ Open Recent 的最近文档列表**（`menus.rs` / `bridge.rs` / `workspace.rs` / `actions.rs`）
 
@@ -2223,7 +2224,7 @@ Encoding* / *Cancel*），SubText 做的是「取消」那一个，并把「改�
 
 | 偏差 | 说明 |
 | --- | --- |
-| `Converted` 列显示的是 WHATWG 的替换 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**判定哪些字符不兼容两边的规则一样**，只是替换物不同 —— 与编码注册表「8 条是 WHATWG 超集近似」同源。 |
+| `Converted` 列显示的是 WHATWG 的替换 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**判定哪些字符不兼容两边的规则一样**，只是替换物不同 —— 与编码注册表里那 5 条 WHATWG 超集近似同源（§19 之前是 8 条）。 |
 | 表格不能按列排序 | 上游的表头可点排序。这里用组件库里无状态的 `Table`（行数是「正在用遗留编码写的文档里的几个出问题的字符」，不需要虚拟化）。 |
 | 表格横向滚动而不是压缩列 | `Table` 的单元格有最小宽度，三列塞不进窄检查器。上游的 SwiftUI `Table` 会压缩并截断。 |
 | 点一行是滚入可见而不是居中 | 与大纲导航同一条：`EditorState` 没有居中接口。 |
@@ -2692,11 +2693,40 @@ BE 文件重存成本机字节序（并注明这是上游行为）、无标记�
 
 ---
 
+## 阶段 19 — 三条编码从「近似」变成「精确」
+
+§8.9f 记账时说，菜单里 40 条有 8 条用的是超集 codec。其中三条不是超集问题，而是
+**Encoding Standard 把标签解析到了另一个标准**：
+
+| 我们的名字 | 之前用的 codec | 差在哪 |
+| --- | --- | --- |
+| Western (ISO Latin 1) | windows-1252 | `0x80`–`0x9F` 变成标点（€‚ƒ…），标准里是 C1 控制符 |
+| Turkish (ISO Latin 5) | windows-1254 | 同上，另加六个土耳其字母（这一点两边一致） |
+| Thai (ISO 8859-11) | windows-874 | `0x80`–`0x9F` 之外，还填了 TIS-620 在 `0xDB`–`0xDE` / `0xFC`–`0xFF` 留的空洞 |
+
+也就是说：一份真正的 Latin-1 文件里出现 `0x80`，SubText 会显示 `€`，CotEditor 显示
+U+0080。这不是「多接受几个字节序列」，是**解码结果不同**。
+
+**做法**：三条改成自带的严格表，数据照旧从 Foundation 实测（逐字节 `String(data:encoding:)`，
+256 个字节跑一遍）。Latin-1 是恒等映射，Latin-5 是恒等 + 六个字母，Thai 是三段区间加两处空洞 ——
+都不需要大表。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 19.1 | `Kind` 增 `Latin1` / `Latin5` / `Thai`，`strict_scalar` / `strict_byte` 是互为逆的两张映射，解码遇到未定义字节给 U+FFFD 并置 lossy，编码遇到写不出的字符给 `?`（Foundation 的替身） | ✅ |
+| 19.2 | 注册表三条换成 `TextEncoding::strict(...)`；`iso-8859-9` 这个标签单独接一条别名（它的 id 是 `iso-latin-5`） | ✅ |
+| 19.3 | 测试：三条的边界字节（`0x80`、`0xA0`、`0xDA`、`0xDF`、`0xE0`、`0xFB`、八个空洞）、Latin-5 的六个字母、以及**每个已定义字节的往返** | ✅ |
+
+**验证**：新增 2 条测试（688 全绿）。缺口表那行从「8 条超集近似」改成「5 条」，
+剩下的五条（两条 Shift JIS、GB 2312、EUC-KR、Big 5 HKSCS）确实是超集，没有严格表可换。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
-| 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **8 条是超集近似**：ISO Latin 1 → windows-1252、ISO Latin 5 → windows-1254、Thai (ISO 8859-11) → windows-874、两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
+| 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
 | UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |

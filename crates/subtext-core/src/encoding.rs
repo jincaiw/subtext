@@ -140,6 +140,13 @@ enum Kind {
     /// .utf16LittleEndian)` does not write one.
     Utf16Le,
     Utf16Be,
+    /// ISO-8859-1, strict. `encoding_rs` resolves the label to windows-1252,
+    /// which differs in `0x80`–`0x9F`; this is the standard itself.
+    Latin1,
+    /// ISO-8859-9 (Latin-5): ISO-8859-1 with six Turkish letters.
+    Latin5,
+    /// ISO-8859-11: ASCII, then TIS-620's Thai block.
+    Thai,
     /// "Unicode (UTF-32)", by the same rules as [`Kind::Utf16`].
     Utf32,
     Utf32Le,
@@ -165,6 +172,11 @@ impl TextEncoding {
     // The four wide forms are named the way Foundation names them — "Unicode
     // (UTF-16BE)", not "Unicode (UTF-16 Big-Endian)" — because that is the string
     // upstream's menu shows, and the whole registry is spelled that way.
+    /// A single-byte standard served by our own table rather than by a codec.
+    const fn strict(name: &'static str, id: &'static str, kind: Kind) -> Self {
+        Self { name, id, kind }
+    }
+
     pub const UTF16: Self = Self {
         name: "Unicode (UTF-16)",
         id: "utf-16",
@@ -218,6 +230,7 @@ impl TextEncoding {
             Kind::Utf16 | Kind::Utf16Le | Kind::Utf16Be => true,
             Kind::Utf32 | Kind::Utf32Le | Kind::Utf32Be => true,
             Kind::Rs(e) => e == UTF_8 || e == UTF_16LE || e == UTF_16BE,
+            Kind::Latin1 | Kind::Latin5 | Kind::Thai => false,
         }
     }
 
@@ -248,7 +261,7 @@ impl TextEncoding {
             // Foundation's `data(using: .utf16LittleEndian)` produces none, and
             // upstream writes whatever Foundation produces.
             Kind::Utf16Le | Kind::Utf16Be | Kind::Utf32Le | Kind::Utf32Be => Bom::None,
-            Kind::Rs(_) => Bom::None,
+            Kind::Latin1 | Kind::Latin5 | Kind::Thai | Kind::Rs(_) => Bom::None,
         }
     }
 
@@ -281,6 +294,10 @@ impl TextEncoding {
             "utf-16be" | "utf-16-be" => return Some(Self::UTF16_BE),
             "utf-32le" | "utf-32-le" => return Some(Self::UTF32_LE),
             "utf-32be" | "utf-32-be" => return Some(Self::UTF32_BE),
+            // The label the Encoding Standard resolves to windows-1254. Ours is
+            // spelled "iso-latin-5", so this is the one alias the id lookup
+            // cannot answer.
+            "iso-8859-9" => return AVAILABLE.iter().copied().find(|e| e.id == "iso-latin-5"),
             _ => {}
         }
         if let Some(found) = AVAILABLE.iter().copied().find(|e| e.id == lowered) {
@@ -321,6 +338,7 @@ impl TextEncoding {
             Kind::Utf16Be => decode_utf16(bytes, false),
             Kind::Utf32Le => decode_utf32(bytes, true),
             Kind::Utf32Be => decode_utf32(bytes, false),
+            Kind::Latin1 | Kind::Latin5 | Kind::Thai => decode_strict(self.kind, bytes),
         }
     }
 
@@ -339,6 +357,7 @@ impl TextEncoding {
             Kind::Utf32 => (encode_utf32(text, NATIVE_IS_LITTLE), false),
             Kind::Utf32Le => (encode_utf32(text, true), false),
             Kind::Utf32Be => (encode_utf32(text, false), false),
+            Kind::Latin1 | Kind::Latin5 | Kind::Thai => encode_strict(self.kind, text),
         }
     }
 }
@@ -347,6 +366,102 @@ impl fmt::Display for TextEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)
     }
+}
+
+/// The scalar a byte of a strict single-byte encoding stands for.
+///
+/// `None` is a byte the standard leaves undefined — `0xDB`–`0xDE` and
+/// `0xFC`–`0xFF` in ISO-8859-11, and nothing in the two Latin ones. The tables
+/// are measured from Foundation (`String(data:encoding:)` over every byte),
+/// which is what CotEditor decodes with; `encoding_rs` cannot serve these three
+/// because the Encoding Standard resolves their labels to Windows code pages.
+fn strict_scalar(kind: Kind, byte: u8) -> Option<u32> {
+    match kind {
+        // ISO-8859-1 is the identity: every byte is its own scalar.
+        Kind::Latin1 => Some(byte as u32),
+        // ISO-8859-9 is ISO-8859-1 with six letters moved to Turkish.
+        Kind::Latin5 => Some(match byte {
+            0xD0 => 0x011E, // Ğ
+            0xDD => 0x0130, // İ
+            0xDE => 0x015E, // Ş
+            0xF0 => 0x011F, // ğ
+            0xFD => 0x0131, // ı
+            0xFE => 0x015F, // ş
+            _ => byte as u32,
+        }),
+        // ISO-8859-11: ASCII and the C1 range as themselves, NBSP at 0xA0, then
+        // TIS-620's Thai block with a hole before the currency sign.
+        Kind::Thai => match byte {
+            0x00..=0xA0 => Some(byte as u32),
+            0xA1..=0xDA => Some(0x0E01 + (byte as u32 - 0xA1)),
+            0xDF => Some(0x0E3F),
+            0xE0..=0xFB => Some(0x0E40 + (byte as u32 - 0xE0)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The byte a scalar is written as in a strict single-byte encoding.
+///
+/// The inverse of [`strict_scalar`], and `None` when the standard has no byte
+/// for it.
+fn strict_byte(kind: Kind, character: char) -> Option<u8> {
+    let value = character as u32;
+    match kind {
+        Kind::Latin1 => u8::try_from(value).ok(),
+        Kind::Latin5 => Some(match value {
+            0x011E => 0xD0,
+            0x0130 => 0xDD,
+            0x015E => 0xDE,
+            0x011F => 0xF0,
+            0x0131 => 0xFD,
+            0x015F => 0xFE,
+            _ => u8::try_from(value).ok()?,
+        }),
+        Kind::Thai => match value {
+            0x00..=0xA0 => u8::try_from(value).ok(),
+            0x0E01..=0x0E3A => u8::try_from(value - 0x0D60).ok(),
+            0x0E3F => Some(0xDF),
+            0x0E40..=0x0E5B => u8::try_from(value - 0x0D60).ok(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn decode_strict(kind: Kind, bytes: &[u8]) -> (String, bool) {
+    let mut out = String::with_capacity(bytes.len());
+    let mut lossy = false;
+    for &byte in bytes {
+        match strict_scalar(kind, byte) {
+            Some(value) => out.push(char::from_u32(value).unwrap_or(char::REPLACEMENT_CHARACTER)),
+            None => {
+                out.push(char::REPLACEMENT_CHARACTER);
+                lossy = true;
+            }
+        }
+    }
+    (out, lossy)
+}
+
+/// Encode for a strict single-byte encoding.
+///
+/// A character the standard cannot spell becomes `?`, which is what Foundation
+/// writes and what the warnings scan then reports as incompatible.
+fn encode_strict(kind: Kind, text: &str) -> (Vec<u8>, bool) {
+    let mut out = Vec::with_capacity(text.len());
+    let mut lossy = false;
+    for character in text.chars() {
+        match strict_byte(kind, character) {
+            Some(byte) => out.push(byte),
+            None => {
+                out.push(b'?');
+                lossy = true;
+            }
+        }
+    }
+    (out, lossy)
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
@@ -479,16 +594,11 @@ fn encode_utf32(text: &str, little_endian: bool) -> Vec<u8> {
 ///
 /// # The listed entries are not all exact
 ///
-/// Eight of the thirty-eight are served by a codec that is a superset of the
-/// standard they name, which is a deliberate trade rather than an oversight — a
-/// superset decodes everything the standard would, and refuses only a few byte
-/// sequences the standard would refuse. Two are forced by the Encoding Standard
-/// resolving the label to a Windows code page: "Western (ISO Latin 1)" decodes
-/// with windows-1252 and "Turkish (ISO Latin 5)" with windows-1254. Six are
-/// forced by the standard having no such codec at all:
+/// Five of the forty are served by a codec that is a superset of the standard
+/// they name, which is a deliberate trade rather than an oversight — a superset
+/// decodes everything the standard would, and refuses only a few byte sequences
+/// the standard would refuse:
 ///
-/// - "Thai (ISO 8859-11)" decodes with windows-874, which differs only in
-///   `0x80`–`0x9F`;
 /// - "Japanese (Shift JIS)" and "Japanese (Shift JIS X0213)" both decode with
 ///   the Windows Shift JIS — cp932, a superset of JIS X 0208 Shift JIS that has
 ///   none of JIS X 0213 plane 2;
@@ -497,6 +607,13 @@ fn encode_utf32(text: &str, little_endian: bool) -> Vec<u8> {
 /// - "Traditional Chinese (Big 5 HKSCS)" decodes with the WHATWG Big 5 table,
 ///   which carries the HKSCS extensions but maps them to their real code points
 ///   rather than to the Private Use Area.
+///
+/// Three more used to be approximated and are now exact. The Encoding Standard
+/// resolves `iso-8859-1`, `iso-8859-9` and `iso-8859-11` to Windows code pages,
+/// which differ from the standards in `0x80`–`0x9F` — and, for Thai, in the two
+/// holes TIS-620 leaves around the currency sign. Those three are served by
+/// [`strict_scalar`] / [`strict_byte`] instead, with the tables measured from
+/// Foundation.
 pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // Unicode (UTF-8). Upstream's first group is one entry, and its menu
     // builder splices "Unicode (UTF-8) with BOM" in right after it — see
@@ -561,11 +678,9 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
             "windows-874",
             encoding_rs::WINDOWS_874,
         ),
-        TextEncoding::rs(
-            "Thai (ISO 8859-11)",
-            "iso-8859-11",
-            encoding_rs::WINDOWS_874,
-        ),
+        // Strict: windows-874 differs in `0x80`–`0x9F` and fills the two holes
+        // TIS-620 leaves before and after the currency sign.
+        TextEncoding::strict("Thai (ISO 8859-11)", "iso-8859-11", Kind::Thai),
     ],
     // Arabic, Greek, Hebrew, Cyrillic. Upstream's group of sixteen is mostly Mac
     // OS codecs. The three Cyrillic entries are in upstream's order — ISO 8859-5,
@@ -615,11 +730,10 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
     // Latin 4 and the Turkish Windows code page — are not repeated here:
     // upstream names them once, in this group.
     &[
-        TextEncoding::rs(
-            "Western (ISO Latin 1)",
-            "iso-8859-1",
-            encoding_rs::WINDOWS_1252,
-        ),
+        // Strict: the Encoding Standard resolves "iso-8859-1" to windows-1252,
+        // which turns `0x80`–`0x9F` into punctuation. CotEditor's ISO Latin 1
+        // leaves them as the control characters they are.
+        TextEncoding::strict("Western (ISO Latin 1)", "iso-8859-1", Kind::Latin1),
         TextEncoding::rs(
             "Central European (ISO Latin 2)",
             "iso-latin-2",
@@ -635,11 +749,9 @@ pub static MENU_GROUPS: &[&[TextEncoding]] = &[
             "iso-latin-4",
             encoding_rs::ISO_8859_4,
         ),
-        TextEncoding::rs(
-            "Turkish (ISO Latin 5)",
-            "iso-latin-5",
-            encoding_rs::WINDOWS_1254,
-        ),
+        // Strict: "iso-8859-9" resolves to windows-1254 in the Encoding
+        // Standard, which differs in `0x80`–`0x9F` exactly as 1252 does.
+        TextEncoding::strict("Turkish (ISO Latin 5)", "iso-latin-5", Kind::Latin5),
         TextEncoding::rs(
             "Nordic (ISO Latin 6)",
             "iso-8859-10",
@@ -1520,6 +1632,72 @@ mod tests {
         }
     }
 
+    /// The three standards `encoding_rs` cannot serve, measured against
+    /// Foundation — which is what CotEditor decodes with.
+    #[test]
+    fn the_strict_single_byte_encodings_match_the_standards() {
+        let latin1 = TextEncoding::from_identifier("iso-8859-1").expect("ISO Latin 1");
+        let latin5 = TextEncoding::from_identifier("iso-latin-5").expect("ISO Latin 5");
+        let thai = TextEncoding::from_identifier("iso-8859-11").expect("Thai");
+
+        // ISO-8859-1 is the identity, including `0x80`–`0x9F` — which the
+        // windows-1252 codec the label used to resolve to turns into punctuation.
+        assert_eq!(latin1.decode(&[0x80]).0, "\u{80}");
+        assert_eq!(latin1.decode(&[0xE9]).0, "é");
+        assert_eq!(encoding_rs::WINDOWS_1252.decode(&[0x80]).0, "€");
+        assert_eq!(latin1.encode("é"), (vec![0xE9], false));
+        // A character outside the standard is replaced, and says so.
+        assert_eq!(latin1.encode("€"), (vec![b'?'], true));
+
+        // ISO-8859-9 moves exactly six letters.
+        for (byte, scalar) in [
+            (0xD0u8, '\u{11E}'),
+            (0xDD, '\u{130}'),
+            (0xDE, '\u{15E}'),
+            (0xF0, '\u{11F}'),
+            (0xFD, '\u{131}'),
+            (0xFE, '\u{15F}'),
+        ] {
+            assert_eq!(latin5.decode(&[byte]).0, scalar.to_string());
+            assert_eq!(latin5.encode(&scalar.to_string()), (vec![byte], false));
+        }
+        assert_eq!(latin5.decode(&[0x80]).0, "\u{80}");
+
+        // ISO-8859-11: NBSP, the Thai block, and the holes TIS-620 leaves.
+        assert_eq!(thai.decode(&[0xA0]).0, "\u{A0}");
+        assert_eq!(thai.decode(&[0xA1]).0, "\u{E01}");
+        assert_eq!(thai.decode(&[0xDA]).0, "\u{E3A}");
+        assert_eq!(thai.decode(&[0xDF]).0, "\u{E3F}");
+        assert_eq!(thai.decode(&[0xE0]).0, "\u{E40}");
+        assert_eq!(thai.decode(&[0xFB]).0, "\u{E5B}");
+        for byte in [0xDBu8, 0xDC, 0xDD, 0xDE, 0xFC, 0xFD, 0xFE, 0xFF] {
+            let (text, lossy) = thai.decode(&[byte]);
+            assert_eq!(text, "\u{FFFD}");
+            assert!(lossy, "{byte:#04X} should decode as an error");
+        }
+        assert_eq!(thai.encode("\u{E3F}"), (vec![0xDF], false));
+    }
+
+    /// Every byte of the three standards survives a round trip, except the ones
+    /// the standard leaves undefined.
+    #[test]
+    fn the_strict_single_byte_encodings_round_trip_every_defined_byte() {
+        for id in ["iso-8859-1", "iso-latin-5", "iso-8859-11"] {
+            let encoding = TextEncoding::from_identifier(id).expect(id);
+            for byte in 0..=0xFFu8 {
+                let (text, lossy) = encoding.decode(&[byte]);
+                if lossy {
+                    continue;
+                }
+                assert_eq!(
+                    encoding.encode(&text),
+                    (vec![byte], false),
+                    "{id} byte {byte:#04X}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_utf32_file_with_a_mark_round_trips() {
         let original = "abc😀";
@@ -1687,11 +1865,6 @@ mod tests {
                 encoding_rs::ISO_8859_4,
                 "Central European (ISO Latin 4)",
             ),
-            (
-                "iso-8859-9",
-                encoding_rs::WINDOWS_1254,
-                "Turkish (ISO Latin 5)",
-            ),
         ] {
             let found = TextEncoding::from_identifier(dropped)
                 .unwrap_or_else(|| panic!("{dropped} did not resolve"));
@@ -1701,6 +1874,13 @@ mod tests {
                 "{dropped} no longer decodes with the codec it named"
             );
         }
+
+        // "iso-8859-9" is the one label that no longer lands on a codec: the
+        // Turkish standard is served by our own table now, because windows-1254
+        // differs from it in `0x80`–`0x9F`.
+        let found = TextEncoding::from_identifier("iso-8859-9").expect("it resolves");
+        assert_eq!(found.name, "Turkish (ISO Latin 5)");
+        assert!(matches!(found.kind, Kind::Latin5));
     }
 
     /// `MENU_GROUPS` and the flat list are two views of one table, so neither

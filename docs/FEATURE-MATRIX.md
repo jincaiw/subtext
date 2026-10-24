@@ -107,7 +107,7 @@
 | 重新着色 | `rehighlight` | ✅ |
 | 换行符 LF / CR / CRLF | `set_line_ending` | ✅ 经 Format ▸ Line Endings 菜单，当前项打勾 |
 | 换行符 NEL / LS / PS | `set_line_ending` | ✅ **超出多数编辑器**；上游按住 Option 才显示这 3 项，这里恒列（GPUI 菜单没有隐藏项） |
-| 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：列表来自用户的优先级列表（默认 38 条 + 9 个分隔符），按组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…`。上游 60 条里 22 条无 codec 如实缺席、8 条为超集近似，逐条见 PLAN §8.9f |
+| 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：列表来自用户的优先级列表（默认 38 条 + 9 个分隔符），按组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…`。上游 60 条里 22 条无 codec 如实缺席、8 条为超集近似（§19 之后剩 5 条），逐条见 PLAN §8.9f |
 | 编码（重新解释） | `reinterpret_encoding` | 🔁 能力在，但没有入口 —— 上游的菜单里也没有这一项 |
 | 编码自动探测 | `Document::open` / `revert` 的 `DetectionOptions` | ✅ 与上游同序：BOM → 声明（`refer_to_encoding_tag`）→ **按用户的优先级列表逐个试** → 默认编码。没有统计猜测（§8.11 删掉了 `chardetng`） |
 | 默认编码（新建文档） | `Settings::default_file_encoding` → `Document::untitled` | ✅ 选的是**文件编码**（codec + 字节序标记），选择器列用户列表并在 UTF-8 之后紧跟 *Unicode (UTF-8) with BOM*、分隔符画成横线；新建文档带上所选编码的标记（只有「未指定字节序」的 UTF-16/32 自带标记，带 LE/BE 的两种不带 —— 与 Foundation 写出的字节一致）。上游是 `EncodingManager.defaultEncoding`（§8.14） |
