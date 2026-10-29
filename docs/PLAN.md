@@ -2982,6 +2982,46 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.16 状态栏的计数改成缓存的：一次探针排除与一次实测的性能修复
+
+这一轮本来在追「还有哪些钩子漏接」，第一个目标是状态栏的行列号 —— 它只在 `render_status_bar` 里
+从编辑器读，而光标移动时不一定会 `cx.notify()`。探针把 `Workspace::render` 打上日志之后：
+**每次光标移动都重绘**（`render caret=9`、`render caret=4`），行列号一直是新的。**怀疑不成立**，
+这是个负结果，但它把真正的问题指出来了：
+
+重绘是热路径，而 `render_status_bar` 每次重绘都做两件 O(n) 的事 —— `state.value().to_string()`
+复制整篇文本，以及 `CharacterCount::of(&text, …)` 数一遍字符、词与行。**实测**（1 MB 文本，
+release）：
+
+```
+PROBE bytes=1020000
+PROBE 31.575916ms lines=20000 words=160000
+PROBE 24.397167ms
+PROBE 23.386583ms
+```
+
+24 ms 一次，而每一次光标移动、每一次光标闪烁都会重建状态栏。1 MB 的文件里移动光标因此是明显
+掉帧的。
+
+**做法**：把三个计数挂到 `OpenDocument` 上（`counts: Option<CharacterCount>`），`render` 的
+第一步 `ensure_status_counts` 补算，`on_pane_changed`（文本变化的唯一入口）把它置回 `None`。
+
+放 `render` 顶部而不是 `render_status_bar` 里，是因为后者是 `&self` —— 想在里面对 `self` 做懒
+求值就要把它改成 `&mut self`，而它在 `.when(…)` 闭包里被捕获，借不出来。`render` 本身是
+`&mut self`，在那里补算最省事。
+
+**验证**（探针）：1.11 MB 的 Rust 文件，打开后移动 5 次光标 ——
+
+```
+PROBE counted 0 bytes        ← 启动时的空文档
+PROBE counted 1110000 bytes  ← 打开时算一次
+（之后 5 次光标移动，一次都没有再算）
+```
+
+**没有做的**：`text.to_string()` 那一份复制还在（1 MB 约 0.3 ms），`status_position` 也仍要扫
+一遍找行号。把这两件也变成增量需要给文本建立行索引，而编辑器的 `LineIndex` 没有暴露成"给我某
+偏移的行列"的形式 —— 与这一轮的量级（0.3 ms 对 24 ms）相比，不值得一起做。
+
 ### 22.15 括号配对跟随光标：缺口表与自己的注释打架
 
 矩阵里这一条写着「上游在每次选区变化时跑，SubText 只在编辑后跑 —— **编辑器不报纯光标移动**」。

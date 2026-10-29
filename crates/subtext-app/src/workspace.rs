@@ -237,6 +237,12 @@ pub struct OpenDocument {
     pub syntax: SharedString,
     /// Set when the file changed underneath us since it was last read.
     pub modified_on_disk: bool,
+    /// The status bar's three counts, kept from the last time the text changed.
+    ///
+    /// Counting a megabyte of text takes 24 ms in release — and the status bar
+    /// is rebuilt on **every repaint**, which includes every caret move and the
+    /// caret's blink. Recomputed when the text changes, not when the frame does.
+    counts: Option<charinfo::CharacterCount>,
 }
 
 impl OpenDocument {
@@ -1064,6 +1070,10 @@ impl Workspace {
             active_pane: 0,
             syntax: SharedString::from(syntax_name),
             modified_on_disk: false,
+            // Filled on the first repaint: `push_document` has just read the
+            // text, and counting it there would put a megabyte's worth of work
+            // in front of the window appearing.
+            counts: None,
         });
         self.active = self.documents.len() - 1;
         self.refresh_menus(cx);
@@ -1233,6 +1243,8 @@ impl Workspace {
         if grew {
             self.schedule_automatic_completion(cx);
         }
+        // The text changed, so the status bar's counts are stale.
+        self.documents[index].counts = None;
         // The text moved under the caret, so the pair may have changed even
         // though the selection did not — the de-duplication the flash does for
         // repaints must not skip this one.
@@ -5986,7 +5998,13 @@ impl Workspace {
             .child(inspector_row("Mode", document.syntax.to_string(), cx));
 
         // ---- Count --------------------------------------------------------
-        let count = charinfo::CharacterCount::of(&text, encoding.encoding);
+        // The count is a cache: it is only recomputed when the text changes, so
+        // a repaint that merely moved the caret pays nothing for it. The fallback
+        // covers the first frame of a document.
+        let count = document
+            .counts
+            .clone()
+            .unwrap_or_else(|| charinfo::CharacterCount::of(&text, encoding.encoding));
         let selected = (!selection.is_empty())
             .then(|| charinfo::CharacterCount::of(&selected_text, encoding.encoding));
         let counts = count.counts(selected.as_ref());
@@ -7372,6 +7390,33 @@ impl Workspace {
     /// counts show. Until this rewrite nothing read them, so they were six
     /// switches that changed nothing — the same defect the byte-order-mark
     /// switch had (see `docs/PLAN.md` §8.14).
+    /// Take the status bar's counts again if the text changed since last time.
+    ///
+    /// Counting a megabyte costs 24 ms in release. The status bar is rebuilt on
+    /// every repaint — caret moves and the caret's blink included — so the
+    /// answer is kept on the document and only thrown away when an edit makes
+    /// it wrong.
+    fn ensure_status_counts(&mut self, cx: &mut Context<Self>) {
+        let index = self.active;
+        let Some(document) = self.documents.get(index) else {
+            return;
+        };
+        if document.counts.is_some() {
+            return;
+        }
+        let (text, encoding) = {
+            let state = document.editor().read(cx);
+            let encoding =
+                FileEncoding::of_document(document.document.encoding(), document.document.bom())
+                    .encoding;
+            (state.value().to_string(), encoding)
+        };
+        let counts = charinfo::CharacterCount::of(&text, encoding);
+        if let Some(document) = self.documents.get_mut(index) {
+            document.counts = Some(counts);
+        }
+    }
+
     fn render_status_bar(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let Some(document) = self.active_document() else {
             return div().into_any_element();
@@ -7828,6 +7873,7 @@ fn reveal_in_file_manager(path: &Path) {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_status_counts(cx);
         let title = self
             .active_document()
             .map_or_else(|| "SubText".to_string(), |document| document.title());
