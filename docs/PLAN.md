@@ -2757,8 +2757,8 @@ Plain Text …）因此**整份 `Info.json` 反序列化失败**，而 `read_jso
 未知值落回 `general` 而不是让整个文件作废。
 
 **验证**：探针打开 `/tmp/probe/notes.md`，工作区路径（不是测试替身）给出
-`syntax="Markdown"`、`entries=4`、`titles=["One", "Two", "", "Three"]`。新增 12 条测试
-（702 全绿），覆盖 Markdown 的 ATX / setext / 分隔符、Python 的类属性与模块变量之别、
+`syntax="Markdown"`、`entries=4`、`titles=["One", "Two", "", "Three"]`。新增 14 条测试
+（688 → 702 全绿），覆盖 Markdown 的 ATX / setext / 分隔符、Python 的类属性与模块变量之别、
 Rust / TypeScript 的参数表、C 的声明子、HTML 的文本提取、CSS 的 at-rule、
 以及「有查询走查询、有规则走规则」这两条分支。
 
