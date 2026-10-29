@@ -2982,6 +2982,54 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.17 检查器的两处：路径的中间省略与四段的展开动画
+
+缺口表里这两条挨着，理由都写着「组件库没这个能力」。读一遍组件库，两条都有一半是错的。
+
+**路径**。上游 `truncationMode(.middle)` + `help` tooltip + `.textSelection(.enabled)`。
+SubText 用的是 `div().truncate()`，只截尾部，也没有 tooltip。三件事里：
+
+* **中间省略能做** —— `subtext_core::textops::middle_elided(text, limit)`：按字符数取头尾，中间一个
+  `…`，尾巴给更大的份额（路径的最后一段才是识别文件的那部分）。按字符而不是按像素，是因为 GPUI
+  没有「量一下这个 label 有多宽」的办法，而检查器是可拖宽的 —— 取一个能填满默认宽度的字符数，
+  宽了就浪费一点，窄了由 `truncate()` 兜底。四条单元测试盯住：短的原样、长度正好等于 limit、
+  头尾都在、中文按字符数不按字节。
+* **tooltip 能做，但要换控件** —— `ManagedTooltipExt` 是组件库的 `pub(crate)`，`div` 挂不上；
+  而 `Button` 有 `.tooltip()`。所以路径变成了一个 ghost 按钮：悬停看全文，**点一下把完整路径复制
+  到剪贴板** —— 正好是上游 `.textSelection(.enabled)` 留给用户"拖选复制"的那件事。
+* 可选中不做。
+
+**动画**。注释里写「`Accordion` 的 chevron 在后、标签样式不对，所以用无样式的
+`AccordionTrigger`，动画一并舍去」—— 前半对，后半是把两件事捆在一起舍掉了。`Accordion`
+的动画不在 `Accordion` 里，而在三个基元上：`spring(id, target, policy, window, cx)` 给出 0…1 的
+progress，`MotionReveal::new(id, progress, content)` 按高度裁剪，`AccordionPanel.open(..)
+.keep_mounted(..)` 决定 settled 之后要不要卸载。照这三件装配即可，trigger 仍然用无样式的那个：
+
+```rust
+let progress = spring(
+    ElementId::from(("inspector-section-body", index)),
+    if open { 1. } else { 0. },
+    cx.theme().motion_tokens().spring_control,
+    window,
+    cx,
+);
+```
+
+`keep_mounted(progress != 0. || cx.reduce_motion())` —— 与 `Accordion` 一字不差：折叠到底时
+卸载（省掉 layout 与 paint），开合过程中保持挂载（否则动画没有内容可以裁）。`spring` 要
+`window`，所以 `render_document_inspector` 与 `inspector_section` 各加了一个参数 —— `render_inspector`
+本来就有，往下传而已。
+
+**验证**（探针 + 截图）：一个路径长 58 字符的文件，检查器宽度 190 px ——
+
+```
+Full Path    /tmp/pr…long-name.rs  ⊙
+```
+
+中间省略落在 `…`，文件名完整，箭头在右。第一版 limit 取 36 是错的：按钮被父容器挤掉，路径
+开头被裁成 `tmp)probeI`，尾部又被 `truncate()` 截了第二次，两个省略号连着出现 —— 这是截图才
+看出来的，`middle_elided` 的输出本身完全正确。取 20 之后两个省略只剩一个。
+
 ### 22.16 状态栏的计数改成缓存的：一次探针排除与一次实测的性能修复
 
 这一轮本来在追「还有哪些钩子漏接」，第一个目标是状态栏的行列号 —— 它只在 `render_status_bar` 里
@@ -3240,8 +3288,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
 | 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
-| 检查器的 `Full Path` 是尾部截断、没有 tooltip、不可选 | 上游 `truncationMode(.middle)` 截中间，带 `help` tooltip，且 `.textSelection(.enabled)`。GPUI 只有尾部截断；`div` 没有 tooltip（只有 Button/Checkbox 一类有）；GPUI 的文本默认不可选。 |
-| 检查器的四段没有展开动画 | 上游 `DisclosureGroup` 带 SwiftUI 的默认展开动画。组件库的 `Accordion` 用 `spring` + `MotionReveal` 做动画，但它的 chevron 在**后**、标签样式也不是上游那一套；这一轮用的是同一套基元里无样式的那一个（`AccordionTrigger`），动画一并舍去。 |
 | 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的（上游的 `.creationDate` 在 APFS 上总有值）。 |
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |

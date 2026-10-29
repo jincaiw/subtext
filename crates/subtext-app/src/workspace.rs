@@ -33,9 +33,9 @@ use std::time::Duration;
 
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
-use gpui_kit::base::AccordionTrigger;
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::base::input::InputEvent;
+use gpui_kit::base::{AccordionPanel, AccordionTrigger, MotionReveal, spring};
 use gpui_kit::base::{Placement, Positioner};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
@@ -96,6 +96,15 @@ use crate::surround_sheet::SurroundSheet;
 
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// How many characters of a path the inspector's Full Path row shows.
+///
+/// CotEditor elides by measured width (`truncationMode(.middle)`); GPUI has no
+/// way to ask a label how wide it ended up, and the inspector is resizable, so
+/// this is the count that fills the default width in `text_xs`. A wider panel
+/// wastes a little room, a narrower one truncates the rest at the end — and the
+/// whole path is the button's tooltip either way.
+const INSPECTOR_PATH_ELISION: usize = 20;
 
 /// How many editors one document may be split into.
 ///
@@ -5830,7 +5839,7 @@ impl Workspace {
 
         let is_outline = self.settings.inspector_pane == InspectorPane::Outline;
         let body = match self.settings.inspector_pane {
-            InspectorPane::Document => self.render_document_inspector(cx),
+            InspectorPane::Document => self.render_document_inspector(window, cx),
             InspectorPane::Outline => self.render_outline(window, cx),
             InspectorPane::Warnings => self.render_warnings(cx),
         };
@@ -5884,6 +5893,26 @@ impl Workspace {
         let shown = path
             .map(|path| path.display().to_string())
             .unwrap_or_default();
+        // A button rather than a plain `div` because only the interactive
+        // elements carry a tooltip in this component set — and a tooltip is
+        // where the rest of an elided path can be read. Clicking copies it,
+        // which is the job upstream's `textSelection(.enabled)` leaves to
+        // dragging across the text.
+        let elided = subtext_core::textops::middle_elided(&shown, INSPECTOR_PATH_ELISION);
+        let path_button = (!shown.is_empty()).then(|| {
+            let full = shown.clone();
+            Button::new("inspector-path")
+                .ghost()
+                .xsmall()
+                .flex_none()
+                .min_w_0()
+                .max_w_full()
+                .label(elided)
+                .tooltip(full.clone())
+                .on_click(cx.listener(move |_this, _, _, cx| {
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(full.clone()));
+                }))
+        });
         let reveal = path.map(Path::to_path_buf).map(|path| {
             Button::new("inspector-reveal")
                 .ghost()
@@ -5911,7 +5940,7 @@ impl Workspace {
                     .min_w_0()
                     .gap_1()
                     .justify_end()
-                    .child(div().min_w_0().text_xs().truncate().child(shown))
+                    .when_some(path_button, |this, button| this.child(button))
                     .when_some(reveal, |this, button| this.child(button)),
             )
     }
@@ -5929,7 +5958,11 @@ impl Workspace {
     ///
     /// Everything the rows need is read in one pass here, because the buffer and
     /// the selection have to be copied out together anyway.
-    fn render_document_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_document_inspector(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let Some(document) = self.active_document() else {
             return v_flex().into_any_element();
         };
@@ -6085,7 +6118,7 @@ impl Workspace {
 
         let mut sections = v_flex().w_full().gap_1();
         for (index, body) in bodies.into_iter().enumerate() {
-            sections = sections.child(self.inspector_section(index, body, cx));
+            sections = sections.child(self.inspector_section(index, body, window, cx));
         }
         sections.into_any_element()
     }
@@ -6108,6 +6141,7 @@ impl Workspace {
         &self,
         index: usize,
         body: AnyElement,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open = self.inspector_sections[index];
@@ -6148,10 +6182,32 @@ impl Workspace {
                     .child(INSPECTOR_SECTIONS[index]),
             );
 
+        // Upstream's `DisclosureGroup` animates its content; the collapsed
+        // panel settles at exactly zero, and a panel at zero is unmounted so a
+        // closed section costs no layout.
+        let progress = spring(
+            gpui_kit::ElementId::from(("inspector-section-body", index)),
+            if open { 1. } else { 0. },
+            cx.theme().motion_tokens().spring_control,
+            window,
+            cx,
+        );
+
         v_flex()
             .w_full()
             .child(trigger)
-            .when(open, |this| this.child(body))
+            .child(
+                AccordionPanel::new()
+                    .id(("inspector-section-panel", index))
+                    .open(open)
+                    .w_full()
+                    .keep_mounted(progress != 0. || cx.reduce_motion())
+                    .child(MotionReveal::new(
+                        ("inspector-section-content", index),
+                        progress,
+                        body,
+                    )),
+            )
             .into_any_element()
     }
 

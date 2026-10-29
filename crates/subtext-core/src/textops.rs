@@ -2308,6 +2308,31 @@ impl LineIndex {
     }
 }
 
+/// `text` shortened in the middle to at most `limit` characters.
+///
+/// CotEditor draws the inspector's path with `truncationMode(.middle)`, which
+/// keeps the beginning of the path and the file name and drops the middle. GPUI
+/// truncates at the end (`truncate()`), so the elision is done here, by
+/// character count rather than by measured width — the inspector panel is
+/// resizable, and a number that fits the default width is the honest
+/// approximation. The full text is one hover away.
+///
+/// The tail gets the larger share: on a path, the last segment is the part
+/// that identifies the file.
+pub fn middle_elided(text: &str, limit: usize) -> String {
+    let count = text.chars().count();
+    // A limit under three cannot hold both sides and the ellipsis.
+    if count <= limit || limit < 3 {
+        return text.to_string();
+    }
+    let keep = limit - 1;
+    let head = keep * 2 / 5;
+    let tail = keep - head;
+    let start: String = text.chars().take(head).collect();
+    let end: String = text.chars().skip(count - tail).collect();
+    format!("{start}…{end}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3251,5 +3276,40 @@ mod tests {
         // The line after a trailing terminator is empty, and an empty range at
         // the end of the selection is not a selection.
         assert_eq!(line_content_ranges("foo\nbar\n", &(0..8)), vec![0..3, 4..7]);
+    }
+    #[test]
+    fn a_short_text_is_left_alone() {
+        assert_eq!(middle_elided("~/a.rs", 44), "~/a.rs");
+        assert_eq!(middle_elided("", 44), "");
+    }
+
+    #[test]
+    fn a_long_path_keeps_both_ends_and_exactly_the_limit() {
+        let path = "/Users/someone/Documents/projects/subtext/crates/subtext-app/src/workspace.rs";
+        let elided = middle_elided(path, 24);
+        assert_eq!(elided.chars().count(), 24, "{elided}");
+        assert!(elided.starts_with("/Users/"), "{elided}");
+        assert!(elided.ends_with("workspace.rs"), "{elided}");
+        assert!(elided.contains('…'), "{elided}");
+    }
+
+    #[test]
+    fn the_tail_gets_the_larger_share_because_it_names_the_file() {
+        let path = "/a/b/c/d/e/f/g/h/i/j/file.rs";
+        let elided = middle_elided(path, 12);
+        // 11 kept: 4 head, 7 tail — and the tail is the whole file name.
+        assert_eq!(elided, "/a/b…file.rs", "{elided}");
+    }
+
+    #[test]
+    fn characters_are_counted_the_way_they_are_drawn() {
+        // Twelve characters, thirty bytes: the limit is about what is drawn.
+        let path = "/文档/项目/说明.md";
+        assert_eq!(middle_elided(path, 12), path);
+        let elided = middle_elided(path, 6);
+        // 5 kept: 2 head, 3 tail — and at this width the tail is only the
+        // extension, which is why the rows in the inspector use a much larger
+        // limit than this test does.
+        assert_eq!(elided, "/文….md", "{elided}");
     }
 }

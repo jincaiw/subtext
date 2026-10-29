@@ -6,6 +6,21 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **文稿检查器的四段现在有展开动画**，折叠到底时卸载（与上游的 `DisclosureGroup` 一样）。
+  此前用的是无样式的 `AccordionTrigger`，把「chevron 位置不对」和「不要动画」一起舍掉了 ——
+  动画其实在 `spring` / `MotionReveal` / `AccordionPanel` 三个基元上，与 trigger 用哪一个无关。
+
+### 修复
+
+- **检查器的 Full Path 改成中间省略**（上游是 `truncationMode(.middle)`），并且**悬停能看到全文、
+  点击复制完整路径**。此前是尾部截断、没有 tooltip：`div` 挂不上 tooltip（`ManagedTooltipExt` 是
+  组件库内部 trait），所以路径改成一个 ghost 按钮 —— 点击复制正好替代上游的
+  `textSelection(.enabled)`。
+
 ## [0.3.17] — 2026-10-29
 
 ### 性能
