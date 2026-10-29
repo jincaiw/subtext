@@ -2767,11 +2767,54 @@ Rust / TypeScript 的参数表、C 的声明子、HTML 的文本提取、CSS 的
 
 ---
 
+## 阶段 21 — 剩下的二十一个格式器
+
+§20 把大纲接上了，但只搬了七个格式器，其余走「名字 + 参数表」的通用规则。这一阶段把
+CotEditor 剩下的十四个全部搬完，于是每一行都按它自己语言的规矩写：
+
+| 语言 | 这一行现在长什么样 | 之前 |
+| --- | --- | --- |
+| Go | `(*T).M(a int)`、`F[T any](v T)` | `M(a int)`、`F(v T)` |
+| Ruby | `self.m(a, b)`、`n()` | `m(a, b)`、`n` |
+| Scala | `f(a, b)`、`g(using c)` | `f(a: Int, b: String)` |
+| Swift | `m(a:b:)`、`init?(x:)`、`deinit`、`MARK: - X` 折叠成 `X` | `m`、`init`、`deinit` |
+| C# | `~A()`、`IFoo.M()`、`G<T>(T a)` | `A()`、`M()`、`G(T a)` |
+| TypeScript | `m<T>(a: T)`、`namespace N` 显示 `N` | `m(a: T)`、`N`（碰巧对） |
+| Java / Kotlin / Lua / PHP | 名字 + 参数表（本来就是通用规则，但补上了没有参数时的 `()`） | 名字 + 参数表 |
+
+三处不是「拼字符串」而是**要读树**的：
+
+* **Scala 的参数名**：`(using c: C)` 里 `using` 不是参数，是修饰符。按文本切 `:` 会得到
+  `using c`，第一版就错了（`g(using using c)`）；改成走 `parameter` 节点的 `name` 字段。
+* **Swift 的签名**：查询不用参数表，而是 `outline.signature.begin/parameter/end` 三个
+  capture，行是 `name(label:label:)` —— 参数**标签**，不是类型。
+* **C# 的析构函数**：`~` 在名字前面，而 capture 从名字开始，所以范围要往前挪一个字节。
+
+**空白归一化**也重写了一次。CotEditor 的 `normalizedClause` 是一串正则替换，按顺序做；
+第一版我写成了「看下一个字符」，结果 `( a , b )` 出来是 `( a, b)` —— 上游是 `(a, b)`。
+现在是「开括号后不吃空格、闭括号前不留空格、逗号后恰好一个空格」，`tidy_signature` 再叠上
+`<` `>` `.` 三条。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 21.1 | `Item` 收成一份上下文：主 capture、整条 match 的范围、全部 `signature.parameters`（范围 + 节点）、`signature.parameter` 节点、`outline.name` | ✅ |
+| 21.2 | Go / Ruby / Scala / Swift / C# / TypeScript / JavaScript 七个专属格式器，加上 Java / Kotlin / Lua / PHP 的 `()` 兜底 | ✅ |
+| 21.3 | `tidy` / `tidy_signature` 重写：括号、方括号、尖括号、点、逗号的空白规则 | ✅ |
+| 21.4 | 8 条新测试，每条断言一整段代码的 `(kind, title)` 序列 | ✅ |
+
+**验证**：710 项测试全绿（702 → 710）。测试里的期望值是**先跑出来再写下的**，其中两条
+一开始就写错了，而且错得有用：
+
+* TypeScript 的 `const g = (x) => x` 在 level 4 而不是 3 —— 它比函数声明多一层语句；
+* Swift 的 `// MARK:` 会**同时**产出 separator 与 mark 两条（查询里两个 pattern 都匹配），
+  也就是大纲上一条细线加一行文字。这是上游查询本来的意思，不是重复。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
-| tree-sitter 大纲的格式器只移植了一半 | §20 让 21 种语言的大纲从空变成有，但 CotEditor 那 21 个 `OutlineFormatter` 只搬了 Markdown / CSS / HTML / Bash / C / C++ / Python 七个，其余走通用规则「名字 + 参数表」。仍然不同的地方：**Go 与 Ruby 的接收者前缀**（`(*T).M(a int)` vs 这里的 `M(a int)`）、**Go / Java / C# 的类型参数**（`M<T>(a)` vs `M(a)`）、**C# 的析构函数 `~A()` 与显式接口前缀**、**Swift 的 `name(label:)` 签名与 `MARK` 折叠**（Swift 的查询用 `outline.signature.begin/parameter/end` 三个 capture 重建签名，不是参数表）、**SQL 的语句头**（上游把 `CREATE TABLE …` 截到头部）。每一条都在上游对应的 formatter 里有明确写法，只是这一轮没搬完。 |
 | SQL 的大纲查询跑不起来 | 上游从 `DerekStride/tree-sitter-sql` 的 `gh-pages` 分支构建语法，那份语法有 `drop_procedure` 等节点；crates.io 上同源的 `tree-sitter-sequel` 0.3.11 没有，`Query::new` 直接报错 → SQL 大纲仍为空。常设门禁 `every_bundled_query_parses_against_its_grammar` 把 SQL 写进 `NOT_YET`，语法追上的那天测试会失败并提醒接线。 |
 | LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |

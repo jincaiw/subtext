@@ -13,10 +13,12 @@
 //! `main(int argc, char **argv)` are the same item — so the formatters here are
 //! ports of CotEditor's, not approximations.
 //!
-//! What is *not* ported yet is listed in `docs/PLAN.md` §20: Go and Ruby
-//! receivers, Go/Java/C# type parameters, C#'s destructor and explicit-interface
-//! prefixes, SQL's statement headers, and LaTeX (whose grammar this build does
-//! not carry).
+//! All twenty-one formatters are ported: Go's receivers and type parameters,
+//! Ruby's receivers, Scala's parameter names, Swift's `name(label:)` signatures
+//! and `MARK` rows, C#'s destructors and explicit interfaces, TypeScript's
+//! namespaces. What is missing is not a formatter but a grammar — SQL's query
+//! needs node types the published grammar does not have, and LaTeX's grammar
+//! does not link — see the gap table in `docs/PLAN.md`.
 
 use std::fmt;
 use std::ops::Range;
@@ -125,7 +127,6 @@ pub fn extract(syntax: &str, text: &str, query_source: &str) -> Result<Vec<TsIte
         let Some(primary) = primary_capture(matched, names) else {
             continue;
         };
-        let parameters = parameters_range(matched, names);
 
         if primary.kind == "separator" {
             items.push(TsItem {
@@ -137,14 +138,24 @@ pub fn extract(syntax: &str, text: &str, query_source: &str) -> Result<Vec<TsIte
             continue;
         }
 
-        let Some((title, range)) = format(
+        let item = Item {
             syntax,
-            primary.kind,
-            primary.node,
+            kind: primary.kind,
             text,
-            primary.range,
-            parameters,
-        ) else {
+            node: primary.node,
+            capture: primary.range,
+            whole: match_range(matched),
+            parameters: captures_named(matched, names, "outline.signature.parameters")
+                .into_iter()
+                .zip(nodes_named(matched, names, "outline.signature.parameters"))
+                .collect(),
+
+            parameter_nodes: nodes_named(matched, names, "outline.signature.parameter"),
+            name: captures_named(matched, names, "outline.name")
+                .first()
+                .cloned(),
+        };
+        let Some((title, range)) = format(&item) else {
             continue;
         };
         if title.is_empty() {
@@ -179,6 +190,29 @@ struct Primary<'tree> {
     range: Range<usize>,
 }
 
+/// Everything a formatter may need about one match.
+///
+/// CotEditor passes a `QueryMatch` and the source string around and each
+/// formatter pulls what it wants out of them; this is the same set of facts,
+/// collected once. `whole` is CotEditor's `QueryMatch.range` — the union of
+/// every capture — which Scala and Swift use as the row's range, and the
+/// `name` / `parameter_nodes` captures are Swift's, whose query spells a
+/// signature as `begin`/`parameter`/`end` rather than as one parameter list.
+struct Item<'a, 'tree> {
+    syntax: &'a str,
+    kind: &'static str,
+    text: &'a str,
+    node: Node<'tree>,
+    capture: Range<usize>,
+    whole: Range<usize>,
+    /// Every `outline.signature.parameters` capture, as a range and as a node:
+    /// the range is what most formatters paste in, the node is what Scala needs
+    /// to read the parameter *names* out of.
+    parameters: Vec<(Range<usize>, Node<'tree>)>,
+    parameter_nodes: Vec<Node<'tree>>,
+    name: Option<Range<usize>>,
+}
+
 /// The first capture in a match whose name is an outline capture.
 ///
 /// "First" is CotEditor's rule, and it matters: a match's other captures are
@@ -200,15 +234,43 @@ fn primary_capture<'tree>(
     })
 }
 
-/// The first `outline.signature.parameters` capture in a match.
-fn parameters_range(
+/// The union of every capture's range, which is what CotEditor's
+/// `QueryMatch.range` is.
+fn match_range(matched: &tree_sitter::QueryMatch<'_, '_>) -> Range<usize> {
+    matched
+        .captures
+        .iter()
+        .map(|capture| capture.node.start_byte()..capture.node.end_byte())
+        .reduce(|left, right| left.start.min(right.start)..left.end.max(right.end))
+        .unwrap_or(0..0)
+}
+
+/// Every capture in a match with a given name, in query order.
+fn captures_named(
     matched: &tree_sitter::QueryMatch<'_, '_>,
     names: &[&str],
-) -> Option<Range<usize>> {
-    matched.captures.iter().find_map(|capture| {
-        (names.get(capture.index as usize)? == &"outline.signature.parameters")
-            .then(|| capture.node.start_byte()..capture.node.end_byte())
-    })
+    wanted: &str,
+) -> Vec<Range<usize>> {
+    matched
+        .captures
+        .iter()
+        .filter(|capture| names.get(capture.index as usize) == Some(&wanted))
+        .map(|capture| capture.node.start_byte()..capture.node.end_byte())
+        .collect()
+}
+
+/// Every capture in a match with a given name, as nodes.
+fn nodes_named<'tree>(
+    matched: &tree_sitter::QueryMatch<'_, 'tree>,
+    names: &[&str],
+    wanted: &str,
+) -> Vec<Node<'tree>> {
+    matched
+        .captures
+        .iter()
+        .filter(|capture| names.get(capture.index as usize) == Some(&wanted))
+        .map(|capture| capture.node)
+        .collect()
 }
 
 /// Read a capture name into a kind and, for a heading, its level.
@@ -257,51 +319,89 @@ fn depth(node: Node<'_>) -> usize {
 }
 
 /// The display title and range for an item, per language.
-fn format(
-    syntax: &str,
-    kind: &'static str,
-    node: Node<'_>,
-    text: &str,
-    capture: Range<usize>,
-    parameters: Option<Range<usize>>,
-) -> Option<(String, Range<usize>)> {
-    let raw = text.get(capture.clone())?.to_string();
+///
+/// One branch per formatter CotEditor ships. The ones that only tidy their
+/// capture — Markdown, CSS, HTML — are at the top; the ones that rebuild a
+/// signature out of neighbouring nodes are below, in the order the language's
+/// formatter file reads.
+fn format(item: &Item<'_, '_>) -> Option<(String, Range<usize>)> {
+    let text = item.text;
+    let raw = text.get(item.capture.clone())?.to_string();
+    let function = item.kind == "function";
 
-    let (title, range) = match syntax {
-        // CotEditor's `MarkdownOutlineFormatter.formatTitle`: the capture is
-        // the whole heading line, `#` marks and all.
-        "Markdown" => (strip_atx(&raw)?, capture),
+    let (title, range) = match item.syntax {
+        // `MarkdownOutlineFormatter.formatTitle`: the capture is the whole
+        // heading line, `#` marks and all.
+        "Markdown" => (strip_atx(&raw)?, item.capture.clone()),
         // `CSSOutlineFormatter.formatTitle`: a rule's capture runs to its
         // closing brace, so the title is the header above it.
-        "CSS" => (css_header(&raw)?, capture),
+        "CSS" => (css_header(&raw)?, item.capture.clone()),
         // `HTMLOutlineFormatter`: the item is an element, and its title is the
         // text inside it, not its markup.
-        "HTML" => html_title(node, text)?,
+        "HTML" => html_title(item.node, text)?,
         // `BashOutlineFormatter`: a shell function's name carries no
         // parentheses in the source, so the row adds them.
-        "Bash" if kind == "function" => {
-            let range = bash_signature_range(text, capture.clone());
-            (format!("{}()", &text[capture]), range)
+        "Bash" if function => {
+            let range = bash_signature_range(text, item.capture.clone());
+            (format!("{}()", &text[item.capture.clone()]), range)
         }
         // `COutlineFormatter` / `CPPOutlineFormatter`: the capture is the
         // declarator, so the name and parameter list have to be dug out of it.
-        "C" | "C++" if kind == "function" => match c_signature(node, text) {
-            Some(signature) => signature,
-            None => (raw, capture),
-        },
-        // `PythonOutlineFormatter`: only a class-body assignment is an item,
-        // and a function's row carries its parameter list.
-        "Python" if kind == "value" => {
-            if !python_is_class_variable(node) {
+        "C" | "C++" if function => {
+            c_signature(item.node, text).unwrap_or((raw, item.capture.clone()))
+        }
+        // `PythonOutlineFormatter`: only a class-body assignment is an item.
+        "Python" if item.kind == "value" => {
+            if !python_is_class_variable(item.node) {
                 return None;
             }
-            (raw, capture)
+            (raw, item.capture.clone())
         }
-        // Only a function row carries a parameter list. A container or a
-        // value that happened to sit in a pattern with a `parameters` capture
-        // must not grow one.
-        _ if kind == "function" => with_parameters(text, capture.clone(), parameters),
-        _ => (raw, capture),
+        // `GoOutlineFormatter`: a method's row starts with its receiver —
+        // `(*T).M(a int)` — and a generic one carries its type parameters.
+        "Go" if function => go_signature(item),
+        // `RubyOutlineFormatter`: `self.m(a)` keeps the receiver, and a
+        // parameter list without parentheses gains them.
+        "Ruby" if function => ruby_signature(item),
+        // `ScalaOutlineFormatter`: the row is the parameter *names*, one clause
+        // per capture — `f(a, b)` rather than `f(a: Int, b: String)`.
+        "Scala" if function => scala_signature(item),
+        // `CSharpOutlineFormatter`: a destructor keeps its `~`, an explicit
+        // interface implementation keeps its prefix, and a generic method keeps
+        // its type parameters.
+        "C#" if function || item.kind == "value" => csharp_signature(item),
+        // `SwiftOutlineFormatter`: the row is `name(label:label:)`, built from
+        // the query's `signature` captures rather than from a parameter list.
+        "Swift" if function => swift_signature(item),
+        "Swift" if item.kind == "value" => match item.name.clone() {
+            Some(name) => (text[name.clone()].to_string(), name),
+            None => (raw, item.capture.clone()),
+        },
+        "Swift" if item.kind == "mark" => (swift_mark(&raw)?, item.capture.clone()),
+        // `JavaScriptOutlineFormatter` / `TypeScriptOutlineFormatter`: a
+        // function assigned to a variable is shown by the variable's name, not
+        // by the arrow function's parameter list.
+        "JavaScript" | "TypeScript" if function => {
+            if item.node.parent().map(|node| node.kind()) == Some("variable_declarator") {
+                return Some((raw, item.capture.clone()));
+            }
+            if item.syntax == "TypeScript" {
+                typescript_signature(item)
+            } else {
+                with_parameters(item)
+            }
+        }
+        // `TypeScriptOutlineFormatter.moduleTitle`: a `module`/`namespace` is
+        // shown by its name, not by its whole body.
+        "TypeScript" if item.kind == "container" => match module_title(item) {
+            Some(title) => title,
+            None => (raw, item.capture.clone()),
+        },
+        // Only a function row carries a parameter list. A container or a value
+        // that happened to sit in a pattern with a `parameters` capture must
+        // not grow one.
+        _ if function => with_parameters(item),
+        _ => (raw, item.capture.clone()),
     };
 
     // Each branch has already normalized its own title the way its formatter
@@ -310,34 +410,394 @@ fn format(
     (!title.is_empty()).then_some((title, range))
 }
 
-/// A name followed by its parameter list, when the match captured one.
+/// A name followed by its parameter list.
 ///
-/// This is the shape of most of CotEditor's formatters — Java, Kotlin, Scala,
-/// Rust, JavaScript, TypeScript, PHP, Lua, Ruby, Go and Swift all do exactly
-/// this for `.function`, and several of them add a receiver or a type parameter
-/// clause on top. The additions are listed as gaps; the parameters are not a
-/// gap, and leaving them out would make every function row look like a
-/// variable.
-fn with_parameters(
-    text: &str,
-    capture: Range<usize>,
-    parameters: Option<Range<usize>>,
-) -> (String, Range<usize>) {
-    let Some(parameters) = parameters else {
-        return (text[capture.clone()].to_string(), capture);
+/// CotEditor's `functionTitle` for Java, Kotlin, Lua, PHP and the rest: the
+/// name, then the captured parameter list with its whitespace tidied, or `()`
+/// when the match captured none — a function without parentheses reads as a
+/// variable otherwise.
+fn with_parameters(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let name = &text[item.capture.clone()];
+    let Some((parameters, _)) = item.parameters.first().cloned() else {
+        return (format!("{name}()"), item.capture.clone());
     };
     // A capture that already contains the parameter list — C's declarator, for
     // one — must not have it appended twice.
-    if parameters.start >= capture.start && parameters.end <= capture.end {
-        return (text[capture.clone()].to_string(), capture);
+    if parameters.start >= item.capture.start && parameters.end <= item.capture.end {
+        return (name.to_string(), item.capture.clone());
     }
-    let title = format!(
-        "{}{}",
-        &text[capture.clone()],
-        collapse(&text[parameters.clone()])
-    );
-    let range = capture.start..capture.end.max(parameters.end);
-    (title, range)
+    let range = item.capture.start..item.capture.end.max(parameters.end);
+    (format!("{name}{}", tidy(&text[parameters])), range)
+}
+
+/// `m<T>(a: T)` — TypeScript normalizes the whole signature — name, type
+/// parameters and parameters — rather than appending a clause to the name.
+fn typescript_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let type_parameters = item
+        .node
+        .parent()
+        .and_then(|declaration| declaration.child_by_field_name("type_parameters"))
+        .map(|node| node.start_byte()..node.end_byte());
+    let parameters = item.parameters.first().map(|(range, _)| range.clone());
+
+    let mut start = item.capture.start;
+    let mut end = item.capture.end;
+    for range in [type_parameters, parameters].into_iter().flatten() {
+        start = start.min(range.start);
+        end = end.max(range.end);
+    }
+    (tidy_signature(&text[start..end]), start..end)
+}
+
+/// `(*T).M(a int)` — the receiver, the name, the type parameters, the
+/// parameters, which is CotEditor's Go formatter in one line.
+fn go_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let name = &text[item.capture.clone()];
+    let declaration = item.node.parent();
+    let type_parameters = declaration
+        .and_then(|declaration| declaration.child_by_field_name("type_parameters"))
+        .map(|node| node.start_byte()..node.end_byte());
+    let parameters = item.parameters.first().map(|(range, _)| range.clone());
+    let receiver = go_receiver(declaration, text);
+
+    let mut title = String::new();
+    if let Some(receiver) = receiver {
+        // A pointer receiver keeps its parentheses: `(*T).M` reads as a type,
+        // `*T.M` reads as a dereference.
+        if receiver.starts_with('*') {
+            title.push('(');
+            title.push_str(&receiver);
+            title.push_str(").");
+        } else {
+            title.push_str(&receiver);
+            title.push('.');
+        }
+    }
+    title.push_str(name);
+    if let Some(range) = type_parameters.clone() {
+        title.push_str(&tidy(&text[range]));
+    }
+    match parameters.clone() {
+        Some(range) => title.push_str(&tidy(&text[range])),
+        None => title.push_str("()"),
+    }
+
+    let mut start = item.capture.start;
+    let mut end = item.capture.end;
+    for range in [type_parameters, parameters].into_iter().flatten() {
+        start = start.min(range.start);
+        end = end.max(range.end);
+    }
+    (title, start..end)
+}
+
+/// The type a Go method is declared on, from `func (t *T) M()`.
+fn go_receiver(declaration: Option<Node<'_>>, text: &str) -> Option<String> {
+    let declaration = declaration.filter(|node| node.kind() == "method_declaration")?;
+    let receiver = declaration.child_by_field_name("receiver")?;
+    let parameter = receiver.named_child(0)?;
+    let ty = parameter.child_by_field_name("type")?;
+    Some(collapse(&text[ty.start_byte()..ty.end_byte()]))
+}
+
+/// `self.m(a)` — Ruby keeps the receiver when the method has one, and wraps a
+/// bare parameter list in the parentheses Ruby lets you leave out.
+fn ruby_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let name = &text[item.capture.clone()];
+    let declaration = item.node.parent();
+    let receiver = declaration
+        .and_then(|node| node.child_by_field_name("object"))
+        .map(|node| node.start_byte()..node.end_byte());
+    let parameters = declaration
+        .and_then(|node| node.child_by_field_name("parameters"))
+        .map(|node| node.start_byte()..node.end_byte());
+
+    let mut title = String::new();
+    if let Some(range) = receiver.clone() {
+        title.push_str(&text[range]);
+        title.push('.');
+    }
+    title.push_str(name);
+    title.push_str(&ruby_parameters(
+        parameters.clone().map(|range| &text[range]),
+    ));
+
+    let mut start = item.capture.start;
+    let mut end = item.capture.end;
+    for range in [receiver, parameters].into_iter().flatten() {
+        start = start.min(range.start);
+        end = end.max(range.end);
+    }
+    (title, start..end)
+}
+
+/// A Ruby parameter list, with the parentheses it may have been written
+/// without.
+fn ruby_parameters(parameters: Option<&str>) -> String {
+    let Some(parameters) = parameters else {
+        return "()".to_string();
+    };
+    let normalized = tidy(parameters);
+    if normalized.is_empty() {
+        return "()".to_string();
+    }
+    if normalized.starts_with('(') {
+        return normalized;
+    }
+    format!("({normalized})")
+}
+
+/// `f(a, b)` — Scala shows parameter *names*, one clause per capture, and keeps
+/// `using` / `implicit` when the clause had one.
+fn scala_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let mut title = text[item.capture.clone()].to_string();
+    for (range, node) in &item.parameters {
+        title.push_str(&scala_clause(&text[range.clone()], *node, text));
+    }
+    // Scala takes the whole match as the row's range, so clicking it lands on
+    // the signature rather than on the name alone.
+    (title, item.whole.clone())
+}
+
+fn scala_clause(parameters: &str, node: Node<'_>, text: &str) -> String {
+    let clause = tidy(parameters);
+    let names = parameter_names(node, text);
+    if names.is_empty() {
+        return clause;
+    }
+    let joined = names.join(", ");
+    if clause.starts_with("(using ") {
+        return format!("(using {joined})");
+    }
+    if clause.starts_with("(implicit ") {
+        return format!("(implicit {joined})");
+    }
+    format!("({joined})")
+}
+
+/// The names of the parameters in a parameter clause.
+///
+/// Walked rather than parsed: `(using c: C)` has one name and a modifier, and
+/// splitting the text on `:` would hand back `using c`.
+fn parameter_names<'tree>(clause: Node<'tree>, text: &str) -> Vec<String> {
+    (0..clause.named_child_count() as u32)
+        .filter_map(|index| clause.named_child(index))
+        .filter(|child| child.kind() == "parameter")
+        .filter_map(|parameter| parameter.child_by_field_name("name"))
+        .map(|name| text[name.start_byte()..name.end_byte()].to_string())
+        .collect()
+}
+
+/// `~A()` / `IFoo.M<T>(int a)` — the C# signature, which is the *text* between
+/// the parts rather than a concatenation of them.
+fn csharp_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let declaration = item.node.parent();
+    let explicit_interface = declaration.and_then(|node| {
+        (0..node.named_child_count() as u32)
+            .filter_map(|index| node.named_child(index))
+            .find(|child| child.kind() == "explicit_interface_specifier")
+            .map(|child| child.start_byte()..child.end_byte())
+    });
+    let type_parameters = declaration
+        .and_then(|node| node.child_by_field_name("type_parameters"))
+        .map(|node| node.start_byte()..node.end_byte());
+
+    // A destructor's `~` sits before the name, and the capture starts at the
+    // name.
+    let mut name = item.capture.clone();
+    if declaration.map(|node| node.kind()) == Some("destructor_declaration")
+        && name.start > 0
+        && text.get(name.start - 1..name.start) == Some("~")
+    {
+        name.start -= 1;
+    }
+
+    let parameters = if item.kind == "value" {
+        None
+    } else {
+        item.parameters.first().map(|(range, _)| range.clone())
+    };
+
+    let mut start = name.start;
+    let mut end = name.end;
+    for range in [explicit_interface, type_parameters, parameters]
+        .into_iter()
+        .flatten()
+    {
+        start = start.min(range.start);
+        end = end.max(range.end);
+    }
+    (tidy_signature(&text[start..end]), start..end)
+}
+
+/// `m(a:)` — Swift's signature is the parameter *labels*, not the parameter
+/// list, and `init` keeps its `!`/`?`.
+fn swift_signature(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let text = item.text;
+    let name = &text[item.capture.clone()];
+    let range = item.whole.clone();
+
+    if name == "deinit" {
+        return (name.to_string(), range);
+    }
+
+    let signature = &text[range.clone()];
+    let base = if name == "init" {
+        initializer_name(signature).unwrap_or_else(|| name.to_string())
+    } else {
+        name.to_string()
+    };
+
+    let labels: Vec<String> = item
+        .parameter_nodes
+        .iter()
+        .filter_map(|parameter| {
+            parameter
+                .child_by_field_name("external_name")
+                .or_else(|| parameter.child_by_field_name("name"))
+                .map(|label| text[label.start_byte()..label.end_byte()].to_string())
+        })
+        .collect();
+
+    if labels.is_empty() {
+        return (format!("{base}()"), range);
+    }
+    let labels: Vec<String> = labels.iter().map(|label| format!("{label}:")).collect();
+    (format!("{base}({})", labels.join("")), range)
+}
+
+/// The `init`/`init!`/`init?` a Swift initializer starts with.
+fn initializer_name(signature: &str) -> Option<String> {
+    let trimmed = signature.trim_start();
+    let rest = trimmed.strip_prefix("init")?;
+    let suffix = rest.chars().next().filter(|c| *c == '!' || *c == '?');
+    Some(match suffix {
+        Some(suffix) => format!("init{suffix}"),
+        None => "init".to_string(),
+    })
+}
+
+/// `MARK: - Section` becomes `Section`; a comment that says nothing else is not
+/// a row.
+fn swift_mark(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let inner = if let Some(rest) = trimmed.strip_prefix("//") {
+        rest.trim()
+    } else if let Some(rest) = trimmed.strip_prefix("/*") {
+        rest.trim().trim_end_matches("*/").trim()
+    } else {
+        trimmed
+    };
+    let inner = inner.strip_prefix("MARK:").map(str::trim).unwrap_or(inner);
+    let inner = inner.trim_start_matches('-').trim();
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
+/// A TypeScript `module`/`namespace` by its name.
+fn module_title(item: &Item<'_, '_>) -> Option<(String, Range<usize>)> {
+    if !matches!(item.node.kind(), "internal_module" | "module") {
+        return None;
+    }
+    let name = item.node.child_by_field_name("name")?;
+    Some((
+        item.text[name.start_byte()..name.end_byte()].to_string(),
+        name.start_byte()..name.end_byte(),
+    ))
+}
+
+/// Collapse runs of whitespace and tidy the punctuation around it.
+///
+/// CotEditor's `normalizedClause`, which every function formatter ends with:
+/// `( a ,  b )` is `(a, b)`.
+fn tidy(clause: &str) -> String {
+    let collapsed = collapse(clause);
+    let mut out = String::with_capacity(collapsed.len());
+    let mut characters = collapsed.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            // Nothing sits just inside an opening bracket.
+            '(' | '[' => {
+                out.push(character);
+                while characters.peek() == Some(&' ') {
+                    characters.next();
+                }
+            }
+            // …or just before a closing one.
+            ')' | ']' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(character);
+            }
+            // A comma takes exactly one space after it.
+            ',' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(',');
+                while characters.peek() == Some(&' ') {
+                    characters.next();
+                }
+                out.push(' ');
+            }
+            _ => out.push(character),
+        }
+    }
+    out.trim().to_string()
+}
+
+/// [`tidy`], plus the angle brackets and dots a C# or TypeScript signature
+/// puts next to each other.
+fn tidy_signature(signature: &str) -> String {
+    let tidied = tidy(signature);
+    let mut out = String::with_capacity(tidied.len());
+    let mut characters = tidied.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            // A signature has no space between a name and its argument list.
+            '(' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push('(');
+                while characters.peek() == Some(&' ') {
+                    characters.next();
+                }
+            }
+            '<' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push('<');
+                while characters.peek() == Some(&' ') {
+                    characters.next();
+                }
+            }
+            '>' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push('>');
+            }
+            '.' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push('.');
+                while characters.peek() == Some(&' ') {
+                    characters.next();
+                }
+            }
+            _ => out.push(character),
+        }
+    }
+    out.trim().to_string()
 }
 
 /// Strip a Markdown heading down to its text.
@@ -681,6 +1141,159 @@ mod tests {
             items("Bash", "foo() {\n  echo hi\n}\n"),
             [("function", 3, "foo()".to_string())]
         );
+    }
+
+    #[test]
+    fn a_go_method_keeps_its_receiver_and_a_generic_function_its_type_parameters() {
+        assert_eq!(
+            items(
+                "Go",
+                "package p\n\nfunc (t *T) M(a int) {}\n\nfunc F[T any](v T) {}\n"
+            ),
+            [
+                ("function", 3, "(*T).M(a int)".to_string()),
+                ("function", 3, "F[T any](v T)".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_ruby_method_keeps_its_receiver_and_gains_its_parentheses() {
+        assert_eq!(
+            items(
+                "Ruby",
+                "class A\n  def self.m(a, b)\n  end\n\n  def n\n  end\nend\n"
+            ),
+            [
+                ("container", 3, "A".to_string()),
+                ("function", 5, "self.m(a, b)".to_string()),
+                // `def n` has no parentheses in the source; the row adds them,
+                // or the entry reads like a variable.
+                ("function", 5, "n()".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_scala_method_shows_parameter_names_and_keeps_using() {
+        assert_eq!(
+            items(
+                "Scala",
+                "object O {\n  def f(a: Int, b: String) = a\n  def g(using c: C) = 1\n}\n"
+            ),
+            [
+                ("container", 3, "O".to_string()),
+                ("function", 5, "f(a, b)".to_string()),
+                // The `using` modifier is not a parameter, so it is not a name.
+                ("function", 5, "g(using c)".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_swift_method_shows_its_argument_labels() {
+        assert_eq!(
+            items(
+                "Swift",
+                "struct S {\n  func m(a: Int, b: String) {}\n  init?(x: Int) {}\n  deinit {}\n  var p: Int\n}\n"
+            ),
+            [
+                ("container", 3, "S".to_string()),
+                ("function", 5, "m(a:b:)".to_string()),
+                // An initializer keeps its failable marker.
+                ("function", 5, "init?(x:)".to_string()),
+                ("function", 5, "deinit".to_string()),
+                // A property is its name, from the query's `outline.name`.
+                ("value", 5, "p".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_swift_mark_becomes_its_text_and_also_a_separator() {
+        // Two patterns match a `MARK:` comment — one calls it a separator, one
+        // calls it a mark — and CotEditor keeps both, so the outline shows a
+        // hairline above the label. That is the shipped query's doing, not this
+        // module's.
+        assert_eq!(
+            items("Swift", "// MARK: - Section\n\nfunc f() {}\n"),
+            [
+                ("separator", 2, String::new()),
+                ("mark", 2, "Section".to_string()),
+                ("function", 3, "f()".to_string()),
+            ]
+        );
+        // A comment that says nothing after the colon is not a row.
+        assert_eq!(
+            items("Swift", "// MARK: -\n"),
+            [("separator", 2, String::new())]
+        );
+    }
+
+    #[test]
+    fn a_csharp_signature_keeps_its_tilde_interface_and_type_parameters() {
+        assert_eq!(
+            items(
+                "C#",
+                "class A {\n  void M(int a) {}\n  ~A() {}\n  void IFoo.M() {}\n  void G<T>(T a) {}\n}\n"
+            ),
+            [
+                ("container", 3, "A".to_string()),
+                ("function", 5, "M(int a)".to_string()),
+                // The `~` sits before the name, and the query captures the name.
+                ("function", 5, "~A()".to_string()),
+                ("function", 5, "IFoo.M()".to_string()),
+                ("function", 5, "G<T>(T a)".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_typescript_signature_includes_its_type_parameters() {
+        assert_eq!(
+            items(
+                "TypeScript",
+                "namespace N {\n}\nclass A {\n  m<T>(a: T): void {}\n}\nconst g = (x) => x;\n"
+            ),
+            [
+                // A namespace is its name, not its body.
+                ("container", 3, "N".to_string()),
+                ("container", 3, "A".to_string()),
+                ("function", 5, "m<T>(a: T)".to_string()),
+                // A function assigned to a variable is the variable's row.
+                ("function", 4, "g".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_plain_function_languages_append_the_parameter_list() {
+        let cases: [(&str, &str, &[&str]); 4] = [
+            (
+                "Java",
+                "class A {\n  void m(int a) {}\n  void n() {}\n}\n",
+                &["m(int a)", "n()"],
+            ),
+            (
+                "Kotlin",
+                "class A {\n  fun m(a: Int) {}\n}\n",
+                &["m(a: Int)"],
+            ),
+            ("Lua", "function f(a)\nend\n", &["f(a)"]),
+            (
+                "PHP",
+                "<?php\nclass A {\n  function m($a) {}\n}\n",
+                &["m($a)"],
+            ),
+        ];
+        for (syntax, text, expected) in cases {
+            let titles: Vec<String> = items(syntax, text)
+                .into_iter()
+                .filter(|(kind, _, _)| *kind == "function")
+                .map(|(_, _, title)| title)
+                .collect();
+            assert_eq!(titles, expected, "{syntax}");
+        }
     }
 
     /// Every bundled query has to parse against the grammar this build carries.
