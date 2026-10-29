@@ -90,16 +90,26 @@ impl HighlightStyleResolver for CotStyleResolver {
 /// which is what [`HighlightToken::style_name`] maps CotEditor's ten tokens
 /// onto.
 pub fn project_theme(theme: &Theme, cx: &mut App) {
-    let foreground = to_hsla(theme.text_color());
-    let background = to_hsla(theme.background_color());
+    // Every editor colour goes through [`editor_style`] first, so the fallbacks
+    // a `.cottheme` leaves out are resolved in exactly one place — the same
+    // place the editor state is given its style, which is what keeps the two
+    // from drifting.
+    let style = editor_style(theme);
 
     let mut component = gpui_kit::component::Theme::global(cx).clone();
-    component.colors.foreground = foreground;
-    component.colors.background = background;
+    component.colors.foreground = style.foreground;
+    component.colors.muted_foreground = style.muted_foreground;
+    component.colors.background = style.background;
+    component.colors.border = style.border;
+    component.colors.selection = style.selection;
+    component.colors.caret = style.caret;
 
     let mut highlight = (*component.highlight_theme).clone();
-    highlight.style.editor_background = Some(background);
-    highlight.style.editor_foreground = Some(foreground);
+    highlight.style.editor_background = Some(style.background);
+    highlight.style.editor_foreground = Some(style.foreground);
+    highlight.style.editor_invisible = style.editor_invisible;
+    highlight.style.editor_active_line = style.editor_active_line;
+    highlight.style.editor_gutter_background = style.editor_gutter_background;
     highlight.style.syntax = syntax_colors(theme);
     component.highlight_theme = std::sync::Arc::new(highlight);
 
@@ -329,27 +339,6 @@ pub fn factory(syntaxes: Arc<Vec<Syntax>>) -> InputHighlighterFactory {
             .find(|syntax| syntax.name == language)
             .map(|syntax| Box::new(CotHighlighter::new(syntax)) as Box<dyn InputHighlighter>)
     })
-}
-
-/// Install the highlighter factory and the theme projection into an editor.
-///
-/// The factory is installed once per editor and keyed by language name; the
-/// language name is the syntax's own name, which is what makes
-/// [`set_highlighter`](gpui_kit::base::input::InputBaseState::set_highlighter)
-/// find the right rules.
-pub fn apply_to_editor(
-    editor: &gpui_kit::Entity<EditorState>,
-    syntax: &Syntax,
-    theme: &Theme,
-    cx: &mut App,
-) {
-    let name = syntax.name.clone();
-    let style = editor_style(theme);
-    editor.update(cx, |state, cx| {
-        state.set_editor_style(style);
-        state.set_highlighter(name, cx);
-        cx.notify();
-    });
 }
 
 /// Install the factory that every editor in the application will use.

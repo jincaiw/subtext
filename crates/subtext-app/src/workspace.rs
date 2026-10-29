@@ -946,13 +946,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<gpui_kit::base::input::EditorState> {
-        let style = highlighter::editor_style(&self.theme);
+        // No `set_editor_style` here on purpose. The pane is a component
+        // `Editor`, and `Input::render` re-applies the style from the component
+        // theme on every frame — a style set on the state is overwritten before
+        // it is read. The colours come from `highlighter::project_theme`
+        // instead; see the note on it.
         let language = syntax_name.to_string();
         let options = self.settings.editor;
 
         cx.new(|cx| {
             let mut state = gpui_kit::base::input::EditorState::new(window, cx);
-            state.set_editor_style(style);
             if let Some(factory) = highlighter::current_factory() {
                 state.set_highlighter_factory(factory, cx);
             }
@@ -4091,13 +4094,10 @@ impl Workspace {
         // go there, not onto the editor state.
         highlighter::project_theme(&theme, cx);
 
-        let style = highlighter::editor_style(&theme);
-        let editors = self.all_panes();
-        for editor in editors {
-            editor.update(cx, |state, cx| {
-                state.set_editor_style(style.clone());
-                cx.notify();
-            });
+        // The panes pick the new colours up from the component theme — see
+        // `highlighter::project_theme` for why they cannot be set on the state.
+        for editor in self.all_panes() {
+            editor.update(cx, |_, cx| cx.notify());
         }
         let _ = self.settings.save();
         // The Format ▸ Theme submenu checks the theme in force.
