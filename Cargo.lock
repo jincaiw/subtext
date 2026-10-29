@@ -6219,7 +6219,7 @@ dependencies = [
 
 [[package]]
 name = "subtext-app"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -6237,7 +6237,7 @@ dependencies = [
 
 [[package]]
 name = "subtext-core"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "encoding_rs",
  "jiff",
@@ -6255,7 +6255,7 @@ dependencies = [
 
 [[package]]
 name = "subtext-syntax"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "regex",
  "serde",
@@ -6287,7 +6287,7 @@ dependencies = [
 
 [[package]]
 name = "subtext-theme"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "serde",
  "serde_json",
