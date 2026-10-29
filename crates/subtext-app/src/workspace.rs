@@ -8542,6 +8542,10 @@ impl Workspace {
                 cx.notify();
             }
             19 => {
+                // Show it too, not just select it: the sweep runs step 18 first
+                // so it could assume the sidebar was open, but `panel_peek`
+                // opens one step on its own and showed nothing.
+                self.settings.window.show_sidebar = true;
                 self.settings.sidebar_pane = SidebarPane::FileBrowser;
                 cx.notify();
             }

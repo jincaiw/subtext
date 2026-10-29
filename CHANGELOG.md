@@ -6,6 +6,15 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **截图走查收官**：Folder Find 侧栏、File Browser 侧栏、Find & Replace 浮窗三处确认无布局缺陷
+  （语法着色也在截图里核对了）。
+- **`SUBTEXT_PANEL_PEEK=19` 此前拍不出东西**：step 19 只切换侧栏页签、不打开侧栏（sweep 里靠
+  step 18 先开）。现在每个 step 独立成立，单步 peek 才可信。
+
 ## [0.3.22] — 2026-10-29
 
 ### 修复
