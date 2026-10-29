@@ -22,13 +22,34 @@ pub struct FileMap {
 }
 
 /// How CotEditor categorises a syntax.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+///
+/// `Syntax.Kind` upstream, and it has exactly these two cases. An earlier
+/// revision spelled them `code` / `markup` / `none`, which meant the seven
+/// bundles that say `"kind": "general"` — Markdown, LaTeX, BibTeX, BBCode and
+/// Plain Text among them — failed to deserialize *at all*. `read_json` treats a
+/// file it cannot parse as absent, so those syntaxes loaded with no file map,
+/// and a `.md` file opened as Plain Text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyntaxKind {
-    Code,
-    Markup,
     #[default]
-    None,
+    General,
+    Code,
+}
+
+/// Read leniently: anything that is not `code` is general.
+///
+/// The alternative is what caused the bug above — one unknown value taking the
+/// whole `Info.json` with it, and with it the file map, the metadata and the
+/// syntax's claim on its extensions. A category is a label for grouping, and a
+/// label this build has not heard of is no reason to lose the rest.
+impl<'de> Deserialize<'de> for SyntaxKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.as_str() {
+            "code" => Self::Code,
+            _ => Self::General,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -280,6 +301,19 @@ impl Syntax {
         })
     }
 
+    /// The tree-sitter outline query for this syntax, when it has one.
+    ///
+    /// CotEditor keeps the queries beside the syntax bundles rather than inside
+    /// them — `resources/queries/<Name>/outline.scm` — so this reads one level
+    /// up from the `syntaxes` directory. A syntax the user installed in their
+    /// own folder has no `queries` directory next to it and gets no outline,
+    /// which is also what CotEditor does: the queries are not part of a
+    /// `.cotsyntax` bundle.
+    pub fn outline_query(&self) -> Option<String> {
+        let queries = self.directory.parent()?.parent()?.join("queries");
+        std::fs::read_to_string(queries.join(&self.name).join("outline.scm")).ok()
+    }
+
     /// A bare Plain Text syntax, with no rules at all.
     ///
     /// Used when the resource directory is missing or empty. Without it the
@@ -481,6 +515,32 @@ mod tests {
 
     fn manager() -> SyntaxManager {
         SyntaxManager::load_from_directory(resources()).expect("resources/syntaxes must exist")
+    }
+
+    /// The seven bundles that say `"kind": "general"` keep their file maps.
+    ///
+    /// They did not, once: `SyntaxKind` was spelled `code`/`markup`/`none`, so
+    /// `general` failed to deserialize, `read_json` treated the whole
+    /// `Info.json` as absent, and a `.md` file opened as Plain Text.
+    #[test]
+    fn a_general_syntax_keeps_its_extensions() {
+        let manager = manager();
+        let markdown = manager.by_name("Markdown").expect("Markdown must load");
+        assert_eq!(markdown.info.kind, SyntaxKind::General);
+        assert!(
+            markdown.info.file_map.extensions.iter().any(|e| e == "md"),
+            "Markdown lost its extensions: {:?}",
+            markdown.info.file_map
+        );
+        assert_eq!(
+            manager.syntax_for_path(Path::new("notes.md")).name,
+            "Markdown"
+        );
+        assert_eq!(
+            manager.syntax_for_path(Path::new("paper.tex")).name,
+            "LaTeX"
+        );
+        assert_eq!(manager.syntax_for_path(Path::new("a.rs")).name, "Rust");
     }
 
     #[test]

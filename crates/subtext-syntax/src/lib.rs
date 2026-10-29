@@ -8,9 +8,15 @@
 //! the definitions onto a tree-sitter grammar: the `.cotsyntax` files are the
 //! source of truth for how a language is highlighted, and a 1:1 reading of
 //! them is what makes the colours match.
+//!
+//! Outlines are the one exception. Twenty-two of the seventy syntaxes have no
+//! outline *rules* at all — theirs live in a tree-sitter query beside the
+//! bundles, and there is no way to read a query with a regex engine. See
+//! [`ts_outline`].
 
 mod highlight;
 mod syntax;
+pub mod ts_outline;
 
 pub use highlight::{HighlightRule, HighlightToken, Highlighter, RawRule, TokenSpan};
 pub use syntax::{

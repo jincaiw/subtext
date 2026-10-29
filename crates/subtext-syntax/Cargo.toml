@@ -10,3 +10,34 @@ subtext-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+
+# Tree-sitter, for the outline only.
+#
+# CotEditor gets the outline of 22 of its 70 syntaxes from a tree-sitter query
+# (`queries/<Name>/outline.scm`) rather than from `Regex/Outlines.json`, and
+# those bundles carry no regex rules at all — Markdown, Python, JavaScript,
+# Rust and the rest. Without a parser their outline is empty, which is why the
+# grammars are here. Highlighting still comes from `.cotsyntax` regex rules;
+# this dependency does not change a single colour.
+tree-sitter = "0.26"
+tree-sitter-bash = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-css = "0.25"
+tree-sitter-go = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-kotlin-sg = "0.4"
+tree-sitter-lua = "0.4"
+tree-sitter-make = "1"
+tree-sitter-md = "0.5"
+tree-sitter-php = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-scala = "0.26"
+tree-sitter-sequel = "0.3"
+tree-sitter-swift = "0.7"
+tree-sitter-typescript = "0.23"

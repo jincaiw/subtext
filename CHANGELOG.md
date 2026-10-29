@@ -6,6 +6,25 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **21 种语言的大纲**。Markdown、Python、JavaScript、TypeScript、Rust、HTML、CSS、C、C++、
+  Java、Go、Ruby、PHP、Swift、Kotlin、Scala、Lua、Bash、Makefile、C# 的大纲不是正则规则，
+  而是 CotEditor 放在 `queries/<Name>/outline.scm` 里的 tree-sitter 查询 —— 此前 SubText
+  只读 `Regex/Outlines.json`，这些语言的大纲面板**一直是空的**。现在照用上游的查询与语法，
+  函数行带参数表（`main(int argc, char **argv)`）、HTML 取文本而不是标签、Markdown 去掉
+  `#`。跳级标题与 `title` 的层级也按上游的 `normalizedLevels` 归一化了。
+
+### 修复
+
+- **`.md` 文件不再以 Plain Text 打开**。`SyntaxKind` 的取值与上游不一致（写成了
+  `code`/`markup`/`none`，上游只有 `general`/`code`），于是七个说 `"kind": "general"` 的语法
+  整份 `Info.json` 反序列化失败；`read_json` 把解析失败当成「文件不存在」，这些语法因此
+  丢了 fileMap —— Markdown、LaTeX、BibTeX、BBCode、Plain Text 的扩展名映射全部失效。
+- 大纲不再合并「同跨度同标签」的两条规则 —— 上游不去重，那是 SubText 自己的规则。
+
 ## [0.3.7] — 2026-10-24
 
 ### 修复

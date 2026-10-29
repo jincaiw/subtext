@@ -2550,9 +2550,15 @@ LS 也计入行号、CRLF 算一行、CRLF 中间的位置算上一行、1024 �
    `Write { path: "Untitled", "no path" }`，只在状态栏留一句错误。对**有名**文档它会写，
    但写的是 `self.active` 那一个，而被关闭的标签不一定是前台那个。
 2. **四行假缺口**：自动补全（§11.1 已做，开关也已接上）、*Straighten Quotes* 置灰
-   （§13.5 已做）、大纲 `title` 层级（上游那段 `normalize` 生产代码根本不调用）、
-   「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁（`menu_contract.rs`
-   早就是那道门禁：menu → bridge → dispatch 三段按名字比，还带解析器地板值）。
+   （§13.5 已做）、大纲 `title` 层级（~~上游那段 `normalize` 生产代码根本不调用~~ —
+   **这条判断是错的**，见下）、「生成表里每个命令都要有人在 `dispatch` 里认领」没有常设门禁
+   （`menu_contract.rs` 早就是那道门禁：menu → bridge → dispatch 三段按名字比，还带解析器地板值）。
+
+**更正（§20）**：`OutlinePolicy.normalize` **确实在生产路径上**。当时的核查只看了
+`OutlineInspectorView`（它直接吃 `syntaxController.outlineItems`），而归一化发生在**上一层**：
+`Syntax.outlineParser` → `RegexOutlineParser.parseOutline` → `policy.normalize(items)` →
+`normalizedLevels`。教训与同节末尾那条一样，只是方向相反：**没查到调用点，可能是因为只看了
+一层**。`title` 的层级、跳级标题的压缩，都由那段代码决定，SubText 到 §20 才补上。
 
 | 任务 | 内容 | 状态 |
 | --- | --- | --- |
@@ -2722,10 +2728,52 @@ U+0080。这不是「多接受几个字节序列」，是**解码结果不同**�
 
 ---
 
+## 阶段 20 — 二十一种语言的大纲，来自它们自己的查询
+
+**发现（2026-10-29）**：核对「`extract` 的去重是 SubText 自己的」这条记账时翻到
+`resources/queries/`，才注意到一件更大的事 —— **70 个语法里有 22 个的大纲根本不是正则规则**，
+它们的 `.cotsyntax` 里没有 `Regex/Outlines.json`，大纲写在 `queries/<Name>/outline.scm`。
+SubText 只读前者，于是 Markdown、Python、JavaScript、TypeScript、Rust、HTML、CSS、C、C++、
+Java、Go、Ruby、PHP、Swift、Kotlin、Scala、Lua、Bash、SQL、Makefile、C# 这些语言的
+大纲面板**一直是空的**，而缺口表里没有这一条。
+
+**做法**：`subtext-syntax` 新增 `ts_outline` 模块，带 21 个 tree-sitter 语法；查询本身照用
+CotEditor 的那份，不翻译、不重写。分工与上游一致 —— **查询**决定哪些节点是条目、有多深，
+**格式器**决定这一行写什么。后者不是装饰：`main` 与 `main(int argc, char **argv)` 是同一条。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 20.1 | `ts_outline`：跑查询、按 capture 名取 kind 与层级（`outline.heading.N` 取 N，其余按节点祖先数），`outline.signature.parameters` 拼进函数行；无标题的条目不出现 | ✅ |
+| 20.2 | 21 个语法按 CotEditor `Package.swift` 的版本对齐（bash 0.25 / go 0.25 / php 0.25 / scala 0.26 / css 0.25 / javascript 0.25 / python 0.25 等），不按缓存里的旧版本将就 | ✅ |
+| 20.3 | 格式器移植：Markdown（去 `#`）、CSS（截到 `{`/`;`）、HTML（取文本节点、跨标签的空隙算空格）、Bash（补 `()`）、C/C++（从声明子里挖出名字与参数表）、Python（只认类体里的赋值，函数带参数） | ✅ |
+| 20.4 | 层级归一化 `normalize_levels`：**两条路径都跑**（正则与 tree-sitter），跳级标题压缩、`title` 排在标题下一层、分隔符用临时栈不打断嵌套 | ✅ |
+| 20.5 | 去掉 SubText 自己的「同跨度同标签合并」——上游不去重 | ✅ |
+| 20.6 | 常设门禁 `every_bundled_query_parses_against_its_grammar`：逐个跑 21 份查询，解析失败即测试失败；唯一的例外（SQL）**写进测试**而不是跳过，语法追上那天测试会提醒 | ✅ |
+
+**顺手抓到的一条真 bug**：`SyntaxKind` 被写成 `code` / `markup` / `none`，而上游只有
+`general` / `code`。七个说 `"kind": "general"` 的语法（Markdown、LaTeX、BibTeX、BBCode、
+Plain Text …）因此**整份 `Info.json` 反序列化失败**，而 `read_json` 把解析失败当成「文件不存在」——
+于是这些语法没有 fileMap：**`.md` 文件一直以 Plain Text 打开**。现在 `SyntaxKind` 按上游取值，
+未知值落回 `general` 而不是让整个文件作废。
+
+**验证**：探针打开 `/tmp/probe/notes.md`，工作区路径（不是测试替身）给出
+`syntax="Markdown"`、`entries=4`、`titles=["One", "Two", "", "Three"]`。新增 12 条测试
+（702 全绿），覆盖 Markdown 的 ATX / setext / 分隔符、Python 的类属性与模块变量之别、
+Rust / TypeScript 的参数表、C 的声明子、HTML 的文本提取、CSS 的 at-rule、
+以及「有查询走查询、有规则走规则」这两条分支。
+
+**还没做的**（下表的「tree-sitter 格式器」一行）：Go 与 Ruby 的接收者前缀、Go / Java / C# 的
+类型参数、C# 的析构函数与显式接口、Swift 的 `name(label:)` 签名与 `MARK` 折叠、SQL 的语句头。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
+| tree-sitter 大纲的格式器只移植了一半 | §20 让 21 种语言的大纲从空变成有，但 CotEditor 那 21 个 `OutlineFormatter` 只搬了 Markdown / CSS / HTML / Bash / C / C++ / Python 七个，其余走通用规则「名字 + 参数表」。仍然不同的地方：**Go 与 Ruby 的接收者前缀**（`(*T).M(a int)` vs 这里的 `M(a int)`）、**Go / Java / C# 的类型参数**（`M<T>(a)` vs `M(a)`）、**C# 的析构函数 `~A()` 与显式接口前缀**、**Swift 的 `name(label:)` 签名与 `MARK` 折叠**（Swift 的查询用 `outline.signature.begin/parameter/end` 三个 capture 重建签名，不是参数表）、**SQL 的语句头**（上游把 `CREATE TABLE …` 截到头部）。每一条都在上游对应的 formatter 里有明确写法，只是这一轮没搬完。 |
+| SQL 的大纲查询跑不起来 | 上游从 `DerekStride/tree-sitter-sql` 的 `gh-pages` 分支构建语法，那份语法有 `drop_procedure` 等节点；crates.io 上同源的 `tree-sitter-sequel` 0.3.11 没有，`Query::new` 直接报错 → SQL 大纲仍为空。常设门禁 `every_bundled_query_parses_against_its_grammar` 把 SQL 写进 `NOT_YET`，语法追上的那天测试会失败并提醒接线。 |
+| LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
 | UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
@@ -2749,7 +2797,6 @@ U+0080。这不是「多接受几个字节序列」，是**解码结果不同**�
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | 大纲行只滚入可见，不居中 | 上游 `selectItem(id:)` 用 `centerSelectionInVisibleArea`（居中），SubText 的 `set_selection` 只滚入可见——`EditorState` 没有居中的公开接口。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
-| `extract` 的去重是 SubText 自己的 | 上游**没有**去重：`removingDuplicateIDs` 只是兜底，防的是身份解析器把同一个 id 发两次，而它不会。SubText 合并「同跨度且同标签」的两条规则（见 §8.10），这是与上游不同的一处保留行为。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **三个纯 Rust crate 已由 CI 跨目标检查**（§14.4）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |

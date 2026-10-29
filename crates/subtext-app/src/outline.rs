@@ -238,14 +238,127 @@ pub fn extract(text: &str, rules: &[OutlineItem]) -> Vec<OutlineEntry> {
     }
 
     entries.sort_by_key(sort_key);
-    // Two rules landing on the same span with the same label are one entry.
-    // Upstream has no dedup at all — `removingDuplicateIDs` only catches an
-    // identity resolver that handed one id out twice, which it does not do —
-    // so this is SubText's own rule, and keyed on the span rather than the
-    // line so that it only ever merges what a reader would call one thing.
-    entries.dedup_by(|a, b| a.range == b.range && a.title == b.title);
+    // No dedup. An earlier revision merged two rules that landed on the same
+    // span with the same label, which reads like a fix but is a difference:
+    // upstream keeps both rows. Its `removingDuplicateIDs` looks like the
+    // opposite and is not — that removes items sharing an *id*, and the
+    // resolver hands each item its own, so it never fires.
+    normalize_levels(&mut entries);
     assign_ids(&mut entries);
     entries
+}
+
+/// The outline of a syntax, from whichever source it has.
+///
+/// Twenty-two of CotEditor's syntaxes have no outline rules at all: theirs is a
+/// tree-sitter query beside the bundle, and a query cannot be read by a regex
+/// engine. Markdown, Python, JavaScript, Rust and the rest are that set, so
+/// without the second branch their outline panel is empty.
+pub fn entries(text: &str, syntax: &subtext_syntax::Syntax) -> Vec<OutlineEntry> {
+    if !syntax.outlines.is_empty() {
+        return extract(text, &syntax.outlines);
+    }
+    let Some(query) = syntax.outline_query() else {
+        return Vec::new();
+    };
+    extract_with_parser(text, &syntax.name, &query)
+}
+
+/// The outline a tree-sitter query describes.
+///
+/// A query that does not parse against its grammar yields no outline rather
+/// than an error the reader cannot act on — the panel is empty either way, and
+/// `ts_outline`'s own tests are what keep a broken query from shipping.
+fn extract_with_parser(text: &str, syntax: &str, query: &str) -> Vec<OutlineEntry> {
+    let Ok(items) = subtext_syntax::ts_outline::extract(syntax, text, query) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<OutlineEntry> = items
+        .into_iter()
+        .map(|item| OutlineEntry {
+            id: String::new(),
+            title: item.title,
+            range: item.range,
+            // Every tree-sitter item is level-indented: its depth comes from
+            // the capture's node, not from whitespace in its label.
+            indent: Indent::Level(item.level),
+            kind: item.kind.and_then(OutlineKind::from_name),
+        })
+        .collect();
+    normalize_levels(&mut entries);
+    assign_ids(&mut entries);
+    entries
+}
+
+/// Renumber levels so none is skipped, and place titles relative to the item
+/// before them.
+///
+/// CotEditor's `[OutlineItem].normalizedLevels(policy: .standard)`, which runs
+/// in *both* of its parsers — the regex one and the tree-sitter one — before the
+/// tree is built. Two things come out of it:
+///
+/// * a document whose headings skip levels (`#` then `###`) still nests one
+///   step at a time, because the depth stack is compacted rather than the
+///   numbers being taken at face value;
+/// * a `title` sits one level below the heading before it, and at the previous
+///   item's level otherwise. A `title` is not a root — an HTML `<title>` under
+///   an `<h1>` belongs to it.
+///
+/// A separator is a *section marker*: it is normalized against a copy of the
+/// stack, so it lands where it would have gone without disturbing the nesting
+/// that follows it.
+fn normalize_levels(entries: &mut [OutlineEntry]) {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut last_level = 0;
+    let mut last_kind: Option<OutlineKind> = None;
+
+    for entry in entries.iter_mut() {
+        let Some(depth) = entry.indent.level() else {
+            // A whitespace indent is not a level: it neither nests nor counts
+            // as the previous level, though it does set the previous kind.
+            if entry.kind != Some(OutlineKind::Separator) {
+                last_kind = entry.kind;
+            }
+            continue;
+        };
+
+        if entry.kind == Some(OutlineKind::Title) {
+            let level = match last_kind {
+                Some(OutlineKind::Heading) => last_level + 1,
+                _ => last_level,
+            };
+            entry.indent = Indent::Level(level);
+        } else if entry.kind == Some(OutlineKind::Separator) {
+            let mut temporary = stack.clone();
+            entry.indent = Indent::Level(compact(depth, &mut temporary));
+        } else {
+            entry.indent = Indent::Level(compact(depth, &mut stack));
+        }
+
+        if entry.kind != Some(OutlineKind::Separator) {
+            last_level = entry.indent.level().unwrap_or(0);
+            last_kind = entry.kind;
+        }
+    }
+}
+
+/// The compacted level for a raw depth, given the depths currently open.
+fn compact(depth: usize, stack: &mut Vec<usize>) -> usize {
+    match stack.last().copied() {
+        None => stack.push(depth),
+        Some(last) if depth > last => stack.push(depth),
+        Some(last) if depth < last => {
+            while stack.last().is_some_and(|open| *open > depth) {
+                stack.pop();
+            }
+            if stack.last() != Some(&depth) {
+                stack.push(depth);
+            }
+        }
+        // The same depth again: already open, and already counted.
+        Some(_) => {}
+    }
+    stack.len() - 1
 }
 
 /// Compile a rule the way CotEditor compiles it.
@@ -895,6 +1008,14 @@ mod tests {
         entries.iter().map(|entry| entry.title.as_str()).collect()
     }
 
+    /// The normalized level of each entry, which is what the tree nests by.
+    fn levels(entries: &[OutlineEntry]) -> Vec<usize> {
+        entries
+            .iter()
+            .map(|entry| entry.indent.level().unwrap_or(0))
+            .collect()
+    }
+
     /// The ids of a tree's roots and their descendants, in document order.
     fn tree_titles(nodes: &[OutlineNode]) -> Vec<(usize, String)> {
         let mut out = Vec::new();
@@ -973,12 +1094,70 @@ mod tests {
 
     #[test]
     fn a_heading_kind_carries_its_own_level() {
+        // The rule says three, and `indent_for` keeps that…
+        assert_eq!(
+            indent_for(Some(OutlineKind::Heading), "heading.3", ""),
+            Indent::Level(3)
+        );
+
+        // …but a document that starts at `###` has nothing above it, so
+        // normalization compacts the level to 0. This is CotEditor's
+        // `normalizedLevels`, and it is why a document whose headings skip
+        // numbers still nests one step at a time.
         let rules = [rule("heading.3", r"^### (.+)$", "$1")];
         let entries = extract("### Deep\n", &rules);
-        assert_eq!(entries[0].indent, Indent::Level(3));
+        assert_eq!(entries[0].indent, Indent::Level(0));
         assert_eq!(entries[0].title, "Deep");
         // The level lives in the indent, so the kind is just "a heading".
         assert_eq!(entries[0].kind, Some(OutlineKind::Heading));
+    }
+
+    /// A syntax whose outline is a tree-sitter query gets one, end to end.
+    ///
+    /// Markdown has no `Regex/Outlines.json` at all — its outline has always
+    /// been a query — so before the parser was wired in this returned nothing
+    /// and the panel was empty.
+    #[test]
+    fn a_syntax_with_a_query_gets_an_outline() {
+        let entries = entries("# One\n\n## Two\n", &syntax("Markdown"));
+        assert_eq!(titles(&entries), ["One", "Two"]);
+        assert_eq!(levels(&entries), [0, 1]);
+        assert_eq!(entries[0].kind, Some(OutlineKind::Heading));
+    }
+
+    /// …and a syntax whose outline is a regex rule still takes that path.
+    #[test]
+    fn a_syntax_with_rules_still_uses_them() {
+        let entries = entries("fn main() {}\n", &syntax("Rust"));
+        assert_eq!(titles(&entries), ["main"]);
+        assert_eq!(entries[0].kind, Some(OutlineKind::Function));
+    }
+
+    #[test]
+    fn skipped_heading_levels_are_compacted() {
+        let rules = [
+            rule("heading.1", r"^# (.+)$", "$1"),
+            rule("heading.3", r"^### (.+)$", "$1"),
+        ];
+        let entries = extract("# A\n\n### B\n", &rules);
+        assert_eq!(levels(&entries), [0, 1]);
+    }
+
+    #[test]
+    fn a_title_sits_below_the_heading_before_it() {
+        // CotEditor's one special case in `normalizedLevels`: a title is one
+        // level below a preceding heading and level with anything else. A
+        // title is not a root — an HTML `<title>` under an `<h1>` belongs to
+        // it, and so does a reStructuredText document title under a section.
+        let rules = [
+            rule("heading.1", r"^# (.+)$", "$1"),
+            rule("title", r"^= (.+)$", "$1"),
+        ];
+        let entries = extract("# A\n\n= T\n", &rules);
+        assert_eq!(levels(&entries), [0, 1]);
+
+        let entries = extract("= T\n", &rules);
+        assert_eq!(levels(&entries), [0]);
     }
 
     #[test]
@@ -1051,15 +1230,23 @@ mod tests {
     }
 
     #[test]
-    fn two_rules_on_the_same_span_with_the_same_label_are_one_entry() {
-        // The one place `extract` drops something upstream would keep, and it
-        // is keyed on the span: the same text, described twice.
+    fn two_rules_on_the_same_span_are_two_entries() {
+        // Two rules describing the same text give two rows, which is what
+        // upstream does. An earlier revision merged them, on the theory that a
+        // reader would call them one thing; that was SubText's own rule, and
+        // `removingDuplicateIDs` — which looks like it does the same — only
+        // removes items sharing an id, which the resolver never hands out
+        // twice.
         let rules = [
             rule("function", r"^fn (\w+)", "$1"),
             rule("value", r"^fn (\w+)", "$1"),
         ];
         let entries = extract("fn a() {}\n", &rules);
-        assert_eq!(titles(&entries), ["a"]);
+        assert_eq!(titles(&entries), ["a", "a"]);
+        assert_eq!(
+            entries.iter().map(|entry| entry.kind).collect::<Vec<_>>(),
+            [Some(OutlineKind::Function), Some(OutlineKind::Value)]
+        );
     }
 
     #[test]

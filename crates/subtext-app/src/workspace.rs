@@ -2133,7 +2133,7 @@ impl Workspace {
         let selection = self.active_selection(cx);
         let entries = match self.active_document() {
             Some(document) => match self.syntaxes.by_name(&document.syntax) {
-                Some(syntax) => crate::outline::extract(&text, &syntax.outlines),
+                Some(syntax) => crate::outline::entries(&text, syntax),
                 None => Vec::new(),
             },
             None => return,
@@ -5945,7 +5945,7 @@ impl Workspace {
         };
 
         let entries = match self.syntaxes.by_name(&source.syntax) {
-            Some(syntax) => crate::outline::extract(&text, &syntax.outlines),
+            Some(syntax) => crate::outline::entries(&text, syntax),
             None => Vec::new(),
         };
         let nodes = crate::outline::build_tree(&entries);
@@ -7045,7 +7045,7 @@ impl Workspace {
             return (Vec::new(), selection);
         };
         let text = document.editor().read(cx).value().to_string();
-        (crate::outline::extract(&text, &syntax.outlines), selection)
+        (crate::outline::entries(&text, syntax), selection)
     }
 
     /// The status bar, as upstream's `StatusBar` lays it out.
