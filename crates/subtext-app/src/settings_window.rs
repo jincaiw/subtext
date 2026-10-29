@@ -375,11 +375,15 @@ impl SettingsWindow {
 
         let warnings = v_flex()
             .gap_1()
+            // In a column the cross axis stretches, so a button here fills the
+            // row; the `h_flex` is what keeps it the width of its label.
             .child(
-                Button::new("manage-warnings")
-                    .small()
-                    .label("Manage Warnings…")
-                    .disabled(true),
+                h_flex().child(
+                    Button::new("manage-warnings")
+                        .small()
+                        .label("Manage Warnings…")
+                        .disabled(true),
+                ),
             )
             .child(note(
                 "Not implemented yet. CotEditor lets you switch off each dialog it can show; \
@@ -1443,13 +1447,17 @@ impl SettingsWindow {
 
         let priorities = v_flex()
             .gap_1()
+            // Same as the General pane's *Manage Warnings*: a column stretches
+            // its children on the cross axis, so the button needs a row.
             .child(
-                Button::new("encoding-priorities")
-                    .small()
-                    .label("Edit List…")
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx)),
-                    ),
+                h_flex().child(
+                    Button::new("encoding-priorities")
+                        .small()
+                        .label("Edit List…")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx)),
+                        ),
+                ),
             )
             .child(
                 Checkbox::new("refer-to-encoding-tag")
@@ -2527,7 +2535,11 @@ fn pick_list_with_gaps(
             .small()
             .w_full()
             .selected(selected == Some(index))
-            .label(label)
+            // `Button` centres its label, and a list of centred names reads as
+            // a column of headings rather than rows. A full-width child puts
+            // the text against the leading edge, which is where a table cell
+            // puts it.
+            .child(div().w_full().child(label))
             .on_click(move |_, window, cx| on_click(&index, window, cx)),
         );
     }

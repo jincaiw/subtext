@@ -5410,8 +5410,17 @@ impl Workspace {
         let workspace = cx.entity();
         let weak = workspace.downgrade();
         let options = WindowOptions {
-            // Platform window geometry, not design scale: a minimum window size
-            // is a constraint on the OS window, so it stays in pixels.
+            // A settings sheet is a column of labelled controls, not a document:
+            // without an explicit size the window opened at the main window's
+            // width and left two thirds of itself empty. 760 × 580 holds the
+            // widest pane (Format's encoding list) with its sidebar.
+            //
+            // Platform window geometry, not design scale: a window size is a
+            // constraint on the OS window, so it stays in pixels.
+            window_bounds: Some(WindowBounds::centered(
+                gpui_kit::size(px(760.), px(580.)),
+                cx,
+            )),
             window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
             ..Default::default()
         };

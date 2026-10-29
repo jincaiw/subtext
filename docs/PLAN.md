@@ -2982,6 +2982,32 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.19 设置窗口：全屏宽、两个被拉成整行的按钮、一列居中的编码
+
+接着 §22.18 的走查方法往下看设置窗口的九个页。第一张截图就不对：**设置窗口开成了 1536 宽**（主窗口的
+宽度），内容只用掉 530，右边三分之二空着。`open_settings` 的 `WindowOptions` 只设了
+`window_min_size`，没有 `window_bounds` —— 于是继承主窗口的尺寸。补上 `WindowBounds::centered(760 × 580)`
+之后，页面的问题才看得清：
+
+| 界面 | 症状 | 原因 |
+| --- | --- | --- |
+| General | `Manage Warnings…` 按钮被拉成整行 | 按钮直接挂在 `v_flex` 上，列的交叉轴是 stretch |
+| Format | `Edit List…` 同上 | 同上 |
+| Format | **编码列表每一项都居中** | 行是 `Button`，而 `Button` 的内部布局硬编码 `justify_center` |
+| Mode | 标签与控件的间距偏大、复选框文字换行 | 未定位，见缺口表 |
+
+三条都修了：前两个各包一层 `h_flex`；列表行保留 `Button`（要它的选中态与键盘可达性）但把
+`.label()` 换成 `.child(div().w_full().child(label))` —— 占满宽度的子元素让文字贴住前沿，而 `Button`
+的居中只作用在它自己那层。
+
+**Mode 页没修成，也没有留下改坏的痕迹**。试过给 `options` 和它所在的行各加 `w_full`，截图 md5 三次
+完全相同 —— 说明那两处与布局无关，于是把改动回退掉。留下一处不起作用的「修过」比留着 bug 更糟：
+下一个人会以为那里已经查过。
+
+**这一轮也踩了一次量具的坑**：`peek3.sh` 一开始用 `pkill; sleep 1` 换进程，三次截图 md5 一模一样。
+`pkill` 返回不等于进程已退出，截到的是上一轮的窗口。改成轮询 `pgrep` 直到进程真的消失，才拿到正确
+的图 —— 而**先怀疑「改动没生效」、后怀疑「量具在骗人」，顺序反了**。
+
 ### 22.18 截图走查：两个对话框的按钮一直是不可见的
 
 `panel_sweep` 证明 21 个界面「打开不崩」，但从来没看过它们「画得对不对」。这一轮加了一个
@@ -3328,4 +3354,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
+| Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
 
