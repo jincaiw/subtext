@@ -818,6 +818,10 @@ impl SettingsWindow {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    // The label, a stepper and the word "spaces" are wider than
+                    // the column at the window's default width, and the tail was
+                    // being cut off at the edge. Wrapping keeps it whole.
+                    .flex_wrap()
                     .child(edit_switch(
                         "hanging-indent",
                         "Indent wrapped lines by",
@@ -966,7 +970,17 @@ impl SettingsWindow {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(div().text_sm().child("Indent width:"))
+                    // The same column `field` gives every other row: without it
+                    // this label sits hard against the pane's edge while its
+                    // neighbours are right-aligned at 12 rem.
+                    .child(
+                        div()
+                            .w(rems(LABEL_COLUMN))
+                            .flex_shrink_0()
+                            .flex()
+                            .justify_end()
+                            .child(div().text_sm().child("Indent width:")),
+                    )
                     .child(stepper(
                         "indent-width",
                         format!("{}", edit.tab_width),
@@ -2238,7 +2252,11 @@ impl SettingsWindow {
             .child(
                 v_flex()
                     .id("shortcut-scroll")
-                    .max_h(rems(28.))
+                    // 22 rem, not 28: the pane scrolls as a whole, so a list
+                    // taller than the space left under the note pushes the
+                    // *Restore Defaults* row past the window's bottom edge and
+                    // it takes a scroll to discover. 28 rem did exactly that.
+                    .max_h(rems(22.))
                     .overflow_y_scroll()
                     .rounded_md()
                     .border_1()
@@ -2273,16 +2291,21 @@ impl SettingsWindow {
     fn render_integration(&self, settings: &Settings, cx: &mut Context<Self>) -> AnyElement {
         let command_line = v_flex()
             .gap_1()
+            // The usual column-stretches-its-children case: a row keeps the
+            // button the width of its label.
             .child(
-                Button::new("learn-more-cli")
-                    .small()
-                    .label("Learn More…")
-                    .disabled(true),
+                h_flex().child(
+                    Button::new("learn-more-cli")
+                        .small()
+                        .label("Learn More…")
+                        .disabled(true),
+                ),
             )
             .child(note(
-                "With the `cot` command-line tool you can open files in CotEditor from a \
-                 terminal. SubText installs `subtext` for the same purpose: put it on your \
-                 PATH and run `subtext FILE`.",
+                // No backticks: this is interface copy, not a README.
+                "With the “cot” command-line tool you can open files in CotEditor from a \
+                 terminal. SubText installs “subtext” for the same purpose: put it on your \
+                 PATH and run “subtext FILE”.",
                 cx,
             ));
 
@@ -2444,7 +2467,10 @@ fn stepper(
             .accessibility_label("Decrease")
             .on_click(minus),
         )
-        .child(div().min_w(rems(4.)).text_sm().text_center().child(value))
+        // 2.5 rem holds three digits, which is as wide as any of these
+        // steppers goes; 4 rem left a gap that pushed the row past the window's
+        // trailing edge on the Window pane.
+        .child(div().min_w(rems(2.5)).text_sm().text_center().child(value))
         .child(
             Button::new(ElementId::Name(SharedString::from(format!(
                 "{id}-increment"

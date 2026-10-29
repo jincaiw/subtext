@@ -2982,6 +2982,24 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.20 设置窗口剩下五页：按钮在窗口外面、标签不在同一列、文案里有反引号
+
+§22.19 走查了四页，这一轮把剩下五页（Window / Edit / Snippets / Shortcuts / Integration）看完了。
+三页各有一处，都不是猜的：
+
+| 界面 | 症状 | 原因与修法 |
+| --- | --- | --- |
+| Shortcuts | 底部的 *Restore Defaults* 与旁边那行说明**只露出上边缘** | 列表 `max_h(28rem)` 太高：整页是可滚动的，列表一长就把按钮行推出窗口底边。降到 22 rem，按钮回到窗口里 |
+| Window | `Indent wrapped lines by [−] 2 [+] spaces` 的 **`spaces` 被右边缘裁成 `spac`** | 标签 + stepper + 单位比可用的 362 px 宽；加 `flex_wrap` 让它折行（`spaces` 落到下一行，完整可见），并把 stepper 的数值区从 4 rem 收到 2.5 rem |
+| Edit | `Indent width:` 的标签**贴在面板左边缘**，与 `Prefer using:` 不在同一列 | 这一行没有走 `field`（那个 helper 给标签一个 12 rem 右对齐的列），是裸的 `div`。补上同样的列 |
+| Integration | *Learn More…* 被拉成整行；说明文字里露出 **Markdown 反引号**（`` `cot` ``） | 按钮包一层 `h_flex`（同 §22.19 的两处）；反引号换成弯引号 —— 那是界面文案，不是 README |
+
+**Snippets 页没修**：表格下面那两个 `+` / `−` 只是两个图标，没有按钮的背景与边框，看着像两个符号。
+没找到它们在哪构造，也不该猜着改，记进缺口表。
+
+九页现在都走查过一遍。**Appearance 与 Mode 是唯一两页仍有已知问题**的（Mode 的间距，见缺口表；
+Appearance 没发现缺陷）。
+
 ### 22.19 设置窗口：全屏宽、两个被拉成整行的按钮、一列居中的编码
 
 接着 §22.18 的走查方法往下看设置窗口的九个页。第一张截图就不对：**设置窗口开成了 1536 宽**（主窗口的
@@ -3355,4 +3373,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
+| Snippets 页的 `+` / `−` 没有按钮外观 | 表格下面那两个只是图标，没有背景与边框，看着像两个符号；上游是两个标准 `NSButton`。没定位到它们的构造位置，也没猜着改。§22.20。另：Window 页的 `spaces` 在默认宽度下会折到下一行（完整可见，但松散）。 |
 

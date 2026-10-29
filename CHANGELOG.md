@@ -6,6 +6,24 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **Shortcuts 页的 *Restore Defaults* 按钮之前在窗口外面**（只露出上边缘）：列表 `max_h(28rem)` 太高，
+  把按钮行推出了窗口底边。降到 22 rem。
+- **Window 页的 `Indent wrapped lines by … spaces` 被右边缘裁成 `spac`**：给这行加 `flex_wrap`，
+  并把 stepper 的数值区从 4 rem 收到 2.5 rem。
+- **Edit 页的 `Indent width:` 与 `Prefer using:` 不在同一列**：这一行没走 `field`，补上同样的
+  12 rem 右对齐标签列。
+- **Integration 页**：*Learn More…* 不再被拉成整行；说明文字里的 Markdown 反引号（`` `cot` ``）
+  换成弯引号 —— 那是界面文案，不是 README。
+
+### 文档
+
+- 设置窗口九个页全部走查完毕（§22.20）。Snippets 的 `+` / `−` 没有按钮外观，没定位到构造位置，
+  记进缺口表。
+
 ## [0.3.20] — 2026-10-29
 
 ### 修复
