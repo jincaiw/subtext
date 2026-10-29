@@ -204,9 +204,20 @@ fn open_main_window(
                 }
                 // A manual smoke for the panels no test can reach; see
                 // `Workspace::panel_sweep`.
+                // `SUBTEXT_PANEL_PEEK=<n>` opens panel n and stays there, so a
+                // screenshot can be taken; `SUBTEXT_PANEL_SWEEP=1` opens all of
+                // them and quits. Both are debug-only.
                 #[cfg(debug_assertions)]
-                if std::env::var_os("SUBTEXT_PANEL_SWEEP").is_some() {
-                    workspace.panel_sweep(cx);
+                match std::env::var("SUBTEXT_PANEL_PEEK")
+                    .ok()
+                    .and_then(|value| value.parse::<u32>().ok())
+                {
+                    Some(step) => workspace.panel_peek(step, cx),
+                    None => {
+                        if std::env::var_os("SUBTEXT_PANEL_SWEEP").is_some() {
+                            workspace.panel_sweep(cx);
+                        }
+                    }
                 }
             });
         })

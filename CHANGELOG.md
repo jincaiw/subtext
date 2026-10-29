@@ -6,6 +6,24 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **两个对话框的内容一直是被裁的**。`Custom Surround` 只显示 `Begin:`、`End:` 与**所有按钮**都在对话框
+  之外；`Edit Color Code` 的 `Notation` 值被截成 `Hexade`、色值被截成 `#00`。原因是两者都没有 `footer`，
+  而 sheet 自己画的按钮行在定宽对话框里放不下。现在都加了 `footer`（Cancel）、加宽到 32 rem，包围的两个
+  字段改成上下排 —— 颜色码的标签列也因此有了位置。
+- **`OK` 仍然不可见**：组件库这一版的 `DialogFooter` 只渲染一个 `DialogClose`，普通 `Button` 完全不渲染
+  （四种写法都试过，见缺口表）。两个对话框现在用 **Enter 提交**、footer 的 Cancel 取消 —— 上游的
+  `CustomSurroundView` 本来就是 `onSubmit`，Enter 是主路径。
+
+### 工程
+
+- **`SUBTEXT_PANEL_PEEK=<n>`**：打开第 n 个面板并停住，用于截图走查（`panel_sweep` 只回答「不崩」）。
+- 走查方法本身也修了一处：`screencapture -l <windowid>` **截不到 GPUI 的对话框**（它在窗口之上的独立合成层），
+  之前所有「sheet 已打开」的判断都只证明了进程没崩 —— 必须截全屏再裁窗口区域。
+
 ## [0.3.18] — 2026-10-29
 
 ### 新增

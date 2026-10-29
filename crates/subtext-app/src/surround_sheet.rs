@@ -155,10 +155,13 @@ impl Render for SurroundSheet {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("Surround with:"),
             )
+            // One pair per row. Upstream puts them side by side in an AppKit
+            // sheet, which is as wide as its content; a GPUI dialog is a fixed
+            // width, and two label-plus-field pairs did not both fit — the
+            // `End:` field was cut off at the dialog's edge.
             .child(
-                h_flex()
-                    .items_start()
-                    .gap_4()
+                v_flex()
+                    .gap_2()
                     .child(field(
                         "Begin:",
                         Input::new(&self.begin).w(rems(FIELD_WIDTH)),

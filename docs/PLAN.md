@@ -2982,6 +2982,38 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.18 截图走查：两个对话框的按钮一直是不可见的
+
+`panel_sweep` 证明 21 个界面「打开不崩」，但从来没看过它们「画得对不对」。这一轮加了一个
+`SUBTEXT_PANEL_PEEK=<n>`（打开第 n 个界面并停住），配上截图，走查了包围、颜色码、多重替换和
+两个检查器。
+
+**第一个发现是方法错了**：`screencapture -l <windowid>` **截不到 GPUI 的对话框**。`window.open_dialog`
+把对话框画在窗口之上的一个独立合成层里，`-l` 截的是窗口自己的 backing store，所以之前所有
+「sheet 已打开」的判断都只证明了「进程没崩」。改成截全屏再裁出窗口区域，对话框就出来了。
+
+**第二个发现是真的缺陷**，一共三处：
+
+| 界面 | 症状 | 原因 |
+| --- | --- | --- |
+| Custom Surround | 只有 `Begin:`，没有 `End:`；**没有任何按钮** | 对话框没有 `footer`，而 sheet 自己画的按钮行在定宽对话框里放不下；两个 `label` + `field` 并排放不进 |
+| Edit Color Code | `Notation:` 的值被截成 `Hexade`，色值被截成 `#00` | 同上：26 rem 的定宽装不下 label 列 + 值 |
+| 两者 | 底部没有可见的确认按钮 | `DialogFooter` 里放普通 `Button` 之后**完全不渲染**；只放 `DialogClose` 才显示，且只有一个 |
+
+修了三处：两个对话框都加 `footer`（`DialogClose` + Cancel）并加宽到 32 rem；`Begin` / `End` 改成上下排；
+颜色码的 label 列因此有了足够宽度。
+
+**到这一步还剩一半**：`OK` 依然不可见。试过四种写法 —— `DialogFooter` 里放两个普通 `Button`（都不渲染）、
+放 `Button` + `DialogClose`（只渲染后者，且被拉伸成整行）、只放 `Button`（不渲染）、两个 `DialogClose`
+（只渲染第一个）。结论是组件库这一版的 `DialogFooter` 只认一个 `DialogClose`。**如实记进缺口表**，
+没有为了让它出现而自己画一个浮在上面的按钮 —— 那样会和对话框的键盘焦点、Esc 语义打架。
+
+所以现在的行为是：**Enter 提交，footer 的 Cancel 取消**。上游的 `CustomSurroundView` 也是
+`onSubmit(self.submit)`，Enter 本来就是主路径；缺的只是一个可见的 OK 按钮。
+
+**顺带修好的**：包围对话框的 `Begin` / `End` 提示说明（`End` 的 placeholder 跟着 `Begin`）在这个
+布局下也正常了；颜色码的 `Hexadecimal` 不再被截。
+
 ### 22.17 检查器的两处：路径的中间省略与四段的展开动画
 
 缺口表里这两条挨着，理由都写着「组件库没这个能力」。读一遍组件库，两条都有一半是错的。
@@ -3295,4 +3327,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
+| `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 

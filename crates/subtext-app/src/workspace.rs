@@ -1985,16 +1985,32 @@ impl Workspace {
         let sheet = cx.new(|cx| SurroundSheet::new(workspace, &begin, &end, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
+            let confirm = sheet.clone();
             dialog
                 .title("Custom Surround")
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
-                .w(window.rem_size() * 24.)
+                // 30 rem holds both field pairs side by side: 4 rem of label
+                // plus 6 rem of field, twice, plus the gap and the padding.
+                .w(window.rem_size() * 32.)
                 .child(sheet.clone())
-                // Enter and Escape reach the dialog's own actions, not the
-                // buttons the sheet draws, so the callbacks are installed here
-                // too. `submit` re-checks the pair, so confirming an empty
-                // begin field is a no-op rather than a surprise.
+                // A footer, not buttons drawn by the sheet: a dialog without
+                // one collapses to `min_h`, and the sheet's own button row was
+                // being cut off. Enter reaches the dialog's own actions, so the
+                // callbacks are installed there as well.
+                .footer(
+                    // Two `DialogClose`s, both with custom triggers: in this
+                    // version a plain `Button` inside a `DialogFooter` is not
+                    // rendered at all, while a `DialogClose` is. The OK trigger
+                    // submits on the way out.
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(DialogClose::new().trigger(move |button| {
+                            button.label("OK").primary().on_click(move |_, _, cx| {
+                                confirm.update(cx, |sheet, cx| sheet.submit(cx));
+                            })
+                        })),
+                )
                 .on_ok(move |_, _, cx| {
                     submit.update(cx, |sheet, cx| sheet.submit(cx));
                     true
@@ -2060,8 +2076,14 @@ impl Workspace {
                 .title("Edit Color Code")
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
-                .w(window.rem_size() * 26.)
+                .w(window.rem_size() * 32.)
                 .child(sheet.clone())
+                // See the note in `surround_sheet`: without a footer the dialog
+                // collapses to its minimum height and cuts the sheet's buttons.
+                .footer(
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel"))),
+                )
                 // Enter and Escape reach the dialog's own actions, not the
                 // buttons the panel draws. Confirming something that is not a
                 // colour code leaves the panel open with the reason in the
@@ -4773,7 +4795,7 @@ impl Workspace {
                 .title("Advanced Character Count")
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
-                .w(window.rem_size() * 30.)
+                .w(window.rem_size() * 32.)
                 .child(sheet.clone())
                 .on_ok(move |_, window, cx| {
                     submit.update(cx, |sheet, cx| sheet.submit(window, cx));
@@ -8440,43 +8462,7 @@ impl Workspace {
                     .timer(std::time::Duration::from_millis(250))
                     .await;
                 let done = this.update_in(cx, |workspace, window, cx| {
-                    match step {
-                        0 => workspace.surround_sheet(window, cx),
-                        1 => workspace.color_code_dialog(window, cx),
-                        2 => workspace.multiple_replace_dialog(window, cx),
-                        3 => workspace.show_inspector(InspectorPane::Warnings, cx),
-                        4 => workspace.show_inspector(InspectorPane::Document, cx),
-                        5 => workspace.show_inspector(InspectorPane::Outline, cx),
-                        6 => workspace.show_find(true, window, cx),
-                        7..=15 => {
-                            let pane = match step - 7 {
-                                0 => SettingsPane::General,
-                                1 => SettingsPane::Appearance,
-                                2 => SettingsPane::Window,
-                                3 => SettingsPane::Edit,
-                                4 => SettingsPane::Mode,
-                                5 => SettingsPane::Format,
-                                6 => SettingsPane::Snippets,
-                                7 => SettingsPane::Shortcuts,
-                                _ => SettingsPane::Integration,
-                            };
-                            workspace.show_settings_pane(pane, cx);
-                        }
-                        16 => workspace.show_about(cx),
-                        17 => workspace.show_console(cx),
-                        18 => {
-                            workspace.settings.window.show_sidebar = true;
-                            workspace.settings.sidebar_pane = SidebarPane::FolderFind;
-                            cx.notify();
-                        }
-                        19 => {
-                            workspace.settings.sidebar_pane = SidebarPane::FileBrowser;
-                            cx.notify();
-                        }
-                        // Not a panel, but a whole document the command builds.
-                        20 => workspace.create_bug_report(window, cx),
-                        _ => {}
-                    }
+                    workspace.open_panel(step, window, cx);
                     eprintln!("panel sweep: step {step} ok");
                     window.close_dialog(cx);
                 });
@@ -8490,6 +8476,70 @@ impl Workspace {
             let _ = this.update_in(cx, |_, _, cx| cx.quit());
         })
         .detach();
+    }
+
+    /// Open one of the sweep's panels and stay there.
+    ///
+    /// The sweep answers "does it crash"; this answers "does it look right",
+    /// which needs the window on screen long enough to be photographed.
+    ///
+    /// ```text
+    /// SUBTEXT_PANEL_PEEK=8 HOME=/tmp/peek ./target/debug/subtext a.txt
+    /// ```
+    #[cfg(debug_assertions)]
+    pub fn panel_peek(&mut self, step: u32, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(400))
+                .await;
+            let _ = this.update_in(cx, |workspace, window, cx| {
+                workspace.open_panel(step, window, cx);
+                eprintln!("panel peek: step {step} open");
+            });
+        })
+        .detach();
+    }
+
+    /// Open panel number `step`. Shared by the sweep and the peek.
+    #[cfg(debug_assertions)]
+    fn open_panel(&mut self, step: u32, window: &mut Window, cx: &mut Context<Self>) {
+        match step {
+            0 => self.surround_sheet(window, cx),
+            1 => self.color_code_dialog(window, cx),
+            2 => self.multiple_replace_dialog(window, cx),
+            3 => self.show_inspector(InspectorPane::Warnings, cx),
+            4 => self.show_inspector(InspectorPane::Document, cx),
+            5 => self.show_inspector(InspectorPane::Outline, cx),
+            6 => self.show_find(true, window, cx),
+            7..=15 => {
+                let pane = match step - 7 {
+                    0 => SettingsPane::General,
+                    1 => SettingsPane::Appearance,
+                    2 => SettingsPane::Window,
+                    3 => SettingsPane::Edit,
+                    4 => SettingsPane::Mode,
+                    5 => SettingsPane::Format,
+                    6 => SettingsPane::Snippets,
+                    7 => SettingsPane::Shortcuts,
+                    _ => SettingsPane::Integration,
+                };
+                self.show_settings_pane(pane, cx);
+            }
+            16 => self.show_about(cx),
+            17 => self.show_console(cx),
+            18 => {
+                self.settings.window.show_sidebar = true;
+                self.settings.sidebar_pane = SidebarPane::FolderFind;
+                cx.notify();
+            }
+            19 => {
+                self.settings.sidebar_pane = SidebarPane::FileBrowser;
+                cx.notify();
+            }
+            // Not a panel, but a whole document the command builds.
+            20 => self.create_bug_report(window, cx),
+            _ => {}
+        }
     }
 }
 
