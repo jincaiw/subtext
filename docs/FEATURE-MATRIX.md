@@ -205,7 +205,7 @@
 | 选择全部查找结果 | `find_all` | ✅ |
 | 用所选内容查找 | `use_selection_for_find` | ✅ |
 | 用所选内容替换 | `use_selection_for_replace` | ✅ |
-| 居中显示选区 | — | 🔁 提示已跳转 |
+| 居中显示选区 | `center_selection` | ✅ 真居中：`prepaint_caret_geometry` 给出光标在**内容坐标**里的位置，与视口中线相减后交给 `set_scroll_offset`（§22.8） |
 | 替换并查找下一个 | `replace_and_find_next` | ✅ |
 | 全部替换 | `replace_all` | ✅ |
 | 多重替换 | `multiple_replace_dialog` | ✅ 规则表 + TSV 导入模型 |

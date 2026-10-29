@@ -6,6 +6,14 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **Format ▸ Center Selection in Visible Area 现在真的居中**。此前它只在状态栏说一句
+  「Jumped to the selection」；`EditorState` 没有居中的接口，但 `prepaint_caret_geometry`
+  给出光标在内容坐标里的位置、`set_scroll_offset` 可以设滚动偏移，两者相减就是答案。
+
 ## [0.3.11] — 2026-10-29
 
 ### 新增

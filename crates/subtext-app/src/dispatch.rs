@@ -350,7 +350,7 @@ impl Workspace {
             "FindAll" | "SelectAllFindMatches" => self.find_all(cx),
             "UseSelectionForFind" => self.use_selection_for_find(window, cx),
             "UseSelectionForReplace" => self.use_selection_for_replace(window, cx),
-            "CenterSelectionInVisibleArea" => self.notice("Jumped to the selection", cx),
+            "CenterSelectionInVisibleArea" => self.center_selection(cx),
             "ReplaceAndFindNext" => self.replace_and_find_next(window, cx),
             "ReplaceAll" => self.replace_all(window, cx),
             "ShowMultipleReplace" => self.multiple_replace_dialog(window, cx),

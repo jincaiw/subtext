@@ -2447,6 +2447,45 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Scroll the active editor so the caret sits in the middle of the view.
+    ///
+    /// Upstream's `centerSelectionInVisibleArea`. `EditorState` has no such
+    /// call, but it does expose the caret's geometry from the last prepaint
+    /// (`prepaint_caret_geometry`) and a public `set_scroll_offset` — which is
+    /// enough to do it by hand: move the viewport by however far the caret is
+    /// from the middle.
+    ///
+    /// The offset is applied after the next layout, so this reads the geometry
+    /// of the frame that is on screen — a caller that has *just* moved the caret
+    /// would centre where it used to be.
+    pub fn center_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let editor = document.editor().clone();
+        editor.update(cx, |state, cx| {
+            let Some(geometry) = state.prepaint_caret_geometry() else {
+                return;
+            };
+            let caret = geometry.cursor_bounds();
+            let viewport = geometry.input_bounds();
+            if viewport.size.height <= px(0.) {
+                return;
+            }
+            let centre = viewport.origin.y + viewport.size.height / 2.0;
+            // `cursor_bounds` is measured against the content, not the window —
+            // it does not move when the view scrolls — so putting the caret in
+            // the middle is one subtraction: where the middle is, minus where
+            // the caret is.
+            let target = centre - caret.origin.y;
+            let offset = state.scroll_offset();
+            if (offset.y - target).abs() < px(0.5) {
+                return;
+            }
+            state.set_scroll_offset(gpui_kit::point(offset.x, target), cx);
+        });
+    }
+
     /// Put the caret at the start of `line` (1-based) and scroll it into view.
     pub fn goto_line(&mut self, line: usize, cx: &mut Context<Self>) {
         let Some(text) = self.active_text(cx) else {
