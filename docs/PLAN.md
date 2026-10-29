@@ -2893,6 +2893,48 @@ pub fn main() {          // fn 蓝、main 橙、() 黑
 **代价**：整篇重算。158 KB 的 Rust 文件在 release 下约 30 ms（19,500 个 span），与正则那条
 路径同量级 —— 上游用增量解析，这里没有，和 `Highlighter` 原来的取舍一致。
 
+### 22.11 控制台：脚本报错原来只能占一行
+
+`Script ▸ Show Console` 一直是「未实现」：状态栏说一句 `The console is not implemented yet`。
+但控制台不是装饰 —— 它是**脚本报错唯一的去处**。上游把 `ScriptError` 交给
+`NSApp.presentError`，而那一支对脚本错误的意思是「追加到控制台，并把窗口提到前面」，不是模态
+弹窗。SubText 此前把标准错误塞进状态栏：一行、四个字的高度，多行的 traceback 从第二行起就丢了。
+
+**做法**：`console.rs` 里三件东西。
+
+* `Log { title, message, at }` —— 上游的 `Console.Log`，`heading()` 拼出
+  `[2026-10-29 19:11:01] fail`（时间戳取机器的时区，没标题就只有时间）；
+* `Console` —— 条目列表，`append` / `clear`；
+* `ConsoleHandle(Entity<Console>)` 是一个 `Global`。**不是**字段：脚本在文档窗口里跑，窗口是独立
+  窗口的视图，两者通过 `App` 找对方。这也是「关掉窗口再打开，日志还在」的原因 —— 窗口只是视图。
+
+界面照上游的 `NSPanel`：360×200（OS 窗口尺寸，不是设计度量）、等宽正文、时间戳用 muted 色、
+正文缩进一级、右上 `Clear`（空日志时置灰）、`Escape` 无关（它不是 overlay）。空态写一行
+说明什么会出现在这里，而不是留白。
+
+**接线**：
+
+* `finish_script` 的失败分支从 `notice(failure)` 改成「写控制台 + 打开窗口 + 状态栏一句话
+  `The script "fail" failed — see the console`」——状态栏回到它该做的事（说发生了什么），
+  完整文本在控制台；
+* `ShowConsolePanel` 命令从「未实现」改成真的打开（已开则前置）；
+* 启动时 `ConsoleHandle::init`，这样脚本在窗口打开之前报错也有地方去。
+
+**验证**（端到端探针 + 截图）：写一个 `echo boom >&2; echo second line >&2; exit 1` 的脚本并
+运行 ——
+
+```
+PROBE console entries=1
+PROBE heading="[2026-10-29 19:11:01] fail"
+PROBE message="boom: line 3 failed\nsecond line"
+```
+
+两行都在（原来是丢第二行的那种）。窗口列表里有 `360x233 subtext Console`。截图确认：标题栏、
+右上 Clear、灰蓝时间戳、等宽两行正文。面板冒烟加了一步，19 → 20，退出码 0。
+
+**没做的**：AppleScript 的 `write to console` 命令（SubText 没有 AppleScript 桥，已记账）；
+上游控制台的字号 +/−/重置（那是一个工具栏菜单，窗口很小时不值得占位）。
+
 ### 22.10 大纲选中居中：一句错误的理由与两层正确的延迟
 
 §22.8 把「居中显示选区」做出来之后，缺口表里还剩一条「大纲行只滚入可见，不居中」，理由写的是
@@ -2925,7 +2967,8 @@ pub fn main() {          // fn 蓝、main 橙、() 黑
 这一轮之前，判断一个面板有没有坏只能靠点。截图这条路在沙箱里也断了（系统要屏幕录制授权），
 于是把一次性的扫测做成**常设的**：`SUBTEXT_PANEL_SWEEP=1` 让 debug 版在启动后依次打开
 19 个界面 —— 三个 sheet（包围、颜色码、多重替换）、三个检查器页、查找面板、九个设置页、
-关于窗口、侧栏的两个页 —— 每开一个打一行日志，全部开完就退出。
+关于窗口、侧栏的两个页 —— 每开一个打一行日志，全部开完就退出。（§22.11 加上了控制台，
+现在是 20 个。）
 
 判据是两条：退出码 0，日志里 19 行 `ok`。任何一处 panic 都会让进程带着非 0 退出码结束，
 或者卡在 `FAILED` 那一行。

@@ -32,6 +32,7 @@ pub mod actions;
 pub mod bridge;
 pub mod color_sheet;
 pub mod command_bar;
+pub mod console;
 pub mod count_panel;
 pub mod dialogs;
 pub mod dispatch;
@@ -89,6 +90,11 @@ pub fn run() {
             let syntaxes = load_syntaxes(resources.as_ref());
             let themes = load_themes(resources.as_ref());
             let settings = Settings::load();
+
+            // The console exists for the life of the process: a script's
+            // standard error is written to it whether or not its window is
+            // open, so it has to exist before the first script can run.
+            console::ConsoleHandle::init(cx);
 
             // The highlighter factory has to be in place before the first
             // editor is built, or the first document would open unhighlighted.

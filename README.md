@@ -68,7 +68,7 @@ cargo test --workspace # 718 项测试
 cargo run                    # 空文档
 cargo run -- path/to/file    # 打开文件
 
-# 面板冒烟（debug 版）：依次打开 19 个面板/页签后退出，任何一处 panic 都会让退出码非 0
+# 面板冒烟（debug 版）：依次打开 20 个面板/页签后退出，任何一处 panic 都会让退出码非 0
 SUBTEXT_PANEL_SWEEP=1 cargo run -- path/to/file
 ```
 

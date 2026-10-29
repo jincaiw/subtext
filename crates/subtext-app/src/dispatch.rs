@@ -365,7 +365,7 @@ impl Workspace {
             "PerformMiniaturize" => window.minimize_window(),
             "PerformZoom" => window.zoom_window(),
             "ArrangeInFront" => self.notice("Handled by the window system", cx),
-            "ShowConsolePanel" => self.notice("The console is not implemented yet", cx),
+            "ShowConsolePanel" => self.show_console(cx),
 
             // ---- help --------------------------------------------------
             "ShowHelp" | "OpenHelpAnchor" => {

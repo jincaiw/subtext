@@ -6226,6 +6226,7 @@ dependencies = [
  "dirs 6.0.0",
  "env_logger",
  "gpui-kit",
+ "jiff",
  "log",
  "regex",
  "serde",

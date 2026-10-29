@@ -74,6 +74,7 @@ use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
 use crate::command_bar::{self, CommandBar};
+use crate::console;
 use crate::count_panel::{CountOptionsView, CountSheet};
 use crate::dialogs::AboutView;
 use crate::find_panel::{FindPanel, apply_row_selection};
@@ -541,6 +542,10 @@ pub struct Workspace {
     /// talk to, and the two are cleared together.
     settings_view: Option<WeakEntity<SettingsWindow>>,
     about_window: Option<AnyWindowHandle>,
+    /// The console, while it is up. Its log outlives the window — the window is
+    /// only the view — so closing it and running `Show Console` again brings the
+    /// same entries back.
+    console_window: Option<AnyWindowHandle>,
     /// The Quick Actions bar, while it is up. It is a panel over this window
     /// rather than part of it, so it is tracked the way the settings window is.
     quick_actions_window: Option<AnyWindowHandle>,
@@ -817,6 +822,7 @@ impl Workspace {
             settings_window: None,
             settings_view: None,
             about_window: None,
+            console_window: None,
             quick_actions_window: None,
             last_color_code_color: colorcode::Color::BLACK,
             outline_tree,
@@ -3949,7 +3955,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if let Some(failure) = outcome.failure {
-            self.notice(failure, cx);
+            // Upstream hands a script's standard error to `NSApp.presentError`,
+            // and for a `ScriptError` that means "append it to the console and
+            // bring the window forward" — not a modal alert. The status bar
+            // cannot hold a traceback: it is one line, and everything past the
+            // first was being dropped.
+            self.log_to_console(Some(name.to_string()), failure, cx);
+            self.show_console(cx);
+            self.set_status(format!("The script “{name}” failed — see the console"), cx);
             return;
         }
         match output {
@@ -5244,6 +5257,57 @@ impl Workspace {
         match gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| AboutView::new())) {
             Ok((handle, _about)) => self.about_window = Some(handle),
             Err(error) => self.set_status(error.to_string(), cx),
+        }
+    }
+
+    /// Show the console, or bring it forward — CotEditor's `Script ▸ Show
+    /// Console`.
+    ///
+    /// The window holds no state of its own: the log is a `Global`, so the
+    /// window is only a view onto it and reopening it shows the entries from
+    /// before it was closed, which is what a console is for.
+    pub fn show_console(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.console_window {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
+                return;
+            }
+            self.console_window = None;
+        }
+
+        let Some(console) = console::ConsoleHandle::get(cx) else {
+            self.set_status("The console is not available", cx);
+            return;
+        };
+        let log = console.entity().clone();
+        let options = WindowOptions {
+            // Upstream's panel opens at 360 × 200 — an OS window geometry, not
+            // a design measurement, so it stays in pixels.
+            window_bounds: Some(WindowBounds::centered(
+                gpui_kit::size(px(360.), px(200.)),
+                cx,
+            )),
+            window_min_size: Some(gpui_kit::size(px(280.), px(140.))),
+            ..Default::default()
+        };
+        match gpui_kit::open_window(options, cx, |_, cx| {
+            cx.new(|cx| console::ConsoleView::new(log, cx))
+        }) {
+            Ok((handle, _)) => self.console_window = Some(handle),
+            Err(error) => self.set_status(error.to_string(), cx),
+        }
+    }
+
+    /// Write one entry to the console, whether or not its window is open.
+    fn log_to_console(&mut self, title: Option<String>, message: String, cx: &mut Context<Self>) {
+        // The console is created at launch, so a missing one only happens in a
+        // test that builds a workspace without it.
+        if let Some(console) = console::ConsoleHandle::get(cx) {
+            console.entity().update(cx, |console, cx| {
+                console.append(console::Log::now(title, message), cx)
+            });
         }
     }
 
@@ -8019,7 +8083,7 @@ impl Workspace {
     #[cfg(debug_assertions)]
     pub fn panel_sweep(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            for step in 0..19u32 {
+            for step in 0..20u32 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(250))
                     .await;
@@ -8047,7 +8111,8 @@ impl Workspace {
                             workspace.show_settings_pane(pane, cx);
                         }
                         16 => workspace.show_about(cx),
-                        17 => {
+                        17 => workspace.show_console(cx),
+                        18 => {
                             workspace.settings.window.show_sidebar = true;
                             workspace.settings.sidebar_pane = SidebarPane::FolderFind;
                             cx.notify();
@@ -8066,7 +8131,7 @@ impl Workspace {
                     return;
                 }
             }
-            eprintln!("panel sweep: 19 of 19 opened");
+            eprintln!("panel sweep: 20 of 20 opened");
             let _ = this.update_in(cx, |_, _, cx| cx.quit());
         })
         .detach();

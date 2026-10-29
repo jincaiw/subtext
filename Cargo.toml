@@ -50,6 +50,7 @@ unicode-properties = "0.1"
 # the machine's time zone from the OS rather than bundling a tzdb; the rest of
 # jiff's default features are not needed and are not enabled.
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system"] }
+# The console stamps each entry with the local time, the way CotEditor does.
 libc = "0.2"
 dirs = "6"
 clap = { version = "4", features = ["derive"] }

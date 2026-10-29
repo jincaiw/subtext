@@ -23,3 +23,5 @@ log.workspace = true
 env_logger.workspace = true
 dirs.workspace = true
 clap.workspace = true
+# The console stamps each entry with the local time, the way CotEditor does.
+jiff.workspace = true
