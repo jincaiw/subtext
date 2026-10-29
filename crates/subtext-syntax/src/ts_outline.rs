@@ -297,7 +297,11 @@ fn format(
             }
             (raw, capture)
         }
-        _ => with_parameters(text, capture.clone(), parameters),
+        // Only a function row carries a parameter list. A container or a
+        // value that happened to sit in a pattern with a `parameters` capture
+        // must not grow one.
+        _ if kind == "function" => with_parameters(text, capture.clone(), parameters),
+        _ => (raw, capture),
     };
 
     // Each branch has already normalized its own title the way its formatter

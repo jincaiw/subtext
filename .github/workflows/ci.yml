@@ -31,24 +31,30 @@ jobs:
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The crates below the UI do not depend on GPUI, and `cargo check` does
-      # not link — so their platform branches (`cfg(unix)`, `cfg(macos)` and the
-      # fallbacks) can be type-checked for Linux and Windows from a Mac runner.
+      # `cargo check` does not link, so a crate's platform branches
+      # (`cfg(unix)`, `cfg(target_os = "macos")` and the fallbacks) can be
+      # type-checked for Linux and Windows from a Mac runner.
       #
-      # `subtext-syntax` is **not** in this list. It builds twenty-one
-      # tree-sitter parsers from C (see `ts_outline`), and a build script runs
-      # even for `cargo check`, so checking it for another target needs that
-      # target's C compiler — the same wall `subtext-app` hits. Nothing is lost:
-      # the crate has no `cfg(target_os)` code of its own, so the only thing the
-      # cross check could prove is that Rust type-checks, which the macOS build
-      # above already proves.
+      # Only `subtext-core` is checked, and the reason is what the other two
+      # would cost rather than what they would prove:
+      #
+      # * `subtext-syntax` builds twenty-one tree-sitter parsers from C (see
+      #   `ts_outline`), and a build script runs even for `cargo check` — so
+      #   checking it for another target needs that target's C compiler, the
+      #   same wall `subtext-app` hits. `subtext-theme` depends on it, so it
+      #   inherits the wall.
+      # * Neither crate has a `cfg(target_os)` of its own, so the only thing
+      #   their cross checks could prove is that Rust type-checks — which the
+      #   macOS build above already proves.
+      #
+      # `subtext-core` is where the platform code is, and it has no C in it.
       - name: Install cross targets
         run: rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
       - name: Check for Linux
         run: >
           cargo check --locked --target x86_64-unknown-linux-gnu
-          -p subtext-core -p subtext-theme
+          -p subtext-core
       - name: Check for Windows
         run: >
           cargo check --locked --target x86_64-pc-windows-msvc
-          -p subtext-core -p subtext-theme
+          -p subtext-core
