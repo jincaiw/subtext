@@ -72,6 +72,16 @@ cargo run -- path/to/file    # 打开文件
 SUBTEXT_PANEL_SWEEP=1 cargo run -- path/to/file
 ```
 
+截图走查（改界面之后该做的事，冒烟只证明「打开不崩」）：
+
+```bash
+tools/peek-panel.sh 14 Settings /tmp/shortcuts.png   # 真窗口
+tools/peek-overlay.sh 0 /tmp/surround.png            # 对话框：在窗口之上的独立层
+```
+
+两条命令不能互相替代 —— `screencapture -l` 截不到对话框。改 UI 前先读
+[`docs/UI-CHECKLIST.md`](docs/UI-CHECKLIST.md)：那份清单里每一条都是本项目实际踩过的坑。
+
 ### 打包（macOS）
 
 ```bash

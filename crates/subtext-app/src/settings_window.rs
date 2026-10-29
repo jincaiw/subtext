@@ -1676,7 +1676,9 @@ impl SettingsWindow {
                 Button::new(ElementId::Name(SharedString::from(format!(
                     "snippet-add-{tab:?}"
                 ))))
-                .ghost()
+                // Not `ghost`: without a background and a border these two
+                // read as stray glyphs rather than buttons. Upstream draws two
+                // bordered `NSButton`s.
                 .small()
                 .icon(gpui_kit::assets::IconName::Plus)
                 .accessibility_label("Add")
@@ -1687,7 +1689,6 @@ impl SettingsWindow {
                 Button::new(ElementId::Name(SharedString::from(format!(
                     "snippet-delete-{tab:?}"
                 ))))
-                .ghost()
                 .small()
                 .icon(gpui_kit::assets::IconName::Minus)
                 .accessibility_label("Delete")

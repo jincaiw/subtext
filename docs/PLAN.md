@@ -2982,6 +2982,34 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.21 把走查变成工具，把缺陷变成清单
+
+§22.18 到 §22.20 三轮一共修了 11 处界面缺陷，每一处都是「截图才看得见」。这套办法有效，但当时
+用的是 `/tmp/peek3.sh` —— 一个随手写的脚本，换个会话就没了。这一轮把它固化下来：
+
+* **`tools/peek-panel.sh <step> <窗口标题>`** 截真窗口（文档、设置、控制台、关于）；
+* **`tools/peek-overlay.sh <step>`** 截对话框 —— 必须截全屏再裁，因为 `screencapture -l`
+  拿的是窗口自己的 backing store，而 `open_dialog` 画在它之上。
+
+两份脚本里都写进了踩过的两条：轮询 `pgrep` 等上一个进程**真的**退出（`pkill` 返回不等于它已
+消失），以及 `step` 的取值表。
+
+**`docs/UI-CHECKLIST.md`** 是另一半：11 处缺陷归成 7 条，每条都指到具体文件与提交：
+
+| 规则 | 次数 |
+| --- | --- |
+| 放进列里的控件会沿交叉轴被拉满 | 3（*Manage Warnings…* / *Edit List…* / *Learn More…*） |
+| 定宽容器里并排放不下，右半被静默裁掉 | 2（Custom Surround 的 `End:` / 色值 `#00`） |
+| 固定高度超过可用空间，把后面的东西顶出窗口 | 2（Shortcuts 的按钮、设置窗口的 `window_bounds`） |
+| 标签列要么都走 `field`，要么都不走 | 1（`Indent width:`） |
+| 组件库硬编码的地方不硬碰 | 2（`Button` 居中、`DialogFooter` 只认一个 `DialogClose`） |
+| `ghost()` 是「没有边框」，不是「低调」 | 1（Snippets 的 `+` / `−`） |
+
+**顺带修掉 Snippets 的 `+` / `−`**（§22.20 里没定位到的那条）：它们用了 `.ghost()`，所以只剩两个
+图标。去掉之后是有边框的小按钮，与上游的 `NSButton` 一致。
+
+清单最后是一份 7 条的自检，改界面之前逐条过一遍。
+
 ### 22.20 设置窗口剩下五页：按钮在窗口外面、标签不在同一列、文案里有反引号
 
 §22.19 走查了四页，这一轮把剩下五页（Window / Edit / Snippets / Shortcuts / Integration）看完了。
@@ -3373,5 +3401,4 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
-| Snippets 页的 `+` / `−` 没有按钮外观 | 表格下面那两个只是图标，没有背景与边框，看着像两个符号；上游是两个标准 `NSButton`。没定位到它们的构造位置，也没猜着改。§22.20。另：Window 页的 `spaces` 在默认宽度下会折到下一行（完整可见，但松散）。 |
 
