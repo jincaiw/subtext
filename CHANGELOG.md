@@ -6,6 +6,16 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **大纲里选中的条目现在会居中显示**。上游的 `selectItem(id:)` 以
+  `centerSelectionInVisibleArea` 收尾，SubText 只做到「滚入可见」。此前记的理由是
+  「选中行的处理器拿不到 `Window`」—— 其实 `Context::observe_in` 就带 window。接上之后还要
+  注意时机：光标几何来自上一帧的 prepaint，要把居中推迟**两帧**才能读到新光标（推迟一帧会把
+  视图顶回第一行）。
+
 ## [0.3.12] — 2026-10-29
 
 ### 新增

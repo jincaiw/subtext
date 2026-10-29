@@ -2893,6 +2893,33 @@ pub fn main() {          // fn 蓝、main 橙、() 黑
 **代价**：整篇重算。158 KB 的 Rust 文件在 release 下约 30 ms（19,500 个 span），与正则那条
 路径同量级 —— 上游用增量解析，这里没有，和 `Highlighter` 原来的取舍一致。
 
+### 22.10 大纲选中居中：一句错误的理由与两层正确的延迟
+
+§22.8 把「居中显示选区」做出来之后，缺口表里还剩一条「大纲行只滚入可见，不居中」，理由写的是
+「选中行的处理器是 `cx.observe` 的回调，拿不到 `Window`」。**这条理由是错的** —— 框架里有
+`Context::observe_in`，回调签名就带 `&mut Window`，和同一个构造器里 `subscribe_in` 是一对。
+改成 `observe_in` 之后 `defer_in` 立刻可用，于是这一条从缺口变成了接线。
+
+但接上之后并没有居中，反而更糟：视图跳到**第一行**。原因是几何的时效性 ——
+`prepaint_caret_geometry` 在每一帧的 prepaint 里写入，它描述的是**已经在屏幕上**那一帧：
+
+1. `set_selection` 触发一次通知，排出一帧，记作 N；N 的 prepaint 才会带上新光标；
+2. `on_next_frame` 的回调跑在**它登记的那一帧之前**，所以第一层看到的仍是选区之前的光标；
+3. 第二层的回调跑在 N+1 之前 —— 此时 N 已经 prepaint 过了，几何是新光标的。
+
+于是「刚设完选区就居中」要**两层** `on_next_frame`。探针把两个版本的读数摆在一起：
+
+| 延迟 | 滚动偏移 | 可见行（42 行视口） | 说明 |
+| --- | --- | --- | --- |
+| 一层 | `0` | `1..43` | 读到文首的光标，把视图顶回第一行 |
+| 两层 | `-5587.5` | `279..321` | 光标在第 300 行，落在第 22 行 —— 正中 |
+
+「一层」那次的 `0` 是关键证据：目标偏移 = 视口中线 − 光标 y，得到 0 只可能是因为光标 y 恰好等于
+中线，也就是光标还在文首那一带。
+
+**验证**（探针）：400 行的 Markdown、选区放到第 300 行，居中后 `offset=-5587.5`、可见行
+`279..321`。与 §22.8 的算式一致（视口 110+788，中线 504，`504 − 6091.5 = −5587.5`）。
+
 ### 22.9 面板冒烟：让「从没打开过的界面」也能被跑一遍
 
 这一轮之前，判断一个面板有没有坏只能靠点。截图这条路在沙箱里也断了（系统要屏幕录制授权），
@@ -2972,7 +2999,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
-| 大纲行只滚入可见，不居中 | 居中本身已经能做（§22.8：`prepaint_caret_geometry` + `set_scroll_offset`，**居中显示选区**命令就用它），但大纲那一侧接不上：选中行的处理器是 `cx.observe` 的回调，拿不到 `Window`，而 `defer_in` 需要 window；用计时器延一帧则可能拿到**上一帧**的光标位置，把视图滚到上一处 —— 比不居中更糟。⌃⌘↑/⌃⌘↓ 那一侧上游也只是 `scrollRangeToVisible`，两边一致（见 §8.10）。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |

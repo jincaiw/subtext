@@ -773,10 +773,16 @@ impl Workspace {
         );
 
         // Selecting a row in the tree — by click or by arrow key — is what
-        // moves the caret, which is CotEditor's `selectItem(id:)`.
-        let outline_selection = cx.observe(&outline_tree, |this: &mut Self, tree, cx| {
-            this.on_outline_row_selected(tree, cx);
-        });
+        // moves the caret, which is CotEditor's `selectItem(id:)`. `observe_in`
+        // rather than `observe` because the row has to be *centred*, and that
+        // needs the window: see `on_outline_row_selected`.
+        let outline_selection = cx.observe_in(
+            &outline_tree,
+            window,
+            |this: &mut Self, tree, window, cx| {
+                this.on_outline_row_selected(tree, window, cx);
+            },
+        );
 
         // Typing in the filter changes nothing but the filter, and the refresh
         // that follows is what notices it; the repaint has to be asked for.
@@ -2483,6 +2489,31 @@ impl Workspace {
                 return;
             }
             state.set_scroll_offset(gpui_kit::point(offset.x, target), cx);
+        });
+    }
+
+    /// Centre the caret once its geometry reflects a selection that was just
+    /// set.
+    ///
+    /// [`center_selection`](Self::center_selection) reads the caret out of
+    /// `prepaint_caret_geometry`, and that is filled in during a frame's
+    /// prepaint — so it always describes the frame that is *already on screen*.
+    /// Right after a `set_selection` the new caret is two frames away from
+    /// being readable:
+    ///
+    /// 1. the notification schedules a frame — call it N — whose prepaint picks
+    ///    up the new caret;
+    /// 2. an `on_next_frame` callback runs *before* the frame it was registered
+    ///    for, so the first one still sees the caret from before the selection;
+    /// 3. the second one runs before N+1, by which point N has been prepared.
+    ///
+    /// Measured, not guessed: with one hop the offset landed on `0` — the
+    /// geometry of the caret at the top of the document — and the view snapped
+    /// back to the first line. With two it lands on the caret's own row. See
+    /// §22.10 in `docs/PLAN.md`.
+    fn center_selection_when_settled(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.on_next_frame(window, |_this, window, cx| {
+            cx.on_next_frame(window, |this, _window, cx| this.center_selection(cx));
         });
     }
 
@@ -6070,7 +6101,12 @@ impl Workspace {
     /// clicking `fn main` selects `fn main`, not the start of its line. The
     /// caret lands at the *end* of the selection, which is inside the entry,
     /// so the row that was just clicked is still the row the caret is in.
-    fn on_outline_row_selected(&mut self, tree: Entity<TreeState>, cx: &mut Context<Self>) {
+    fn on_outline_row_selected(
+        &mut self,
+        tree: Entity<TreeState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let selected = tree
             .read(cx)
             .selected_entry()
@@ -6091,6 +6127,10 @@ impl Workspace {
         };
         self.outline_selected = Some(id);
         self.set_selection(range, cx);
+        // Upstream's `selectItem(id:)` ends with
+        // `centerSelectionInVisibleArea`, so the entry lands in the middle of
+        // the view rather than at whichever edge it came in from.
+        self.center_selection_when_settled(window, cx);
     }
 
     /// The pane's title row, with CotEditor's Options menu at its trailing edge.
