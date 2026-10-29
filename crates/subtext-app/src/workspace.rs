@@ -7964,6 +7964,75 @@ fn cycled_pane(current: usize, count: usize, forward: bool) -> usize {
     }
 }
 
+/// Open every panel once, in order, and quit.
+///
+/// A manual smoke for the surfaces that no unit test can reach: a panic in a
+/// sheet, a settings pane or an inspector would otherwise only show up when a
+/// user clicks it. `SUBTEXT_PANEL_SWEEP=1` runs it at launch (debug builds
+/// only); the log line per panel is the evidence, and the exit status is the
+/// gate.
+///
+/// ```text
+/// SUBTEXT_PANEL_SWEEP=1 HOME=/tmp/smoke ./target/debug/subtext a.txt
+/// ```
+impl Workspace {
+    #[cfg(debug_assertions)]
+    pub fn panel_sweep(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            for step in 0..19u32 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let done = this.update_in(cx, |workspace, window, cx| {
+                    match step {
+                        0 => workspace.surround_sheet(window, cx),
+                        1 => workspace.color_code_dialog(window, cx),
+                        2 => workspace.multiple_replace_dialog(window, cx),
+                        3 => workspace.show_inspector(InspectorPane::Warnings, cx),
+                        4 => workspace.show_inspector(InspectorPane::Document, cx),
+                        5 => workspace.show_inspector(InspectorPane::Outline, cx),
+                        6 => workspace.show_find(true, window, cx),
+                        7..=15 => {
+                            let pane = match step - 7 {
+                                0 => SettingsPane::General,
+                                1 => SettingsPane::Appearance,
+                                2 => SettingsPane::Window,
+                                3 => SettingsPane::Edit,
+                                4 => SettingsPane::Mode,
+                                5 => SettingsPane::Format,
+                                6 => SettingsPane::Snippets,
+                                7 => SettingsPane::Shortcuts,
+                                _ => SettingsPane::Integration,
+                            };
+                            workspace.show_settings_pane(pane, cx);
+                        }
+                        16 => workspace.show_about(cx),
+                        17 => {
+                            workspace.settings.window.show_sidebar = true;
+                            workspace.settings.sidebar_pane = SidebarPane::FolderFind;
+                            cx.notify();
+                        }
+                        _ => {
+                            workspace.settings.sidebar_pane = SidebarPane::FileBrowser;
+                            cx.notify();
+                        }
+                    }
+                    eprintln!("panel sweep: step {step} ok");
+                    window.close_dialog(cx);
+                });
+                if done.is_err() {
+                    eprintln!("panel sweep: step {step} FAILED — the workspace is gone");
+                    let _ = this.update_in(cx, |_, _, cx| cx.quit());
+                    return;
+                }
+            }
+            eprintln!("panel sweep: 19 of 19 opened");
+            let _ = this.update_in(cx, |_, _, cx| cx.quit());
+        })
+        .detach();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

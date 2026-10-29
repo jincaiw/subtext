@@ -14,6 +14,14 @@
   「Jumped to the selection」；`EditorState` 没有居中的接口，但 `prepaint_caret_geometry`
   给出光标在内容坐标里的位置、`set_scroll_offset` 可以设滚动偏移，两者相减就是答案。
 
+## [Unreleased]
+
+### 工程
+
+- **面板冒烟**：`SUBTEXT_PANEL_SWEEP=1` 让 debug 版在启动后依次打开 19 个界面（三个 sheet、
+  三个检查器页、查找面板、九个设置页、关于窗口、侧栏两页）再退出。任何一处 panic 都会让退出码
+  非 0 —— 这是第一个能覆盖「从没打开过的界面」的自动判据。
+
 ## [0.3.11] — 2026-10-29
 
 ### 新增

@@ -196,6 +196,12 @@ fn open_main_window(
                 for path in paths {
                     workspace.open_path(path, window, cx);
                 }
+                // A manual smoke for the panels no test can reach; see
+                // `Workspace::panel_sweep`.
+                #[cfg(debug_assertions)]
+                if std::env::var_os("SUBTEXT_PANEL_SWEEP").is_some() {
+                    workspace.panel_sweep(cx);
+                }
             });
         })
         .ok();
