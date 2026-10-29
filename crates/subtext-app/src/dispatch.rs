@@ -53,9 +53,14 @@ impl Workspace {
             "ShowSettingsWindow" => self.toggle_settings(cx),
             "Terminate" => cx.quit(),
             "ShowAboutPanel" => self.show_about(cx),
-            "ShowWhatsNew" | "ShowDonationWindow" => {
-                self.notice("That panel has no SubText equivalent yet", cx)
-            }
+            // Upstream's What's New panel is a page of the new features in this
+            // version; the release notes for that same version are the same
+            // text, so the page it links to is the honest equivalent.
+            "ShowWhatsNew" => cx.open_url(RELEASES_URL),
+            "ShowDonationWindow" => self.notice(
+                "SubText has no donation channel — the upstream CotEditor project is where to give",
+                cx,
+            ),
             "Hide" => self.notice("Hide is handled by the window system", cx),
             "HideOtherApplications" | "UnhideAllApplications" => {
                 self.notice("Application hiding is handled by the window system", cx)
@@ -374,10 +379,11 @@ impl Workspace {
             "OpenAppleScriptDictionary" => {
                 self.notice("AppleScript support does not exist on GPUI", cx)
             }
-            "OpenWebSite" => self.notice("https://coteditor.com is the upstream project", cx),
-            "ReportBug" | "CreateBugReport" => {
-                self.notice("Please report issues in the SubText repository", cx)
-            }
+            "OpenWebSite" => cx.open_url(PROJECT_URL),
+            "ReportBug" => cx.open_url(ISSUES_URL),
+            // Not a link: upstream opens a *new untitled document* holding the
+            // template with the environment filled in.
+            "CreateBugReport" => self.create_bug_report(window, cx),
 
             other => {
                 self.notice(format!("{other} is not implemented yet"), cx);
@@ -387,6 +393,16 @@ impl Workspace {
         true
     }
 }
+
+/// Where SubText lives.
+///
+/// Upstream's commands point at coteditor.com and its issue tracker. These are
+/// the same four destinations for this project — the version, the system and
+/// the report all belong to SubText, so a link to the upstream tracker would
+/// send a SubText bug to the wrong place.
+const PROJECT_URL: &str = "https://github.com/jincaiw/subtext";
+const ISSUES_URL: &str = "https://github.com/jincaiw/subtext/issues";
+const RELEASES_URL: &str = "https://github.com/jincaiw/subtext/releases";
 
 /// A deterministic stand-in for a random source, so `Shuffle Lines` is
 /// reproducible in tests and needs no `rand` dependency.

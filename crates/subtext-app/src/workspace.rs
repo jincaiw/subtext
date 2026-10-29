@@ -917,6 +917,42 @@ impl Workspace {
         self.set_status("New document", cx);
     }
 
+    /// Open a new document already holding `text`, in `syntax_name`.
+    ///
+    /// Used by the one command that creates a document with something in it —
+    /// `Help ▸ Create Issue Report`, whose whole point is that the template and
+    /// the environment are already written. The document is dirty, because
+    /// closing it without saving throws the text away.
+    fn new_document_with(
+        &mut self,
+        text: &str,
+        syntax_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut document = Document::untitled(
+            self.settings.default_file_encoding(),
+            self.settings.default_line_ending,
+        );
+        document.set_text(text.to_string(), true);
+        self.push_document(document, syntax_name.to_string(), window, cx);
+    }
+
+    /// `Help ▸ Create Issue Report` — a new Markdown document holding the bug
+    /// report template, with this machine's version, system and language
+    /// already filled in.
+    ///
+    /// Upstream's `createBugReport(_:)` does exactly this: it opens an untitled
+    /// document with `IssueReport().template` and sets its syntax to Markdown.
+    /// The version and the system are the two things a report most often gets
+    /// wrong, which is why they are not left to the person writing it.
+    pub fn create_bug_report(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let environment = subtext_core::issuereport::Environment::detect();
+        let template = subtext_core::issuereport::IssueReport::template(&environment);
+        self.new_document_with(&template, "Markdown", window, cx);
+        self.set_status("Bug report template created — fill it in and post it", cx);
+    }
+
     fn push_document(
         &mut self,
         document: Document,
@@ -8083,7 +8119,7 @@ impl Workspace {
     #[cfg(debug_assertions)]
     pub fn panel_sweep(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            for step in 0..20u32 {
+            for step in 0..21u32 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(250))
                     .await;
@@ -8117,10 +8153,13 @@ impl Workspace {
                             workspace.settings.sidebar_pane = SidebarPane::FolderFind;
                             cx.notify();
                         }
-                        _ => {
+                        19 => {
                             workspace.settings.sidebar_pane = SidebarPane::FileBrowser;
                             cx.notify();
                         }
+                        // Not a panel, but a whole document the command builds.
+                        20 => workspace.create_bug_report(window, cx),
+                        _ => {}
                     }
                     eprintln!("panel sweep: step {step} ok");
                     window.close_dialog(cx);
@@ -8131,7 +8170,7 @@ impl Workspace {
                     return;
                 }
             }
-            eprintln!("panel sweep: 20 of 20 opened");
+            eprintln!("panel sweep: 21 of 21 opened");
             let _ = this.update_in(cx, |_, _, cx| cx.quit());
         })
         .detach();

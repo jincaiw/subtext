@@ -2935,6 +2935,55 @@ PROBE message="boom: line 3 failed\nsecond line"
 **没做的**：AppleScript 的 `write to console` 命令（SubText 没有 AppleScript 桥，已记账）；
 上游控制台的字号 +/−/重置（那是一个工具栏菜单，窗口很小时不值得占位）。
 
+### 22.12 创建报告：把「一条提示」变成一份填好的文档
+
+`Help` 菜单里有三条一直只是状态栏提示：「CotEditor Web Site」「Report Issue」「Create Issue
+Report」。前两条本来就该是打开网页，第三条不是 —— 上游的 `createBugReport(_:)` 打开的是**一个
+新的未命名文档**，内容来自 `IssueReport().template`，语法设成 Markdown，然后把光标留给用户去写
+「怎么复现」。版本号和系统正是报告里最常写错的两项，上游不让用户手打。
+
+**做法**：`subtext-core` 新增 `issuereport`，纯函数 + 参数化的环境：
+
+* `Environment { version, system, language }`，`detect()` 去问机器；
+* `IssueReport::template(&Environment)` 拼出上游那份文本 —— 描述段、25 个短横线、`##
+  Environment` 与三行环境，后面 `## Short Description` / `## Steps to Reproduce the Issue` /
+  `## Expected Result`，标题之间空**两**行（上游 join 的分隔符就是三个换行），好让人直接往下写。
+
+应用侧 `create_bug_report` 用 `Document::untitled` + `set_text(text, dirty = true)` 建文档，
+语法名 `"Markdown"`，走 `push_document`，于是它就是一个普通的、可保存的标签页。
+
+**两处不照抄上游的地方**，都在注释里写了理由：
+
+* **语言**。上游问 `Locale.current` 再翻成英文名（`Chinese`）。GUI 进程在 macOS 上**不继承
+  `LANG`**，只读环境变量会对几乎所有人答 `–`；而 `zh-Hans_US` → `Chinese` 要 Foundation 的
+  `localizedString(forLanguageCode:)`，自己维护一张表只能近似。所以取 `defaults read -g
+  AppleLocale`（`zh-Hans_US`），退回环境变量，最后才是 `–`。
+* **系统版本**。`sw_vers -productVersion` 是 macOS 上唯一能拿到产品版本的办法（和
+  `ProcessInfo.operatingSystemVersionString` 同一个值）；Linux / Windows 没有对应调用，
+  就只报平台与架构 —— 在报告里猜一个版本号比缺一个更糟。
+
+新增的两条 URL（官网 / 报告问题）与「发行说明」都用 `App::open_url`。**发行说明**这一条也顺手
+说明了：上游的 What's New 是独立窗口，内容是新版本的功能说明，离它最近的东西是同一版本的
+release notes，所以这一条打开 release 页面，记在矩阵里是 🔁 而不是 ✅。
+
+**验证**（探针 + 单元测试）：程序化调用 `create_bug_report` ——
+
+```
+PROBE tabs 2 -> 3 syntax="Markdown" dirty=true bytes=353
+PROBE | Fill in the following template, then post it on [GitHub Issues](...)
+PROBE | -------------------------
+PROBE | ## Environment
+PROBE | - SubText: 0.3.13
+PROBE | - System: macOS 27.0.1 (aarch64)
+PROBE | - Language: zh-Hans_US
+```
+
+五个单元测试盯的是版式：描述段与 25 个短横线、三行环境各就各位、标题之间是三个换行、
+末尾只有一行、缺 locale 时打的是 en dash 而不是空。面板冒烟加了一步（21），退出码 0。
+
+**没做的**：`Help ▸ Release Notes` 在上游走帮助系统（`openHelpAnchor:`），SubText 没有帮助书，
+仍是状态栏提示 —— 与「发行说明」不是同一条命令，没有合并。捐赠窗口保留提示：SubText 不收钱。
+
 ### 22.10 大纲选中居中：一句错误的理由与两层正确的延迟
 
 §22.8 把「居中显示选区」做出来之后，缺口表里还剩一条「大纲行只滚入可见，不居中」，理由写的是
@@ -2967,8 +3016,7 @@ PROBE message="boom: line 3 failed\nsecond line"
 这一轮之前，判断一个面板有没有坏只能靠点。截图这条路在沙箱里也断了（系统要屏幕录制授权），
 于是把一次性的扫测做成**常设的**：`SUBTEXT_PANEL_SWEEP=1` 让 debug 版在启动后依次打开
 19 个界面 —— 三个 sheet（包围、颜色码、多重替换）、三个检查器页、查找面板、九个设置页、
-关于窗口、侧栏的两个页 —— 每开一个打一行日志，全部开完就退出。（§22.11 加上了控制台，
-现在是 20 个。）
+关于窗口、侧栏的两个页 —— 每开一个打一行日志，全部开完就退出。（§22.11 加上了控制台、§22.12 加上了「创建报告」那条命令开的新文档，现在是 21 个。）
 
 判据是两条：退出码 0，日志里 19 行 `ok`。任何一处 panic 都会让进程带着非 0 退出码结束，
 或者卡在 `FAILED` 那一行。

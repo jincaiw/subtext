@@ -18,6 +18,7 @@ pub mod finder;
 pub mod findresult;
 pub mod folderfind;
 pub mod imagesize;
+pub mod issuereport;
 pub mod line_ending;
 pub mod matcher;
 pub mod multireplace;

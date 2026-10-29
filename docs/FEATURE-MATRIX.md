@@ -31,8 +31,8 @@
 | 服务 | `NSMenu` Services | `MenuItem::os_submenu(_, SystemMenuType::Services)` | ✅ 交系统填 |
 | 隐藏 / 隐藏其他 / 全部显示 | `NSApplication` | 交窗口系统处理 | 🔁 |
 | 退出 | `terminate:` | `cx.quit()` | ✅ |
-| 捐赠窗口 | 独立窗口 | 状态栏提示 | ⏳ |
-| 更新日志 | 独立窗口 | 状态栏提示 | ⏳ |
+| 捐赠窗口 | 独立窗口 | 状态栏提示：SubText 没有捐赠渠道 | ⏳ 不是做不了，是没有账户可指向 |
+| 更新日志 | 独立窗口 | 打开本项目的 release 页面 | 🔁 上游的 What's New 面板就是新版本功能说明，离它最近的是 release notes |
 
 ## 2. 文件菜单
 
@@ -230,7 +230,11 @@
 标准错误：时间戳 + 脚本名 + 等宽正文，Clear 按钮清空。日志是 `Global`，关掉窗口再开还在（§22.11） |
 | 帮助 / 打开帮助锚点 | — | ⏳ 指向 `docs/` |
 | AppleScript 字典 | — | ⚠️ GPUI 无此能力 |
-| 官网 / 报告问题 / 创建报告 / 发行说明 | 状态栏提示 | 🔁 |
+| 官网 | `cx.open_url` | ✅ 打开 <https://github.com/jincaiw/subtext> |
+| 报告问题 | `cx.open_url` | ✅ 打开 issues 页 |
+| 创建报告 | `create_bug_report` + `issuereport` | ✅ **新建一份 Markdown 文档**：模板 + 已填好的
+版本 / 系统 / 语言（上游的 `createBugReport:` 就是开一个 untitled 文档，§22.12） |
+| 发行说明 | `cx.open_url` | ✅ 打开 release 页面 |
 
 ---
 

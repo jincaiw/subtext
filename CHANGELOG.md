@@ -6,6 +6,22 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **Help ▸ Create Issue Report 现在真的建一份报告文档**。此前它只在状态栏说一句「请到仓库提
+  issue」。上游的做法是打开**一个新的未命名文档**，内容是一份 Markdown 模板，版本号、系统与语言
+  已经填好，语法是 Markdown —— 版本和系统正是报告里最常写错的两项。SubText 现在照做。
+- **官网 / 报告问题 / 发行说明三条命令现在真的打开网页**（`App::open_url`），不再只是提示。
+  What's New 上游是独立窗口，离它最近的是同一版本的 release notes，所以那一条打开 release 页面。
+
+### 工程
+
+- `subtext-core` 新增 `issuereport`：`Environment`（版本 / 系统 / 语言，各自有取法与退路）
+  与 `IssueReport::template`，版式由 5 条单元测试盯住。
+- 面板冒烟多一步：算上「创建报告」开的那个文档，20 → 21 个界面。
+
 ## [0.3.13] — 2026-10-29
 
 ### 新增
