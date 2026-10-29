@@ -77,6 +77,57 @@ impl HighlightStyleResolver for CotStyleResolver {
     }
 }
 
+/// Project a CotEditor theme onto the theme the editor paints with.
+///
+/// The document pane is a `gpui-component` `Editor`, and `Input::render`
+/// re-applies `set_editor_style` from `cx.theme()` on **every frame**. A style
+/// set on the editor state is therefore overwritten before anything reads it —
+/// which is why every token used to come out in the plain text colour, and why
+/// `editor_style` alone was never enough.
+///
+/// The colours have to live where the component looks: the global component
+/// theme. Its syntax palette speaks Zed's names (`keyword`, `string.special`),
+/// which is what [`HighlightToken::style_name`] maps CotEditor's ten tokens
+/// onto.
+pub fn project_theme(theme: &Theme, cx: &mut App) {
+    let foreground = to_hsla(theme.text_color());
+    let background = to_hsla(theme.background_color());
+
+    let mut component = gpui_kit::component::Theme::global(cx).clone();
+    component.colors.foreground = foreground;
+    component.colors.background = background;
+
+    let mut highlight = (*component.highlight_theme).clone();
+    highlight.style.editor_background = Some(background);
+    highlight.style.editor_foreground = Some(foreground);
+    highlight.style.syntax = syntax_colors(theme);
+    component.highlight_theme = std::sync::Arc::new(highlight);
+
+    cx.set_global(component);
+}
+
+/// The syntax palette, in the component theme's vocabulary.
+///
+/// `SyntaxColors` has one field per name and no public constructor, so this
+/// goes through the shape its own deserializer takes — the same `syntax` block
+/// a Zed theme file has.
+fn syntax_colors(theme: &Theme) -> gpui_kit::component::highlighter::SyntaxColors {
+    let mut palette = serde_json::Map::new();
+    for token in subtext_syntax::PRIORITY {
+        let color = theme
+            .token_color(token)
+            .color
+            .unwrap_or_else(|| theme.text_color());
+        palette.insert(
+            token.style_name().to_string(),
+            serde_json::json!({
+                "color": format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
+            }),
+        );
+    }
+    serde_json::from_value(serde_json::Value::Object(palette)).unwrap_or_default()
+}
+
 /// Project a theme onto the editor's chrome.
 ///
 /// A `.cottheme` key is optional — CotEditor leaves a colour out when it wants
@@ -129,9 +180,22 @@ pub struct CotHighlighter {
 }
 
 impl CotHighlighter {
+    /// A highlighter for a syntax, from whichever source it has.
+    ///
+    /// A bundle with a `Highlights.json` is highlighted by those rules. One
+    /// without — the twenty-three whose colours are a tree-sitter query — is
+    /// highlighted by the query, because the only rules it carries are the
+    /// comment and string delimiters from `Edit.json`, and running just those
+    /// leaves every keyword, type and number in the plain text colour.
     pub fn new(syntax: &Syntax) -> Self {
+        let inner = match syntax.highlight_query() {
+            Some(query) if !syntax.has_highlight_file => {
+                Highlighter::with_query(&syntax.name, &query)
+            }
+            _ => Highlighter::new(&syntax.highlights),
+        };
         Self {
-            inner: Highlighter::new(&syntax.highlights),
+            inner,
             snapshot: String::new(),
             language: SharedString::from(syntax.name.clone()),
         }
@@ -385,6 +449,31 @@ mod tests {
         assert_eq!(highlighter.language().as_ref(), "Rust");
     }
 
+    /// Rust has no `Highlights.json`: its colours are a tree-sitter query, and
+    /// before this the buffer showed keywords, types and numbers in the plain
+    /// text colour.
+    #[test]
+    fn a_query_highlighted_syntax_colours_its_keywords() {
+        let syntax = syntax("Rust");
+        assert!(!syntax.has_highlight_file, "Rust must have no rule file");
+        let mut highlighter = CotHighlighter::new(&syntax);
+        let text = "fn main() {\n    let x: u32 = 1;\n}\n";
+        highlighter.rehighlight_text(text);
+
+        let resolver = CotStyleResolver::new(&Theme::builtin_light());
+        let runs = highlighter.styled_runs(&(0..text.len()), &resolver);
+        let plain = HighlightStyle::default();
+        let styled: Vec<&str> = runs
+            .iter()
+            .filter(|(_, style)| *style != plain)
+            .map(|(range, _)| &text[range.clone()])
+            .collect();
+        assert!(
+            styled.contains(&"fn") && styled.contains(&"let") && styled.contains(&"u32"),
+            "the keywords and the type should be coloured, got {styled:?}"
+        );
+    }
+
     #[test]
     fn styles_tile_the_requested_range() {
         let syntax = syntax("YAML");
@@ -427,6 +516,36 @@ mod tests {
         assert!(highlighter.styled_runs(&(0..0), &resolver).is_empty());
     }
 
+    /// The palette the component theme carries is the one the editor paints
+    /// with, and it has to speak the component's vocabulary.
+    #[test]
+    fn the_syntax_palette_is_projected_into_the_component_vocabulary() {
+        let theme = Theme::builtin_light();
+        let colors = syntax_colors(&theme);
+
+        let keyword = colors.style("keyword").expect("keyword");
+        let expected = theme
+            .token_color(subtext_syntax::HighlightToken::Keywords)
+            .color
+            .expect("the built-in theme defines keywords");
+        assert_eq!(keyword.color, Some(to_hsla(expected)));
+
+        for (name, token) in [
+            ("attribute", subtext_syntax::HighlightToken::Attributes),
+            ("string.special", subtext_syntax::HighlightToken::Characters),
+            ("function", subtext_syntax::HighlightToken::Commands),
+            ("comment", subtext_syntax::HighlightToken::Comments),
+            ("number", subtext_syntax::HighlightToken::Numbers),
+            ("string", subtext_syntax::HighlightToken::Strings),
+            ("type", subtext_syntax::HighlightToken::Types),
+            ("constant", subtext_syntax::HighlightToken::Values),
+            ("variable", subtext_syntax::HighlightToken::Variables),
+        ] {
+            assert_eq!(token.style_name(), name);
+            assert!(colors.style(name).is_some(), "{name} is missing");
+        }
+    }
+
     #[test]
     fn comments_are_styled_in_a_regex_language() {
         let syntax = syntax("YAML");
@@ -436,7 +555,9 @@ mod tests {
 
         let resolver = CotStyleResolver::new(&Theme::builtin_light());
         let runs = highlighter.styled_runs(&(0..text.len()), &resolver);
-        let comment_style = resolver.style("comments").unwrap();
+        let comment_style = resolver
+            .style(subtext_syntax::HighlightToken::Comments.style_name())
+            .expect("the resolver knows the comment token");
         assert!(
             runs.iter()
                 .any(|(range, style)| range.start == 0 && *style == comment_style),

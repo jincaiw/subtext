@@ -2811,11 +2811,96 @@ CotEditor 剩下的十四个全部搬完，于是每一行都按它自己语言�
 
 ---
 
+## 阶段 22 — 二十一种语言的着色，与「着色从来没画出来」这件事
+
+§20 接上 tree-sitter 时只做了一半：查 `resources/queries/` 是为了大纲，但同一个目录里还有
+`highlights.scm`。核对之后才看清一件事 —— **70 个语法里有 23 个根本没有 `Highlights.json`**（其中 21 个有 tree-sitter 查询，另外三个 —— Plain Text、Git Ignore、Shell Script —— 本来就不需要）。
+SubText 的 `Syntax::load` 在这种情况下只剩 `Edit.json` 里的注释与字面量分隔符，于是
+Rust、Python、JavaScript、TypeScript、C、C++、Java、Go、Ruby、PHP、Swift、Kotlin、Scala、
+Lua、Bash、SQL、Makefile、C#、HTML、CSS 这些语言的缓冲区里，**关键字、类型、数字、函数名
+全都是正文色** —— 只有注释和字符串是有颜色的。
+
+**做法**：`subtext-syntax` 新增 `ts_highlight`，与 `ts_outline` 共用语法表与解析器。
+CotEditor 的两步照搬：
+
+1. **冲突消解** —— 两个 pattern 匹配同一个节点会给出同一个范围，取**后声明**的那个
+   （查询里越靠后的规则越具体，`(#eq? …)` 守卫的规则因此赢过它上面的通配规则）；
+2. **上色** —— 按文档顺序把 capture 刷到缓冲区上，后刷的盖住先刷的，所以嵌套里的内层
+   （开始得更晚）赢。最后把连续同色的字节合并成 span，交给渲染器时互不重叠。
+
+capture 名不用翻译：`highlights.scm` 用的就是 CotEditor 的十个 token 名
+（`@keywords`、`@types`、`@commands.method` …），一级名即 token；不是这十个的名字
+（`@name`、`@pkg` 这类给 `#eq?` 用的）不着色。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| 22.1 | `ts_highlight::highlights(syntax, text, query)`：跑查询、按一级名取 token、消解同范围冲突、按文档序上色、合并成不重叠的 span | ✅ |
+| 22.2 | `Highlighter` 变成两种来源：`Source::Rules`（正则）与 `Source::Query`（tree-sitter），`rehighlight` 各走各的；两种来源的冲突规则相反，注释里写清了为什么 | ✅ |
+| 22.3 | `Syntax::highlight_query()`，与 `outline_query()` 共用 `query_file()` | ✅ |
+| 22.4 | `CotHighlighter::new` 按 `has_highlight_file` 选择来源；没有规则文件的语法走查询 | ✅ |
+| 22.5 | 常设门禁 `every_bundled_highlight_query_parses`：21 份查询逐个跑，SQL 与 Kotlin 作为具名例外写进测试 | ✅ |
+
+**语法版本又换了一次**：Lua 从 0.4.1 升到 0.5.0 —— 0.4.1 的节点表里没有 `global`，高亮查询
+解析不了；0.5.0 有，而大纲查询在两个版本下都通过。Kotlin 没有这个运气：上游用
+`fwcd/tree-sitter-kotlin` 0.3.8，crates.io 上只发布到 0.3.5（依赖 tree-sitter 0.20 的 API，
+与本仓的 0.26 不是同一个类型）；`-sg` 与 `-ng` 两个替代品都把查询要的节点名改了
+（`type_identifier`、`break`）。所以 Kotlin 的**大纲**能用（`-sg` 解析得动 outline 查询），
+**高亮**用不了，仍只有注释与字面量 —— 写进了缺口表。
+
+### 22.6 顺带发现：编辑器**从来没画过**任何着色
+
+把上面这些接上之后跑起来截图，发现**一个字都没变色** —— 连 YAML 的注释都是黑的。
+一路查下来是框架层的一处约定：
+
+* 文档面板渲染的是 `gpui-component` 的 `Editor`，而 `Editor::render` 只是
+  `Input::from_state(...)`；
+* `Input` 是 `RenderOnce`，它的 `render` **每一帧**都调
+  `state.set_editor_style(InputEditorStyle { foreground: cx.theme().foreground,
+  highlight_styles: cx.theme().highlight_theme, .. })`；
+* 于是应用在 `new_editor` 里设的样式（`CotStyleResolver`、主题的前景/背景）在**被读到之前
+  就被覆盖**了。`set_editor_style` 本身没问题 —— 延时 1.2 秒再设一次就能生效，下一帧又被盖掉。
+
+也就是说：SubText 至今没有任何语法着色，正则那 47 个语法也一样。这条从来不在缺口表里，
+因为它看起来"做了"—— 有 `Highlighter`、有规则、有测试，只是画不出来。
+
+**修法**：颜色必须放进组件看的那一格。`highlight::project_theme` 把 CotEditor 主题投影到
+全局组件主题上：
+
+* `colors.foreground` / `colors.background` / `highlight_theme.style.editor_*` 来自
+  `.cottheme` 的正文色与背景色；
+* `highlight_theme.style.syntax` 是十个 token 的颜色 —— 但组件那套词汇是 Zed 的
+  （`keyword`、`string.special`、`type`），不是 CotEditor 的复数名。所以
+  `HighlightToken` 现在有两个名字：`key()` 仍是 `Highlights.json` 与 tree-sitter 查询里
+  写的那个（`keywords`），`style_name()` 是画的时候用的那个（`keyword`）。映射只有这一处。
+
+`SyntaxColors` 没有公开构造函数（字段是私有的），所以投影走它自己的反序列化 —— 构造一份
+Zed 主题里 `syntax` 块那样的 JSON 再解析。`set_theme` 与启动路径都调一次（启动时若用户没有
+保存过主题，也要用默认主题投影，否则就是黑字白底）。
+
+**验证**：718 项测试全绿（710 → 718）。21 种语言里有 19 种真的画得出来（SQL 与 Kotlin 的查询与公开语法对不上，见缺口表）。新增 7 条：Rust 的关键字/类型/字符串/注释/数字各就各位、
+span 互不重叠且字符串里的 `//` 不变成注释、点号后缀取一级名、同节点取后声明的 pattern、
+21 份查询的解析门禁、两个词汇表各就各位、以及投影出来的调色板能在组件的名字下取到颜色。
+**截图确认**（这是本轮唯一能证明它真的画出来的方式）：
+
+```
+pub fn main() {          // fn 蓝、main 橙、() 黑
+    let x: u32 = 1;      // let 蓝、u32 暗红、1 蓝
+    let s = "hi // not a comment";   // 整串绿，里面的 // 不变成注释
+    // real comment      // 灰蓝
+}
+```
+
+**代价**：整篇重算。158 KB 的 Rust 文件在 release 下约 30 ms（19,500 个 span），与正则那条
+路径同量级 —— 上游用增量解析，这里没有，和 `Highlighter` 原来的取舍一致。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
-| SQL 的大纲查询跑不起来 | 上游从 `DerekStride/tree-sitter-sql` 的 `gh-pages` 分支构建语法，那份语法有 `drop_procedure` 等节点；crates.io 上同源的 `tree-sitter-sequel` 0.3.11 没有，`Query::new` 直接报错 → SQL 大纲仍为空。常设门禁 `every_bundled_query_parses_against_its_grammar` 把 SQL 写进 `NOT_YET`，语法追上的那天测试会失败并提醒接线。 |
+| Kotlin 的高亮用不了 | 上游的 `queries/Kotlin/highlights.scm` 是给 `fwcd/tree-sitter-kotlin` 0.3.8 写的，而 crates.io 上只发布到 0.3.5（依赖 tree-sitter 0.20，`Language` 类型与本仓的 0.26 不同）；`tree-sitter-kotlin-sg` 与 `-ng` 都能装上，但都把查询要的节点名改了（`type_identifier`、`break`），`Query::new` 直接报错。**大纲**能用（`-sg` 解析得动 outline 查询），**高亮**退回注释与字面量。常设门禁 `every_bundled_highlight_query_parses` 把 Kotlin 写进 `NOT_YET`。 |
+| SQL 的查询跑不起来 | 大纲与高亮两条都受影响：上游从 `DerekStride/tree-sitter-sql` 的 `gh-pages` 分支构建语法，那份语法有 `drop_procedure` 等节点；crates.io 上同源的 `tree-sitter-sequel` 0.3.11 没有，`Query::new` 直接报错 —— SQL 的大纲与高亮都还是空的。两道常设门禁（`every_bundled_query_parses_against_its_grammar` 与 `every_bundled_highlight_query_parses`）把 SQL 写进 `NOT_YET`，语法追上的那天测试会失败并提醒接线。 |
 | LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |

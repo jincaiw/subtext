@@ -98,19 +98,23 @@ pub fn run() {
 
             // CotEditor applies the saved theme at launch; so does the editor,
             // which means the component layer has to be told as well as the
-            // text.
-            if let Some(theme) = settings
+            // text. With nothing saved the default theme is the one in force,
+            // and it has to reach the component layer too — the document pane
+            // paints from there, so skipping it leaves the editor black on
+            // white whatever the CotEditor theme says.
+            let theme = settings
                 .theme
                 .as_deref()
                 .and_then(|name| themes.by_name(name))
-            {
-                let mode = if theme.is_dark() {
-                    gpui_kit::component::ThemeMode::Dark
-                } else {
-                    gpui_kit::component::ThemeMode::Light
-                };
-                gpui_kit::component::Theme::change(mode, None, cx);
-            }
+                .cloned()
+                .unwrap_or_else(|| themes.default_theme().clone());
+            let mode = if theme.is_dark() {
+                gpui_kit::component::ThemeMode::Dark
+            } else {
+                gpui_kit::component::ThemeMode::Light
+            };
+            gpui_kit::component::Theme::change(mode, None, cx);
+            highlighter::project_theme(&theme, cx);
 
             bridge::install(cx);
             // The keymap and the menu bar, with the saved snippets already in

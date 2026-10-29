@@ -68,9 +68,26 @@ impl HighlightToken {
         PRIORITY.into_iter().find(|token| token.key() == key)
     }
 
-    /// The semantic style name handed to the theme resolver.
+    /// The name the *painter's* theme resolver knows this token by.
+    ///
+    /// CotEditor's own key (`keywords`) is the one `Highlights.json` and the
+    /// tree-sitter queries spell, and [`key`](Self::key) keeps it. The editor,
+    /// though, paints through `gpui-component`'s syntax palette, which speaks
+    /// Zed's singular vocabulary — `keyword`, `string.special`, `type` — so the
+    /// ten tokens map onto those names here, once.
     pub fn style_name(self) -> &'static str {
-        self.key()
+        match self {
+            HighlightToken::Attributes => "attribute",
+            HighlightToken::Characters => "string.special",
+            HighlightToken::Commands => "function",
+            HighlightToken::Comments => "comment",
+            HighlightToken::Keywords => "keyword",
+            HighlightToken::Numbers => "number",
+            HighlightToken::Strings => "string",
+            HighlightToken::Types => "type",
+            HighlightToken::Values => "constant",
+            HighlightToken::Variables => "variable",
+        }
     }
 
     pub fn priority(self) -> usize {
@@ -342,11 +359,21 @@ pub struct TokenSpan {
     pub token: HighlightToken,
 }
 
+/// Where a highlighter gets its colours from.
+#[derive(Debug, Clone)]
+enum Source {
+    /// A `.cotsyntax` bundle's `Highlights.json`, already compiled.
+    Rules(Vec<(HighlightToken, Vec<HighlightRule>)>),
+    /// A tree-sitter query, for the syntaxes that have no rules at all.
+    Query { syntax: String, query: String },
+}
+
 /// A syntax's rules bound to a buffer.
 #[derive(Debug, Clone)]
 pub struct Highlighter {
-    /// Rules grouped by token, ready to apply in [`PRIORITY`] order.
-    rules: Vec<(HighlightToken, Vec<HighlightRule>)>,
+    /// Rules grouped by token, ready to apply in [`PRIORITY`] order — or the
+    /// query that replaces them.
+    source: Source,
     spans: Vec<TokenSpan>,
 }
 
@@ -358,39 +385,68 @@ impl Highlighter {
             .filter_map(|token| rules.get(&token).map(|rules| (token, rules.clone())))
             .collect();
         Self {
-            rules: ordered,
+            source: Source::Rules(ordered),
+            spans: Vec::new(),
+        }
+    }
+
+    /// Build a highlighter from a tree-sitter highlight query.
+    ///
+    /// Twenty-one of CotEditor's syntaxes have no rules to compile: their
+    /// colours are a query, and a regex engine cannot read one. See
+    /// [`ts_highlight`](crate::ts_highlight).
+    pub fn with_query(syntax: &str, query: &str) -> Self {
+        Self {
+            source: Source::Query {
+                syntax: syntax.to_string(),
+                query: query.to_string(),
+            },
             spans: Vec::new(),
         }
     }
 
     /// Recompute every span for `text`.
     ///
-    /// Later rules never overwrite earlier ones, so the first claim on a byte
-    /// wins — the mechanism behind correct nesting.
+    /// The two sources differ in how a conflict is settled, because the two
+    /// formats do: a rule never overwrites an earlier one, so the first claim on
+    /// a byte wins, while a query's captures are painted in document order, so
+    /// the last one does. Both end up non-overlapping, which is what the
+    /// renderer needs.
     pub fn rehighlight(&mut self, text: &str) {
-        let mut claimed = vec![false; text.len()];
-        let mut spans = Vec::new();
+        match &self.source {
+            Source::Rules(rules) => {
+                let mut claimed = vec![false; text.len()];
+                let mut spans = Vec::new();
 
-        for (token, rules) in &self.rules {
-            for rule in rules {
-                for range in rule.scan(text) {
-                    if range.end > text.len() || range.start >= range.end {
-                        continue;
+                for (token, rules) in rules {
+                    for rule in rules {
+                        for range in rule.scan(text) {
+                            if range.end > text.len() || range.start >= range.end {
+                                continue;
+                            }
+                            if claimed[range.clone()].iter().any(|taken| *taken) {
+                                continue;
+                            }
+                            claimed[range.clone()].fill(true);
+                            spans.push(TokenSpan {
+                                range,
+                                token: *token,
+                            });
+                        }
                     }
-                    if claimed[range.clone()].iter().any(|taken| *taken) {
-                        continue;
-                    }
-                    claimed[range.clone()].fill(true);
-                    spans.push(TokenSpan {
-                        range,
-                        token: *token,
-                    });
                 }
+
+                spans.sort_by_key(|span| span.range.start);
+                self.spans = spans;
+            }
+            Source::Query { syntax, query } => {
+                // A query that does not parse against its grammar leaves the
+                // buffer uncoloured rather than half-coloured; the gate in
+                // `ts_highlight` is what keeps one from shipping.
+                self.spans =
+                    crate::ts_highlight::highlights(syntax, text, query).unwrap_or_default();
             }
         }
-
-        spans.sort_by_key(|span| span.range.start);
-        self.spans = spans;
     }
 
     pub fn spans(&self) -> &[TokenSpan] {
@@ -416,6 +472,22 @@ impl Highlighter {
 
 #[cfg(test)]
 mod tests {
+
+    /// Two vocabularies, one token: CotEditor's plural key is what the files
+    /// spell, and the painter's theme knows the singular one.
+    #[test]
+    fn a_token_has_a_file_name_and_a_theme_name() {
+        assert_eq!(HighlightToken::Keywords.key(), "keywords");
+        assert_eq!(HighlightToken::Keywords.style_name(), "keyword");
+        assert_eq!(HighlightToken::Characters.key(), "characters");
+        assert_eq!(HighlightToken::Characters.style_name(), "string.special");
+        // The file vocabulary still round-trips, which is what `Highlights.json`
+        // and the tree-sitter queries rely on.
+        for token in PRIORITY {
+            assert_eq!(HighlightToken::from_key(token.key()), Some(token));
+        }
+    }
+
     use super::*;
 
     fn rules(entries: &[(&str, RawRule)]) -> BTreeMap<HighlightToken, Vec<HighlightRule>> {

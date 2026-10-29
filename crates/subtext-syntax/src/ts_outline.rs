@@ -39,7 +39,10 @@ pub struct TsItem {
     pub title: String,
 }
 
-/// Why a query could not be run.
+/// Why a tree-sitter query could not be run.
+///
+/// Shared by the outline and the highlighter: both hand a query to a grammar,
+/// and both can be handed a query that grammar no longer understands.
 #[derive(Debug)]
 pub enum Error {
     /// The grammar and the parser disagree about a language version.
@@ -53,7 +56,7 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Language(error) => write!(formatter, "tree-sitter language: {error}"),
-            Self::Query(error) => write!(formatter, "outline query: {error}"),
+            Self::Query(error) => write!(formatter, "query: {error}"),
         }
     }
 }

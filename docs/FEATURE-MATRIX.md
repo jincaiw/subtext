@@ -16,6 +16,7 @@
 | 快捷键 | 75 条 | 75 条 | ✅ 键位一致（storyboard 里三条 base64 键位在 §8.20 补上） |
 | 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
+| 语法着色 | `Highlighter` | ✅ 两条来源：47 个语法用 `Highlights.json` 的正则规则；**21 个用 tree-sitter 查询**（`queries/<Name>/highlights.scm`；19 种生效，SQL 与 Kotlin 的查询与公开语法对不上）。颜色经 `highlight::project_theme` 投影进组件主题 —— 面板渲染的 `Editor` 每帧都从那里取样式，在编辑器状态上设的样式会被覆盖（§22.6） |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
 | 代码行数 | 约 72,128（Swift） | 43,493（Rust，`find crates -name '*.rs'` 去掉生成的 `menu.rs` / `keymap.rs`；含生成的 `unicode_tables.rs`） | — |
 
@@ -104,7 +105,7 @@
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 重新着色 | `rehighlight` | ✅ |
+| 重新着色 | `rehighlight` | ✅ 两条来源都整篇重算（与上游一样不增量） |
 | 换行符 LF / CR / CRLF | `set_line_ending` | ✅ 经 Format ▸ Line Endings 菜单，当前项打勾 |
 | 换行符 NEL / LS / PS | `set_line_ending` | ✅ **超出多数编辑器**；上游按住 Option 才显示这 3 项，这里恒列（GPUI 菜单没有隐藏项） |
 | 编码（转换） | `change_encoding` | ✅ 经 Format ▸ Text Encoding 菜单：列表来自用户的优先级列表（默认 38 条 + 9 个分隔符），按组分隔，当前项打勾（带 BOM 的 UTF-8 勾在 *with BOM* 项上），末尾分隔符 + `Customize Encodings List…`。上游 60 条里 22 条无 codec 如实缺席、8 条为超集近似（§19 之后剩 5 条），逐条见 PLAN §8.9f |

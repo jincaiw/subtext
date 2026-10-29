@@ -6,6 +6,24 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **二十一种语言终于有语法着色了**（其中 19 种已生效）。Rust、Python、JavaScript、TypeScript、C、C++、Java、Go、
+  Ruby、PHP、Swift、Kotlin、Scala、Lua、Bash、SQL、Makefile、C#、HTML、CSS 这些语法**没有**
+  `Highlights.json` —— 它们的颜色是 CotEditor 放在 `queries/<Name>/highlights.scm` 里的
+  tree-sitter 查询。现在照用上游的查询：冲突按「后声明的规则更具体」消解，按文档顺序上色，
+  字符串里的 `//` 不会被当成注释。
+
+### 修复
+
+- **编辑器现在真的会画语法着色了**。文档面板渲染的是 `gpui-component` 的 `Editor`，而它
+  每一帧都用组件主题重设一次编辑器样式，把应用设的颜色**在读到之前**覆盖掉 —— 于是
+  SubText 至今没有任何语法着色，正则那 47 个语法也一样。现在把 `.cottheme` 的正文色、
+  背景色与十个 token 的颜色投影进组件主题（`highlight::project_theme`），启动与切换主题时
+  各做一次。
+
 ## [0.3.9] — 2026-10-29
 
 ### 修复

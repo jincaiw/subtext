@@ -4086,6 +4086,10 @@ impl Workspace {
             gpui_kit::component::ThemeMode::Light
         };
         gpui_kit::component::Theme::change(mode, None, cx);
+        // The document pane is a component `Editor`, which re-applies its own
+        // style from the component theme every frame — so the colours have to
+        // go there, not onto the editor state.
+        highlighter::project_theme(&theme, cx);
 
         let style = highlighter::editor_style(&theme);
         let editors = self.all_panes();

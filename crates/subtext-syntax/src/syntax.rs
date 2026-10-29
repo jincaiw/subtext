@@ -301,17 +301,32 @@ impl Syntax {
         })
     }
 
+    /// The tree-sitter highlight query for this syntax, when it has one.
+    ///
+    /// Twenty-one bundles have no `Highlights.json` at all — Rust, Python,
+    /// JavaScript and the rest of the tree-sitter set — and their colours live
+    /// in `queries/<Name>/highlights.scm` beside the bundles. Without it those
+    /// languages are highlighted by their comment and string delimiters alone,
+    /// which is to say barely at all.
+    pub fn highlight_query(&self) -> Option<String> {
+        self.query_file("highlights.scm")
+    }
+
     /// The tree-sitter outline query for this syntax, when it has one.
     ///
-    /// CotEditor keeps the queries beside the syntax bundles rather than inside
-    /// them — `resources/queries/<Name>/outline.scm` — so this reads one level
-    /// up from the `syntaxes` directory. A syntax the user installed in their
-    /// own folder has no `queries` directory next to it and gets no outline,
-    /// which is also what CotEditor does: the queries are not part of a
-    /// `.cotsyntax` bundle.
     pub fn outline_query(&self) -> Option<String> {
+        self.query_file("outline.scm")
+    }
+
+    /// A query file from the directory beside the syntax bundles.
+    ///
+    /// CotEditor keeps them there rather than inside a `.cotsyntax` — so this
+    /// reads one level up from `syntaxes`. A syntax the user installed in their
+    /// own folder has no `queries` directory next to it and gets no query,
+    /// which is also what CotEditor does.
+    fn query_file(&self, name: &str) -> Option<String> {
         let queries = self.directory.parent()?.parent()?.join("queries");
-        std::fs::read_to_string(queries.join(&self.name).join("outline.scm")).ok()
+        std::fs::read_to_string(queries.join(&self.name).join(name)).ok()
     }
 
     /// A bare Plain Text syntax, with no rules at all.
