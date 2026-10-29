@@ -93,8 +93,12 @@ impl Workspace {
             // so the text engine handles them while the editor has focus. The
             // menu items still reach it: GPUI dispatches a menu command down
             // the same focus path a keystroke takes.
-            "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "PasteAsIs" | "SelectAll"
-            | "CopyWithStyle" => self.notice("Handled by the text engine", cx),
+            "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "PasteAsIs" | "SelectAll" => {
+                self.notice("Handled by the text engine", cx)
+            }
+            // The one clipboard command the text engine cannot do: it needs the
+            // syntax colours, which the engine does not know about.
+            "CopyWithStyle" => self.copy_as_rich_text(cx),
             // The menu's own ⌘⌫, which AppKit's text view does not bind: it
             // deletes backwards, exactly as `delete:` does upstream.
             "Delete" => self.delete_backward(window, cx),
@@ -373,9 +377,12 @@ impl Workspace {
             "ShowConsolePanel" => self.show_console(cx),
 
             // ---- help --------------------------------------------------
-            "ShowHelp" | "OpenHelpAnchor" => {
-                self.notice("SubText's documentation lives in docs/ in the source tree", cx)
-            }
+            // Upstream's `openHelpAnchor:` opens a page of the help book by
+            // anchor — the Help menu and Release Notes both point here. A plain
+            // executable has no help book, so the same destination is the
+            // documentation the project actually keeps, which is the `docs`
+            // directory of the repository.
+            "ShowHelp" | "OpenHelpAnchor" => cx.open_url(DOCS_URL),
             "OpenAppleScriptDictionary" => {
                 self.notice("AppleScript support does not exist on GPUI", cx)
             }
@@ -403,6 +410,7 @@ impl Workspace {
 const PROJECT_URL: &str = "https://github.com/jincaiw/subtext";
 const ISSUES_URL: &str = "https://github.com/jincaiw/subtext/issues";
 const RELEASES_URL: &str = "https://github.com/jincaiw/subtext/releases";
+const DOCS_URL: &str = "https://github.com/jincaiw/subtext/tree/main/docs";
 
 /// A deterministic stand-in for a random source, so `Shuffle Lines` is
 /// reproducible in tests and needs no `rand` dependency.

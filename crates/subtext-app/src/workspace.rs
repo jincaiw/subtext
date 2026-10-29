@@ -938,6 +938,87 @@ impl Workspace {
         self.push_document(document, syntax_name.to_string(), window, cx);
     }
 
+    /// `Edit ▸ Copy as Rich Text` — the selection with its syntax colours.
+    ///
+    /// Upstream's `copyWithStyle(_:)` builds an `NSAttributedString` from the
+    /// selection (plain text plus the colour the highlighter put on each run)
+    /// and hands it to `NSPasteboard.writeObjects`, which publishes RTF.
+    ///
+    /// GPUI's clipboard carries text or an image and has no styled-text entry,
+    /// so the RTF is built in `subtext_core::richtext` and put on the pasteboard
+    /// through `osascript` — the one call that can write a pasteboard type GPUI
+    /// does not model. A platform without `osascript` falls back to plain text
+    /// rather than pretending: the status bar says which one happened.
+    pub fn copy_as_rich_text(&mut self, cx: &mut Context<Self>) {
+        let selection = self.active_selection(cx);
+        if selection.is_empty() {
+            // Upstream beeps here; a status line says the same thing and is
+            // still there a second later.
+            self.set_status("Select something to copy", cx);
+            return;
+        }
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let text = document.editor().read(cx).value().to_string();
+        if selection.end > text.len() {
+            return;
+        }
+        let syntax_name = document.syntax.clone();
+
+        // The colours come from the same two pieces the editor paints with: the
+        // bundle's rules (or its tree-sitter query) and the theme resolver.
+        let runs = match self.syntaxes.by_name(&syntax_name) {
+            Some(syntax) => {
+                let mut highlighter = crate::highlighter::CotHighlighter::new(syntax);
+                highlighter.rehighlight_text(&text);
+                let resolver = crate::highlighter::CotStyleResolver::new(&self.theme);
+                highlighter.styled_runs(&selection, &resolver)
+            }
+            None => Vec::new(),
+        };
+
+        // A byte the highlighter said nothing about keeps the document's own
+        // text colour rather than RTF's "automatic", which would come out in
+        // whatever the receiving application happens to use.
+        let body = rgb_of_theme(self.theme.text_color());
+        let mut segments: Vec<subtext_core::richtext::Run<'_>> = Vec::new();
+        let mut cursor = selection.start;
+        for (range, style) in runs {
+            if range.start > cursor {
+                segments.push(subtext_core::richtext::Run {
+                    text: &text[cursor..range.start],
+                    color: Some(body),
+                });
+            }
+            segments.push(subtext_core::richtext::Run {
+                text: &text[range.clone()],
+                color: Some(style.color.map(rgb_of).unwrap_or(body)),
+            });
+            cursor = range.end;
+        }
+        if cursor < selection.end {
+            segments.push(subtext_core::richtext::Run {
+                text: &text[cursor..selection.end],
+                color: Some(body),
+            });
+        }
+
+        let font = self
+            .settings
+            .font_family
+            .clone()
+            .unwrap_or_else(|| cx.theme().mono_font_family.to_string());
+        let rtf = subtext_core::richtext::rtf(&segments, &font, self.settings.font_size);
+
+        let plain = text[selection].to_string();
+        match put_rich_text_on_the_pasteboard(&rtf, &plain, cx) {
+            Ok(true) => self.set_status("Copied with syntax colours", cx),
+            Ok(false) => self.set_status("Copied as plain text — no RTF pasteboard here", cx),
+            Err(error) => self.set_status(format!("The clipboard refused the text: {error}"), cx),
+        }
+    }
+
     /// `Help ▸ Create Issue Report` — a new Markdown document holding the bug
     /// report template, with this machine's version, system and language
     /// already filled in.
@@ -8021,6 +8102,92 @@ fn outline_item(node: &FilteredNode, expanded: &HashSet<String>) -> TreeItem {
                 .map(|child| outline_item(child, expanded)),
         )
         .expanded(expanded.contains(&node.entry.id))
+}
+
+/// An `Rgba` as the eight-bit channels an RTF colour table takes.
+fn rgb_of_rgba(rgba: gpui_kit::Rgba) -> subtext_core::richtext::Rgb {
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    subtext_core::richtext::Rgb {
+        red: channel(rgba.r),
+        green: channel(rgba.g),
+        blue: channel(rgba.b),
+    }
+}
+
+/// The same for a `.cottheme` colour, which is already eight-bit.
+fn rgb_of_theme(color: subtext_theme::Rgba) -> subtext_core::richtext::Rgb {
+    subtext_core::richtext::Rgb {
+        red: color.r,
+        green: color.g,
+        blue: color.b,
+    }
+}
+
+/// The same for a colour the highlighter hands out, which is an `Hsla`.
+fn rgb_of(color: gpui_kit::Hsla) -> subtext_core::richtext::Rgb {
+    rgb_of_rgba(color.to_rgb())
+}
+
+/// Escape `text` for an AppleScript string literal.
+///
+/// Only the backslash and the double quote end a literal early; a real line
+/// break is a legal character inside one, which is why there is no `\n` case.
+fn applescript_string(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len() + 8);
+    for character in text.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
+/// Put styled text on the pasteboard, falling back to plain text.
+///
+/// `Ok(true)` means the RTF flavour was written. `Ok(false)` means this platform
+/// has no way to write one and `plain` went to the clipboard instead — the
+/// caller says so, because silently copying less than asked is the kind of quiet
+/// difference this project writes gaps about.
+///
+/// The RTF goes through `osascript` because GPUI's `ClipboardEntry` has three
+/// variants — string, image, file paths — and styled text is none of them.
+/// `StandardAdditions`' `set the clipboard to` is the only call that writes a
+/// pasteboard type the framework does not model, and it needs no automation
+/// permission of its own.
+fn put_rich_text_on_the_pasteboard(rtf: &str, plain: &str, cx: &mut App) -> std::io::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        let path = std::env::temp_dir().join(format!("subtext-{}.rtf", std::process::id()));
+        std::fs::write(&path, rtf)?;
+        // `«class RTF »` is the four-character code with a trailing space; the
+        // path sits inside a quoted literal, which is enough because a
+        // temporary directory does not contain a double quote.
+        // A record, not a bare value: that is what makes StandardAdditions
+        // write the plain-text flavours alongside the RTF. Upstream gets the
+        // same set because it writes an `NSAttributedString`; without it,
+        // pasting into a target that only takes text would find nothing.
+        let script = format!(
+            "set the clipboard to {{«class RTF »:(read (POSIX file \"{}\") as «class RTF »), \
+             string:\"{}\"}}",
+            path.display(),
+            applescript_string(plain)
+        );
+        let written = matches!(
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .status(),
+            Ok(status) if status.success()
+        );
+        let _ = std::fs::remove_file(&path);
+        if written {
+            return Ok(true);
+        }
+    }
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(plain.to_string()));
+    Ok(false)
 }
 
 /// Load every `.cotsyntax` bundle the resource directory offers.

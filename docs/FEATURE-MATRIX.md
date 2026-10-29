@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | 新建 | `new_tab` | ✅ |
 | 新建标签页 | `new_tab` | ✅ |
-| 新建窗口 | — | ⏳ 提示「SubText 以标签页打开文档」 |
+| 新建窗口 | — | ⏳ 设计决定而非能力缺失：上游同时有窗口与标签页，SubText 只做标签页（§22.13） |
 | 打开… | `open_dialog` | ✅ |
 | 打开最近使用 | 菜单运行时列出最近 10 条（标题用文件名）+ 侧栏 `FileBrowser` | ✅ |
 | 清除最近使用 | `clear_recent` | ✅ |
@@ -50,7 +50,7 @@
 | 复原到已存储 | `revert` | ✅ |
 | 在文件管理器中显示 | `show_in_finder` | ✅ |
 | 拷贝路径 | `copy_path` | ✅ |
-| 共享 | — | ⏳ |
+| 共享 | — | ⚠️ 上游是 `NSSharingServicePicker`，一个 AppKit 弹出层；GPUI 不暴露 |
 | 页面设置 / 打印 | — | ⏳ |
 
 **文件 I/O 细节**：编码（含 6 种 BOM）、换行符、文件修改标记、未保存确认，
@@ -63,19 +63,19 @@
 | 撤销 / 重做 | 编辑器键上下文 | 🔁 由文本引擎处理 |
 | 剪切 / 拷贝 / 粘贴 | 编辑器键上下文 | 🔁 |
 | 原样粘贴 | 编辑器键上下文 | 🔁 |
-| 带样式拷贝 | — | 🔁 提示「由文本引擎处理」 |
+| 带样式拷贝 | `copy_as_rich_text` + `richtext` | ✅ 真的把选区的语法着色写进剪贴板的 **RTF** 类型（同时带纯文本，粘到只收文本的地方也能用）。上游的 `copyWithStyle:` 写 `NSAttributedString`；GPUI 的剪贴板没有富文本，所以 RTF 由 `subtext_core::richtext` 生成、经 `osascript` 写进pasteboard（§22.14） |
 | 删除 | `delete_backward` | ✅ ⌘⌫，删选区或光标前一个字形簇（上游 `delete:`） |
 | 全选 | 编辑器键上下文 | 🔁 |
 | 选择单词 | `select_word` | ✅ |
 | 选择段落 | `select_line` | ✅ |
 | 选择包围符号 | `select_enclosing_symbols` | ✅ |
-| 向上/下扩展列选择 | — | ⏳ 需要编辑器的视觉行模型 |
+| 向上/下扩展列选择 | — | ⏳ **不是视觉行模型，是多光标**：上游的 `selectColumnUp/Down` 调 `addSelectedColumn(affinity:)`，在第一个选区**上方加一个插入点**（多光标），而 `EditorState` 只有一个选区（§22.13） |
 | 按行拆分选区 | `split_selection_by_lines` | ✅ |
 | 菜单校验 | `menu_contract` | ✅ 命令覆盖由 `cargo test` 常设把关（生成表 → bridge 绑定 → dispatch 分支）。**按状态置灰**：*Straighten Quotes* 在空选区时是灰的（生成器把 `state.selection_empty` 烘进条目，工作区用 `cx.observe(editor)` 跟踪选区并在翻转时重建菜单栏）。大纲导航两项仍未置灰（要判断「大纲是否有条目」，每次 refresh 解析缓冲区不划算） |
 | 括号配对 | `flash_matching_bracket` | ✅ 光标紧跟括号时闪出配对那一个（`matching_symbol_pair` 按对计数嵌套，`()` `{}` `[]`）。上游在每次选区变化时跑，SubText 只在编辑后跑 —— 编辑器不报纯光标移动，见缺口表 |
 | 补全 | `complete` | ✅ 上游的候选规则（文档里的词 + 语法 `Completion.json` 的词），⌥⎋ 弹出、↑↓ 选、Enter/Tab 插入、Esc/左右取消、继续打字重新过滤；带括号的词插完光标停在括号中间。**自动补全**也做了：打字停顿 250ms 后按上游 `performCompletion` 的四条守卫（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字）弹列表，Mode 面板的 *Suggest completions while typing* 生效。列表未虚拟化、不判断 IME 合成态、*Standard words* 仍禁用，见缺口表 |
 | 输入反斜杠 / 日元符号 | `insert_text` | ✅ |
-| 显示 Unicode 输入面板 | — | ⏳ |
+| 显示 Unicode 输入面板 | — | ⚠️ 上游是 `NSApplication.orderFrontCharacterPalette`，一个 AppKit 系统面板；GPUI 不暴露面板 API |
 
 ## 4. 拼写与替换
 
@@ -118,7 +118,7 @@
 | 等宽字体 | `set_font(mono_font())` | ✅ |
 | 增大 / 减小字号 | `bump_font(±1.0)` | ✅ |
 | 重置字体 | `set_font` + `set_font_size` | ✅ |
-| 字体面板 | — | ⏳ 提示走 Format ▸ Font |
+| 字体面板 | Format ▸ Font 的字体族 / 字号 | 🔁 上游的「Show Fonts」是 `NSFontManager.orderFrontFontPanel`（含字体变体与特性开关），GPUI 不暴露；能选的字体族与字号已经都在 Format ▸ Font 里 |
 | 抗锯齿 | `toggle_antialias` | ✅ |
 | 连字 | `toggle_ligatures` | ✅ |
 | 主题 | `apply_theme_by_name` | ✅ 经 Format ▸ Theme 菜单，当前项打勾 |
@@ -228,7 +228,7 @@
 | 前置全部窗口 | 交窗口系统处理 | 🔁 |
 | 显示控制台 | `show_console`（`console.rs`） | ✅ 独立窗口（360×200，与上游面板一致）显示脚本的
 标准错误：时间戳 + 脚本名 + 等宽正文，Clear 按钮清空。日志是 `Global`，关掉窗口再开还在（§22.11） |
-| 帮助 / 打开帮助锚点 | — | ⏳ 指向 `docs/` |
+| 帮助 / 打开帮助锚点 | `cx.open_url` | ✅ 打开仓库的 `docs/` 目录页面。上游 `openHelpAnchor:` 按锚点翻帮助书，纯可执行文件没有帮助书（§22.13） |
 | AppleScript 字典 | — | ⚠️ GPUI 无此能力 |
 | 官网 | `cx.open_url` | ✅ 打开 <https://github.com/jincaiw/subtext> |
 | 报告问题 | `cx.open_url` | ✅ 打开 issues 页 |
@@ -262,7 +262,7 @@ Windows / Linux 为 `config_directory()/Scripts`。
 | 目录变化自动重算菜单 | `NSFilePresenter` | 2 秒轮询（`SCRIPT_POLL`）+ `MenuSignature` | 🔁 |
 | Option 点击打开 / Option+Shift 显示 | `NSEvent.modifierFlags` | — | ⚠️ GPUI 菜单项无修饰键状态，点击恒为运行 |
 | 菜单项 tooltip | `"Option-click to open script in editor."` | — | ⚠️ GPUI 菜单项无 tooltip |
-| 事件脚本（`documentOpened` / `documentSaved`） | `ScriptInfo` + `CotEditorHandlers` | — | ⏳ 无对应钩子 |
+| 事件脚本（`documentOpened` / `documentSaved`） | `ScriptInfo` + `CotEditorHandlers` | — | ⚠️ 上游派发的是 Apple event（`cEd1` / `edod`、`edsd`），且脚本必须是带 `CotEditorHandlers` 的 app bundle（`ScriptDescriptor.swift`）；SubText 没有 Apple event 通道（§22.13） |
 | `tell application "CotEditor"` | 自身 scripting dictionary | — | ⚠️ 不暴露 dictionary |
 
 ---

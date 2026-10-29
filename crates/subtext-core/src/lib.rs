@@ -22,6 +22,7 @@ pub mod issuereport;
 pub mod line_ending;
 pub mod matcher;
 pub mod multireplace;
+pub mod richtext;
 pub mod scripts;
 pub mod snippets;
 pub mod textops;

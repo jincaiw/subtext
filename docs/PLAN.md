@@ -2935,6 +2935,81 @@ PROBE message="boom: line 3 failed\nsecond line"
 **没做的**：AppleScript 的 `write to console` 命令（SubText 没有 AppleScript 桥，已记账）；
 上游控制台的字号 +/−/重置（那是一个工具栏菜单，窗口很小时不值得占位）。
 
+### 22.14 带样式拷贝：把 RTF 自己拼出来
+
+`Edit ▸ Copy as Rich Text` 一直是「提示由文本引擎处理」。核对上游才发现它不是提示：`copyWithStyle(_:)`
+把选区做成 `NSAttributedString`（纯文本 + 语法高亮给出的前景色），交给
+`NSPasteboard.writeObjects`，AppKit 于是发布 **RTF** —— 粘到邮件或 Pages 里颜色还在。
+
+GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径），没有富文本。所以这件事分两半：
+
+**生成**（`subtext-core/src/richtext.rs`，纯函数）：`Run { text, color }` 的序列 → RTF。要点：
+
+* 颜色表按颜色**首次出现的顺序**排，同样的输入永远产出同样的字节 —— 这是它能被测试的原因；
+* 索引从 1 开始（0 是 RTF 的"自动颜色"）；
+* 非 ASCII 走 `\uN?`，N 是**有符号** 16 位码元（`龙` U+9F99 = 40857 写成 `\u-24679?`），
+  代理对拆成两个；换行是 `\par`，制表是 `\tab`，`\ { }` 转义；
+* 字号按半点写（13pt → `\fs26`）。
+
+8 条单元测试盯这些：无颜色时颜色表为空、两个同色只占一项、分隔符转义、换行/制表、
+`中`/`龙` 的正负号、emoji 拆成两段、字体名缺失时退回 Courier。
+
+**写剪贴板**（应用层）：GPUI 写不了这个类型，于是 RTF 落到临时文件，再由
+`osascript -e 'set the clipboard to (read (POSIX file …) as «class RTF »)'` 设进 pasteboard。
+第一版只写了 RTF，`clipboard info` 里就只有 `«class RTF »` 一项 —— 粘到只收纯文本的地方什么也
+拿不到。改成 **record 形式**后 StandardAdditions 一次写全：
+
+```
+«class RTF », 323, Unicode text, 76, string, 38, «class utf8», 38, «class ut16», 78
+```
+
+与上游 `writeObjects` 给出的类型集合一致。没有 `osascript` 的平台退回纯文本，状态栏**明说**
+是纯文本 —— 悄悄少给一点，正是这个项目记缺口的那种差异。
+
+**验证**（探针 + `pbpaste`）：一个 38 字节的 Rust 片段，选中全部后调用命令 ——
+
+```
+{\rtf1\ansi\ansicpg1252\deff0\uc1
+{\fonttbl{\f0\fnil\fcharset0 Menlo;}}
+{\colortbl;\red27\green85\blue107;\red49\green49\blue49;\red128\green97\blue38;...}
+\f0\fs26
+\cf1 pub\cf2  \cf1 fn\cf2  \cf3 main\cf2 () \{\par
+    \cf1 let\cf2  x: \cf4 u32\cf2  = \cf5 1\cf2 ;\par
+\}\par
+}
+```
+
+`pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
+编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
+
+### 22.13 把「未实现」逐条回到上游核对
+
+§22.12 结尾发现一件事：`Create Issue Report` 在矩阵里记的是「状态栏提示」，看起来像平台限制，
+实际上上游的实现是「建一份填好的文档」，完全做得了 —— 当初没查就写下了难度。同一类错误在
+§22.8（说是没有居中接口）、§22.10（说是拿不到 `Window`）已经各犯过一次。
+
+所以这一轮把矩阵里剩下的 11 条 `⏳` 逐条回到上游源码核对了一遍。**十条里有五条的理由不准确**：
+
+| 条目 | 原记的理由 | 核对结果 | 依据 |
+| --- | --- | --- | --- |
+| 向上/下扩展列选择 | 需要编辑器的视觉行模型 | **是多光标**：`selectColumnUp/Down` 调 `addSelectedColumn(affinity:)`，在第一个选区上方**加一个插入点**；`EditorState` 只有一个选区 | `EditorTextView+CursorMovement.swift:627` |
+| 显示 Unicode 输入面板 | （空） | AppKit 系统面板 | `DocumentWindowController.swift:989` — `NSApplication.orderFrontCharacterPalette` |
+| 字体面板 | 提示走 Format ▸ Font | AppKit 系统面板；但**字体族与字号已有等价入口**，应记 🔁 而不是 ⏳ | `DocumentWindowController.swift:1014` — `NSFontManager.orderFrontFontPanel` |
+| 共享 | （空） | AppKit 弹出层 | `NSSharingServicePicker` |
+| 事件脚本 | 无对应钩子 | 派发的是 **Apple event**（`cEd1` / `edod` / `edsd`），且脚本必须是带 `CotEditorHandlers` 的 **app bundle** | `ScriptDescriptor.swift:61`、`ScriptManager.swift:112` |
+| 新建窗口 | 提示以标签页打开 | **设计决定**，不是能力缺失 —— 上游两种都有 | — |
+
+**做实了一条**：`ShowHelp` / `OpenHelpAnchor` 从「文档在源码树里」改成打开仓库的 `docs/` 目录
+页面。上游按锚点翻帮助书（`openHelpAnchor:inBook:`），纯可执行文件没有帮助书；`docs/` 是这个
+项目真正维护的文档，就是那个位置。
+
+其余五条（打印、书写方向、布局方向、工具栏自定义、捐赠）核对后维持原判：打印是
+`NSPrintOperation`，书写/布局方向是 `NSLayoutManager` 的竖排支持，工具栏自定义是
+`NSToolbar` 的 `customizationPalette`，捐赠是没有账户可指 —— 都不是「没查就写」。
+
+**留下的教训写进缺口表的规矩**：以后每条 `⏳` / `⚠️` 都要能回答「查了上游哪个文件 / 哪个
+框架 API」，回答不出来就先别写理由。
+
 ### 22.12 创建报告：把「一条提示」变成一份填好的文档
 
 `Help` 菜单里有三条一直只是状态栏提示：「CotEditor Web Site」「Report Issue」「Create Issue

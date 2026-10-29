@@ -6,6 +6,24 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **Help 菜单的帮助项现在真的打开文档**（仓库的 `docs/` 目录），不再只在状态栏说「文档在源码树
+  里」。上游按锚点翻帮助书，纯可执行文件没有帮助书。
+- **Edit ▸ Copy as Rich Text 现在真的复制富文本**。此前它提示「由文本引擎处理」，实际只拿到纯
+  文本。现在把选区的语法着色写成剪贴板的 **RTF** 类型（同时带纯文本，粘到只收文本的地方也能用）：
+  上游的 `copyWithStyle:` 写 `NSAttributedString`，而 GPUI 的剪贴板没有富文本，所以 RTF 由
+  `subtext-core::richtext` 生成、经 `osascript` 写进 pasteboard。
+
+### 文档
+
+- **矩阵里 11 条「未实现」逐条回到上游核对**，十条里有五条的理由不准确，已改正：向上/下扩展
+  列选择其实是**多光标**（不是视觉行模型）；Unicode 输入面板、共享是 AppKit 弹出层（⚠️ 而不是
+  ⏳）；字体面板其实是 🔁（Format ▸ Font 已有字体族与字号）；事件脚本走的是 Apple event +
+  带 `CotEditorHandlers` 的 app bundle；新建窗口是**设计决定**而不是能力缺失。
+
 ## [0.3.14] — 2026-10-29
 
 ### 新增
@@ -20,6 +38,8 @@
 
 - `subtext-core` 新增 `issuereport`：`Environment`（版本 / 系统 / 语言，各自有取法与退路）
   与 `IssueReport::template`，版式由 5 条单元测试盯住。
+- `subtext-core` 新增 `richtext`：`Run` → RTF，8 条单元测试盯颜色表顺序、转义、`\uN?` 的
+  有符号码元、代理对与半点字号。
 - 面板冒烟多一步：算上「创建报告」开的那个文档，20 → 21 个界面。
 
 ## [0.3.13] — 2026-10-29
