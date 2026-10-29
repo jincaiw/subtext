@@ -2982,6 +2982,47 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.15 括号配对跟随光标：缺口表与自己的注释打架
+
+矩阵里这一条写着「上游在每次选区变化时跑，SubText 只在编辑后跑 —— **编辑器不报纯光标移动**」。
+但 `subscribe_pane` 的注释写的是相反的话：
+
+> The editor notifies whenever it repaints, **which includes every caret move and every selection
+> change** — the two things the menu bar has to follow and the two it never reports as an
+> `InputEvent`.
+
+两句话不可能都对。探针一测就知道：把光标从文首移到一段选区上（不动一个字节），
+`menu_selection_empty` 从 `true` 变成 `false` —— 而那个值只有 `observe(editor)` → `defer` →
+`sync_menu_gates` 这条路会改。**编辑器确实在每次重绘时通知，光标移动也算**。
+
+所以这不是「框架不给」，是**接线漏了一处**：`sync_menu_gates` 挂在 observe 上，而
+`flash_matching_bracket` 只挂在 `InputEvent::Change` 上。括号配对因此只在打字后闪，光标走到括号旁
+不闪 —— 与上游 `selectionDidChange` 的行为不同。
+
+**做法**：把配对判断放进同一个 `defer`，并做两层去重，因为 observe 的通知密度是「每次重绘」：
+
+1. **先比选区**（一次 `Range` 比较）。光标闪烁、滚动重绘都不改变选区，于是连配对都不去扫 ——
+   这一步是必须的，`matching_symbol_pair` 要按对计数嵌套，对大文件是 O(n)；
+2. **再比配对**。光标沿同一个 `foo(bar)` 一格一格移动时配对不变，不能每步都重新淡出。
+
+编辑那条路径（`on_pane_changed`）在调用前把选区记录清空 —— 文本在光标底下变了，配对可能变而
+选区没变，去重不能把这次跳过去。
+
+**验证**（探针）：`fn main() {\n    body();\n}\n`，光标从文首移到 `{` 后（偏移 11）——
+
+```
+PROBE step 2: caret -> 11
+PROBE bracket pair=Some(24..25) prev=None      ← 第一次，闪
+PROBE bracket pair=Some(24..25) prev=Some(24..25)  ← 后续重绘，被去重
+```
+
+`Some(24..25)` 是最后一行的 `}`；把光标移到 `main` 中间时返回 `None`，记录随之清空，回到括号旁
+会再闪一次。
+
+**这条缺口不算「平台受限」**：它一直是能做的，只是理由写错了。§22.13 刚给缺口表立了「每条都要
+能回答查了哪里」的规矩，这是同一个毛病在本轮的第二次发作 —— 而且这次是**文档和代码注释互相矛盾**，
+本来只要读一眼注释就能发现。
+
 ### 22.13 把「未实现」逐条回到上游核对
 
 §22.12 结尾发现一件事：`Create Issue Report` 在矩阵里记的是「状态栏提示」，看起来像平台限制，

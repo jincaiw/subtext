@@ -546,6 +546,13 @@ pub struct Workspace {
     /// only the view — so closing it and running `Show Console` again brings the
     /// same entries back.
     console_window: Option<AnyWindowHandle>,
+    /// The bracket pair the caret was last next to, so a caret that slides
+    /// along the same pair does not restart the flash on every key.
+    matching_bracket: Option<std::ops::Range<usize>>,
+    /// The selection the pair was worked out for. The editor notifies on every
+    /// repaint — the caret's blink included — and a repaint that did not move
+    /// the caret cannot change the answer.
+    matching_bracket_selection: Option<std::ops::Range<usize>>,
     /// The Quick Actions bar, while it is up. It is a panel over this window
     /// rather than part of it, so it is tracked the way the settings window is.
     quick_actions_window: Option<AnyWindowHandle>,
@@ -823,6 +830,8 @@ impl Workspace {
             settings_view: None,
             about_window: None,
             console_window: None,
+            matching_bracket: None,
+            matching_bracket_selection: None,
             quick_actions_window: None,
             last_color_code_color: colorcode::Color::BLACK,
             outline_tree,
@@ -1148,8 +1157,14 @@ impl Workspace {
             let queued = queued.clone();
             cx.defer(move |cx| {
                 queued.set(false);
-                weak.update(cx, |workspace, cx| workspace.sync_menu_gates(cx))
-                    .ok();
+                weak.update(cx, |workspace, cx| {
+                    workspace.sync_menu_gates(cx);
+                    // Upstream runs the bracket match on every selection
+                    // change, not only on an edit — and the editor notifies on
+                    // exactly that (see the note above).
+                    workspace.flash_matching_bracket(cx);
+                })
+                .ok();
             });
         });
         let changed = cx.subscribe_in(
@@ -1218,6 +1233,10 @@ impl Workspace {
         if grew {
             self.schedule_automatic_completion(cx);
         }
+        // The text moved under the caret, so the pair may have changed even
+        // though the selection did not — the de-duplication the flash does for
+        // repaints must not skip this one.
+        self.matching_bracket_selection = None;
         self.flash_matching_bracket(cx);
         cx.notify();
     }
@@ -3098,25 +3117,53 @@ impl Workspace {
     /// need the double-delimiter scan and a syntax of their own, and that path
     /// upstream feeds a different candidate list.
     fn flash_matching_bracket(&mut self, cx: &mut Context<Self>) {
-        let Some(text) = self.active_text(cx) else {
+        let Some(document) = self.documents.get(self.active) else {
             return;
         };
-        let selection = self.active_selection(cx);
-        if !selection.is_empty() {
+        let selection = document.editor().read(cx).selected_range();
+
+        // Answering "did the caret move at all" is one range compare; a repaint
+        // that did not move it — the blink, a scroll — stops here and never
+        // scans for a pair.
+        if self.matching_bracket_selection.as_ref() == Some(&selection) {
             return;
         }
+        self.matching_bracket_selection = Some(selection.clone());
+
+        let pair = self.matching_bracket_at_caret(&selection, cx);
+        // A caret that walks along the same pair — one arrow key at a time past
+        // `foo(bar)` — must not restart the fade on every step. Leaving the pair
+        // clears the record, so coming back to it flashes again.
+        if self.matching_bracket == pair {
+            return;
+        }
+        self.matching_bracket = pair.clone();
+        if let Some(range) = pair {
+            self.flash_find_indicator(range, cx);
+        }
+    }
+
+    /// The pair a collapsed caret sits beside, if it sits beside one.
+    ///
+    /// Read straight off the editor rather than through `active_text`, which
+    /// copies the buffer.
+    fn matching_bracket_at_caret(
+        &self,
+        selection: &std::ops::Range<usize>,
+        cx: &App,
+    ) -> Option<std::ops::Range<usize>> {
+        if !selection.is_empty() || selection.start == 0 {
+            return None;
+        }
+        let document = self.documents.get(self.active)?;
+        let state = document.editor().read(cx);
+        let text = state.value();
         let caret = selection.start;
-        if caret == 0 {
-            return;
+        if caret > text.len() {
+            return None;
         }
-        let Some((start, _)) = text[..caret].char_indices().next_back() else {
-            return;
-        };
-        let Some(range) = textops::matching_symbol_pair(&text, start, &textops::SymbolPair::BRACES)
-        else {
-            return;
-        };
-        self.flash_find_indicator(range, cx);
+        let (start, _) = text[..caret].char_indices().next_back()?;
+        textops::matching_symbol_pair(&text, start, &textops::SymbolPair::BRACES)
     }
 
     /// The active pane's marks collection.
