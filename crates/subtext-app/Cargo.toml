@@ -34,3 +34,7 @@ jiff.workspace = true
 # `gpui-fast-macos` pins `cocoa = 0.26.0` exactly, while the rest of the graph
 # takes 0.26.1. Naming the version here is what lets both resolve to one.
 cocoa = "=0.26.0"
+# The UI tests build fixtures out of the model types — the encoding list editor
+# is handed an `EncodingList` rather than reading one from the settings — and an
+# integration test can only name a crate the package itself depends on.
+subtext-core.workspace = true

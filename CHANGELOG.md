@@ -6,7 +6,7 @@
 
 ---
 
-## [Unreleased]
+## [0.3.49] — 2026-10-30
 
 ### 修复
 
@@ -21,7 +21,9 @@
 - `EncodingList::insert_at`：拖拽的落点是一个下标，而 `insert_after` 只服务 Add 按钮。
 - 落点算术抽成 `landing_index()`（Foundation `move(fromOffsets:toOffset:)` 的纯函数形式），
   向下 / 向上 / 成块 / 原地 / 分隔符 / 末尾六条测试覆盖。
-- 拖拽手势本身还没有真机验证（本机无辅助功能权限），记在 `docs/PLAN.md` §22.47。
+- 拖拽手势本身有 UI 测试了（`dragging_a_row_reorders_the_encoding_list`）：把 sheet 直接挂进
+  测试窗口，按下第一行、拖到第三行、松手，断言第一行的 y 变大。为此给 dev-dependencies 加了一行
+  `subtext-core`，让集成测试能构造 `EncodingList`。UI 测试 21 → 22。
 
 ## [0.3.48] — 2026-10-30
 

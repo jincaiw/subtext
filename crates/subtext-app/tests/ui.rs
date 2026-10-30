@@ -1059,3 +1059,76 @@ fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppCon
         "the saved file should hold what this test wrote"
     );
 }
+
+/// Dragging a row of the encoding list reorders it.
+///
+/// §22.47 replaced the two arrow buttons with upstream's gesture — drag a row,
+/// ⌫ to delete — and the model tests call `move_dragged` directly, so they
+/// cannot say whether the gesture is wired to it. This drives the pointer path
+/// the way a hand does (press, move past the threshold, release) and reads the
+/// answer off the rows' own bounds: the row that was first has to end up lower
+/// than it started.
+#[gpui_kit::test]
+fn dragging_a_row_reorders_the_encoding_list(cx: &mut TestAppContext) {
+    use subtext_app::encoding_list_sheet::EncodingListSheet;
+    use subtext_core::encoding::{EncodingList, TextEncoding};
+
+    cx.update(gpui_kit::init);
+
+    let list = EncodingList::from_identifiers(&[
+        Some("utf-8".to_string()),
+        Some("shift_jis".to_string()),
+        Some("windows-1252".to_string()),
+    ]);
+    let sheet = cx.update(|cx| {
+        cx.new(|cx| {
+            EncodingListSheet::new(
+                gpui_kit::WeakEntity::new_invalid(),
+                list,
+                TextEncoding::UTF8,
+                cx,
+            )
+        })
+    });
+
+    let window = cx.update(|cx| {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(560.), px(420.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            |_window, _cx| sheet.clone(),
+        )
+        .expect("open the test window")
+        .0
+    });
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let first = window.find(("encoding-row", 0u64)).bounds();
+        let third = window.find(("encoding-row", 2u64)).bounds();
+        let middle = |bounds: Bounds<gpui_kit::Pixels>| {
+            gpui_kit::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            )
+        };
+
+        window.drag(middle(first), middle(third), cx);
+        window.render_frame(cx);
+
+        let moved = window.find(("encoding-row", 0u64)).bounds();
+        assert!(
+            moved.origin.y > first.origin.y,
+            "the first row should have been dragged below the last one \
+             ({} → {})",
+            f32::from(first.origin.y),
+            f32::from(moved.origin.y)
+        );
+    })
+    .expect("drag the row");
+}

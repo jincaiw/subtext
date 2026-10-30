@@ -3382,11 +3382,15 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
   交给它 —— 上游是 `.onDeleteCommand` 挂在 `List` 上，行为一致。
 * 说明文字改成上游那句 *Drag encodings to change the order:*。
 
-**没验到的，写在这里**：拖拽手势本身。本机没有辅助功能权限，`osascript` 既点不动菜单栏也拖不动
-行（`-10004`）；`TestWindowExt::drag` 够得着工作区里的元素，够不着这个对话框 —— sheet 由
-`SettingsWindow::edit_encoding_list` 打开，UI 测试没有那条路径，而给它开一条只为一个手势，
-代价大于收益。模型侧的六条测试覆盖了落点算术、选区行为与分隔符；**`on_drop` 有没有接上
-`move_dragged` 只有真机能回答**。所以这一轮先不发布，等授权后补一次真机拖拽与截图。
+**怎么验的 —— 以及一条被自己推翻的结论。** 起初这里写的是「手势验不了」：`osascript` 没有
+辅助功能权限（`-10004`），`TestWindowExt::drag` 又「够不着这个对话框」。前半句是对的，后半句
+只对了一半 —— 够不着的不是拖拽，是**测试里没有那条路径**。sheet 只依赖一个
+`WeakEntity<Workspace>`，`new_invalid()` 就够渲染；把它直接挂进测试窗口，拖拽就能走。
+
+于是 `dragging_a_row_reorders_the_encoding_list` 按下第一行、拖到第三行、松手，断言第一行的 y
+变大 —— **一次通过**，`on_drop` 确实接到了 `move_dragged`。为此给 `subtext-app` 的
+dev-dependencies 加了一行 `subtext-core`：集成测试只能命名包自己依赖的 crate，而 fixture 要构造
+`EncodingList`。
 
 ### 22.46 大纲导航两项跟着光标置灰 —— 以及导航栏每帧都在重算的那份大纲
 
