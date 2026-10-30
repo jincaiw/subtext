@@ -70,15 +70,8 @@
   (object_reference
     name: (identifier) @outline.container))
 
-(drop_procedure
-  (object_reference
-    name: (identifier) @outline.container))
-
 ; Functions
 (create_function
   (object_reference) @outline.function
   (function_arguments) @outline.signature.parameters)
 
-(create_procedure
-  (object_reference) @outline.function
-  ((function_arguments) @outline.signature.parameters)?)

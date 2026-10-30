@@ -303,7 +303,7 @@ mod tests {
             //
             // Both are listed rather than skipped, so the day a grammar catches
             // up the test fails and says so.
-            const NOT_YET: [&str; 1] = ["SQL"];
+            const NOT_YET: [&str; 0] = [];
             let result = highlights(&name, "", &source);
             if NOT_YET.contains(&name.as_str()) {
                 assert!(result.is_err(), "{name} parses now — wire it up");
@@ -312,6 +312,9 @@ mod tests {
             result.unwrap_or_else(|error| panic!("{name}: {error}"));
             checked += 1;
         }
-        assert_eq!(checked, 20, "expected twenty parsable highlight queries");
+        assert_eq!(
+            checked, 21,
+            "expected twenty-one parsable highlight queries"
+        );
     }
 }

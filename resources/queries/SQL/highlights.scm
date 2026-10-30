@@ -81,7 +81,6 @@
   (keyword_constraint)
   (keyword_force)
   (keyword_use)
-  (keyword_include)
   (keyword_for)
   (keyword_if)
   (keyword_exists)
@@ -117,7 +116,6 @@
   (keyword_transaction)
   (keyword_only)
   (keyword_like)
-  (keyword_rlike)
   (keyword_similar)
   (keyword_over)
   (keyword_change)
@@ -190,28 +188,17 @@
   (keyword_password)
   (keyword_reset)
   (keyword_role)
-  (keyword_current_role)
   (keyword_sequence)
   (keyword_start)
   (keyword_restart)
   (keyword_tablespace)
-  (keyword_split)
-  (keyword_tablets)
   (keyword_until)
   (keyword_user)
-  (keyword_current_user)
-  (keyword_session_user)
   (keyword_valid)
   (keyword_action)
   (keyword_definer)
   (keyword_invoker)
-  (keyword_enable)
-  (keyword_disable)
   (keyword_security)
-  (keyword_policy)
-  (keyword_permissive)
-  (keyword_restrictive)
-  (keyword_public)
   (keyword_extension)
   (keyword_version)
   (keyword_out)
@@ -267,7 +254,6 @@
   (keyword_storage)
   (keyword_compression)
   (keyword_duplicate)
-  (keyword_while)
 ] @keywords
 
 [
@@ -310,7 +296,6 @@
 ] @keywords
 
 
-; MARK: Types (default)
 ; ----------------------------
 
 (object_reference

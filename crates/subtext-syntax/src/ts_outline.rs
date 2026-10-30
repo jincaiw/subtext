@@ -1311,7 +1311,7 @@ mod tests {
         // CotEditor builds SQL from `DerekStride/tree-sitter-sql`'s `gh-pages`
         // branch, which has node types (`drop_procedure`) that the published
         // `tree-sitter-sequel` 0.3.11 does not.
-        const NOT_YET: [&str; 1] = ["SQL"];
+        const NOT_YET: [&str; 0] = [];
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/queries");
         let mut checked = 0;
@@ -1337,7 +1337,7 @@ mod tests {
             result.unwrap_or_else(|error| panic!("{name}: {error}"));
             checked += 1;
         }
-        assert_eq!(checked, 21, "expected twenty-one parsable outline queries");
+        assert_eq!(checked, 22, "expected twenty-two parsable outline queries");
     }
 
     /// A syntax with no query and no regex rules is simply empty, and asking for
