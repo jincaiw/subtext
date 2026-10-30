@@ -2982,7 +2982,7 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
-### 22.23 Quick Actions：面板画得对，但一半的结果够不着
+### 22.23 Quick Actions：第一次看清它，顺带记一次误判
 
 上一轮列的「可走查界面」里漏了 Quick Actions（浮动命令面板）。补进 sweep 第 22 步后，它第一次被拍照——
 中间卡了四轮，卡的不是应用，是**看不见的窗口**。
@@ -3017,19 +3017,29 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 ◻ Transformations › Convert to Half Width     ← 被下边切掉一半
 ```
 
-字段、图标、面包屑、快捷键、高亮都对。**但第九条只露出半行，而它够不着**：
+字段、图标、面包屑、快捷键、高亮都对。列表比窗口高时，底部那半行是滚动边缘 —— 先按 ↑↓ 把高亮压到最后一条，
+再截一张：高亮落到
+`Stack Editors Vertically`，列表整体上移，前几条滚出视野。**方向键与滚动都正常**。
 
-* 窗口高度被 `LIST_MAX = 18.75rem` 封顶（`window_height` 里 `.min(rem * LIST_MAX)`），行高实测 54.25 px，
-  9 条候选 → 只能放 5.5 行；
-* 组件库的列表容器是 `.max_h(..).overflow_hidden()`（`gpui-component/src/command/state.rs:1006`）——
-  **不滚动，直接裁掉**；
-* 连按 8 次下箭头，`dispatch_keystroke` 全部返回 `handled=false`，高亮不动。
+```
+🔍 save
+  Format › Syntax                       ← 已滚出上边缘
+Transformations › Convert to Full Width
+Transformations › Convert to Half Width
+Transformations › Convert Alphanumeric Text to Full Width
+Transformations › Convert Alphanumeric Text to Half Width
+Stack Editors Vertically                ← 高亮（第 9 条）
+```
 
-也就是说第 6 条之后的结果**既看不到也选不到**。这是真缺陷，记进缺口表：要修得把面板的结果区换成能滚动的
-列表（上游是 `NSTableView`，本来就滚），不是调一个数能解决的。
+**这里我判错过一次，值得记下来。** 第一版探针在同一帧里先打 `save` 再派发 8 次 `SelectDown`，
+高亮一动不动，于是写成「第 6 条之后够不着」并记进缺口表。实际原因是**动作发得太早**：查询落地后
+结果行是在观察者回调里重建的（`refresh` 走 `observe_in`），同一帧里 palette 还是空的，8 次下移
+都落在空列表上。把动作延后 900 ms 再发，高亮一路走到最后一条 —— 列表本来就会滚（组件自己就有
+`moving_past_the_visible_rows_scrolls_the_list` 这个测试）。那条缺口已从表里删掉。
 
-**量具的第四次**：前三次是「旧进程还在」「`-l` 截不到 overlay」「侧栏根本没开」，这次是「窗口存在但不在
-屏幕上」。四次的共同形状一样 —— **工具没报错，但答的不是你问的那个问题**。
+**量具的第五次**：前四次是「旧进程还在」「`-l` 截不到 overlay」「侧栏根本没开」「窗口存在但
+`onscreen=false`」，这次是「在空的列表上按键」。五次的共同形状一样 —— **工具没报错，但答的不是你问的
+那个问题**；而这次我差点把它写成产品缺陷。
 
 ### 22.22 走查收官：侧栏两页与查找面板，外加一个「单步不自足」的工具修正
 
@@ -3465,5 +3475,4 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
-| Quick Actions 超出 5 行的结果够不着 | 面板高度被 `LIST_MAX = 18.75rem` 封顶（9 条候选只能放 5.5 行），而组件库的列表容器是 `.max_h(..).overflow_hidden()`（`gpui-component/src/command/state.rs:1006`）—— 不滚动，直接裁；下箭头 `dispatch_keystroke` 返回 `handled=false`，高亮也不动。要修得把结果区换成可滚动列表（上游是 `NSTableView`），不是调数能解决的。§22.23 |
 
