@@ -383,9 +383,7 @@ fn escape_dismisses_the_custom_surround_sheet(cx: &mut TestAppContext) {
             "the sheet should be open before Escape"
         );
 
-        // Real use: the user is typing in `Begin:` when they change their mind.
-        // Focus has to be in the dialog for the key to reach it.
-        window.click("surround-begin", cx);
+        // No click first: the sheet takes the keyboard when it opens (§22.31).
         window.press("escape", cx);
         window.render_frame(cx);
         window.render_frame(cx);
@@ -397,35 +395,72 @@ fn escape_dismisses_the_custom_surround_sheet(cx: &mut TestAppContext) {
     .expect("dismiss with Escape");
 }
 
-/// The same Escape rule on the other sheet with a text field.
+/// The colour panel's two keyboard ways out, both without a click first.
 ///
-/// `Edit Color Code` has a hexadecimal field, so it hits the same thing the
-/// Custom Surround sheet did: the field takes Escape before the dialog sees it.
+/// Enter inserts and Escape cancels — the two keys a sheet is expected to
+/// answer. Both had to be taken on the way down (§22.30, §22.31); before that
+/// the code field swallowed them.
 #[gpui_kit::test]
-fn escape_dismisses_the_color_code_sheet(cx: &mut TestAppContext) {
-    let (window, workspace) = open_workspace_with_document(cx, "escape-color", "#ff0000");
+fn the_color_code_sheet_answers_enter_and_escape(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "keys-color", "#ff0000");
 
     cx.update_window(window, |_, window, cx| {
-        workspace.update(cx, |workspace, cx| {
-            workspace.color_code_dialog(window, cx);
-        });
+        for key in ["enter", "escape"] {
+            workspace.update(cx, |workspace, cx| {
+                workspace.color_code_dialog(window, cx);
+            });
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("color-insert").is_some(),
+                "the sheet should be open before {key}"
+            );
+
+            // No click first: the panel takes the keyboard when it opens.
+            window.press(key, cx);
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("color-insert").is_none(),
+                "{key} should have dismissed the sheet"
+            );
+        }
+    })
+    .expect("keys");
+}
+
+/// The sheet opens with the caret in `Begin:`.
+///
+/// A dialog that opens without focus leaves the keyboard with the editor
+/// behind it: typing goes into the document and Escape goes nowhere. Upstream's
+/// sheet puts the caret in the first field the moment it appears, and so does
+/// this — the assertion is that nothing has to be clicked first.
+#[gpui_kit::test]
+fn the_surround_sheet_opens_with_the_caret_in_begin(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "caret", "abc");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.surround_sheet(window, cx));
         window.render_frame(cx);
         window.render_frame(cx);
-        assert!(
-            window.try_find("color-insert").is_some(),
-            "the sheet should be open before Escape"
+
+        // Nothing is clicked: the keystroke has to land in the sheet's field.
+        window.input("«", cx);
+        assert_eq!(
+            window.find("surround-begin").value(),
+            Some("«"),
+            "the sheet should take the keyboard when it opens"
         );
 
-        // Focus in the sheet: a field takes Escape for itself, which is the
-        // whole reason `dismiss_on_escape` captures it on the way down.
-        window.click("color-code-field", cx);
-        window.press("escape", cx);
+        // And Enter still confirms: the field has focus, but the dialog's
+        // confirm action reaches `on_ok` all the same.
+        window.press("enter", cx);
         window.render_frame(cx);
         window.render_frame(cx);
         assert!(
-            window.try_find("color-insert").is_none(),
-            "Escape should have dismissed the sheet"
+            window.try_find("surround-begin").is_none(),
+            "Enter should confirm the sheet while the caret is in Begin:"
         );
     })
-    .expect("dismiss with Escape");
+    .expect("open with focus");
 }

@@ -38,8 +38,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, Focusable as _, Hsla, IntoElement, ParentElement as _,
-    Render, Styled as _, Subscription, WeakEntity, Window, div, hsla, rems,
+    App, AppContext as _, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div, hsla, rems,
 };
 
 use subtext_core::colorcode::{self, Color, ColorCodeType};
@@ -70,6 +70,8 @@ pub struct ColorSheet {
     uppercase: bool,
     /// Kept alive so the subscriptions below last as long as the panel.
     _subscriptions: Vec<Subscription>,
+    /// Whether the panel has already put the caret in the code field.
+    focused_once: bool,
 }
 
 impl ColorSheet {
@@ -108,15 +110,13 @@ impl ColorSheet {
             kind,
             uppercase,
             _subscriptions: Vec::new(),
+            focused_once: false,
         };
         // An empty field would leave the panel with nothing to insert, so it
         // opens holding the code for the colour it starts on. Upstream reaches
         // the same state a moment later, through the publisher that fires when
         // the panel is first observed.
         sheet.write_code(color, window, cx);
-        sheet
-            .code
-            .update(cx, |state, cx| state.focus_handle(cx).focus(window, cx));
 
         let subscriptions = vec![
             cx.subscribe_in(&sheet.code.clone(), window, Self::on_code_change),
@@ -335,9 +335,29 @@ impl ColorSheet {
 }
 
 impl Render for ColorSheet {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The caret belongs in the code field from the moment the panel opens:
+        // focusing from `new` does nothing, because the field is not in a
+        // rendered tree yet. See `SurroundSheet::render` for the same note.
+        if !self.focused_once {
+            self.focused_once = true;
+            let caret =
+                gpui_kit::component::input::AnyInputState::from(self.code.clone()).focus_handle(cx);
+            window.focus(&caret, cx);
+        }
+
         v_flex()
             .dismiss_on_escape()
+            // Enter inserts, as the button does. With the caret in the code
+            // field the key never reaches the dialog's confirm action, so the
+            // panel takes it here — the same interception Escape needs.
+            .capture_key_down(
+                cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "enter" && this.submit(cx) {
+                        window.close_dialog(cx);
+                    }
+                }),
+            )
             .gap_3()
             .child(self.render_code(cx))
             .child(self.render_picker())

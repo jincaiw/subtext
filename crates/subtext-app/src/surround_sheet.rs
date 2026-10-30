@@ -32,8 +32,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render,
-    Styled as _, Subscription, WeakEntity, Window, div, rems,
+    App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    KeyDownEvent, ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div,
+    rems,
 };
 
 use crate::dialog_escape::DismissOnEscape as _;
@@ -56,6 +57,8 @@ pub struct SurroundSheet {
     end: Entity<InputState>,
     /// Kept alive so the begin field's subscription lasts as long as the sheet.
     _subscriptions: Vec<Subscription>,
+    /// Whether the sheet has already put the caret in `Begin:`.
+    focused_once: bool,
 }
 
 impl SurroundSheet {
@@ -79,8 +82,10 @@ impl SurroundSheet {
             begin: begin_state.clone(),
             end: end_state,
             _subscriptions: Vec::new(),
+            focused_once: false,
         };
         sheet._subscriptions = vec![cx.subscribe_in(&begin_state, window, Self::on_begin_change)];
+
         sheet
     }
 
@@ -147,11 +152,32 @@ impl SurroundSheet {
 }
 
 impl Render for SurroundSheet {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The sheet opens with the caret in `Begin:`, as a system sheet would:
+        // without it the keyboard still belongs to the editor behind, so typing
+        // and Escape both go nowhere until the user clicks. Deferred from the
+        // *first render* rather than from `new`: the field can only hold focus
+        // once the tree containing it has been laid out.
+        if !self.focused_once {
+            self.focused_once = true;
+            let caret = gpui_kit::component::input::AnyInputState::from(self.begin.clone())
+                .focus_handle(cx);
+            window.focus(&caret, cx);
+        }
+
         let can_submit = self.pair(cx).is_some();
         v_flex()
             .gap_3()
             .dismiss_on_escape()
+            // Enter confirms, as it does in any sheet. The caret now opens in
+            // `Begin:`, so the field sees the key first and the dialog's own
+            // confirm action never fires — the same interception Escape needs.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "enter" && this.pair(cx).is_some() {
+                    this.submit(cx);
+                    window.close_dialog(cx);
+                }
+            }))
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)

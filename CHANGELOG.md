@@ -6,6 +6,21 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **对话框打开时拿走键盘**。此前焦点留在编辑器里：打开 `Custom Surround` 后直接打字会打进**文档**，
+  Esc 也没有反应，除非先用鼠标点一下输入框。现在打开即把光标放进第一个字段 —— 在首次渲染里用
+  `window.focus`（`defer` 的两个变体都无效，因为它们排在本次焦点处理之后）。
+- **Enter 仍然确认**：字段拿到焦点后键先到 `Input`、`Dialog` 的 `on_ok` 收不到，所以两个 sheet 的根元素
+  在捕获阶段接管 Enter（包围：提交并关闭；颜色码：插入并关闭）。
+
+### 工程
+
+- 新增 `the_surround_sheet_opens_with_the_caret_in_begin` 与
+  `the_color_code_sheet_answers_enter_and_escape` 两条 UI 测试；原来那两条 Escape 测试不再需要「先点输入框」。
+
 ## [0.3.31] — 2026-10-30
 
 ### 文档

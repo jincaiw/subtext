@@ -2982,6 +2982,37 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.31 对话框打开时拿了键盘：先打字的那个问题
+
+§22.30 末尾留了一句「对话框打开时不抢焦点」。它比听上去严重：焦点还在编辑器里，意味着用户打开
+`Custom Surround` 后**直接打字会打进文档**，按 Esc 也不会有反应 —— 除非先用鼠标点一下输入框。
+
+上游的 sheet 是 `beginSheet`，系统把焦点移进第一个字段。这里要自己做，而做法试了三次：
+
+| 做法 | 结果 |
+| --- | --- |
+| 在 `new()` 里 `window.defer(… focus …)` | 无效 —— 那时字段还没进渲染树 |
+| 在**首次 render** 里 `window.defer(… focus …)` | 仍然无效 |
+| 在**首次 render** 里 `window.focus(&handle, cx)` | **生效**：不点任何东西就能打字，Esc 直接关 |
+
+区别在 `defer`：它排到本次效果周期末尾，而对话框这一帧的布局/焦点处理还没结束，排进去的那次聚焦
+既不生效也不报错。`Window::focus` 是同步的，落在这帧的焦点处理之内。
+
+**连带的一个坑**：字段拿到焦点之后，**Enter 不再确认对话框了** —— 键先到 `Input`，`Dialog` 的
+`on_ok` 收不到（和 Escape 是同一个机制，§22.30）。所以两个 sheet 的根元素也**接管 Enter**：
+`Custom Surround` 走 `submit` + 关闭，`Edit Color Code` 走 `submit`（插入）+ 关闭。
+
+**四条断言**（都在 `the_surround_sheet_opens_with_the_caret_in_begin` 与
+`the_color_code_sheet_answers_enter_and_escape` 里）：
+
+* 打开后**不点任何东西**输入 `«`，落在 `Begin:` 里；
+* 再接 Enter，窗口确认关闭；
+* 颜色码面板：Enter 插入并关闭；
+* 同一面板：Esc 取消并关闭。
+
+**没做的**：Multiple Replace 的表格没有接管 Enter（那里 Enter 属于单元格编辑），框里也没有一个
+「第一个字段」值得抢焦点 —— 打开时它仍然不拿键盘，这一条留在缺口之外，记在这里。
+
 ### 22.30 Escape 关不掉对话框（输入框把它吃掉了）
 
 写 §22.29 时顺手想给对话框加一条「Escape 关闭」的测试 —— 设计指南把它写成规则（「Escape dismisses
