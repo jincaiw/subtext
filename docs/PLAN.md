@@ -2984,6 +2984,9 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 
 ### 22.37 保存通了，撤销不通（这一轮只修前一半）
 
+> **§22.38 更正**：这一节的「⌘Z 不生效」是**误判**。真实原因是测试里的按键路径根本不会解析键位表，
+> 与撤销无关 —— 连 ⌘S 都"不生效"。详见 §22.38，缺口表里那条已删除。
+
 顺着 §22.36 的「读路径 ≠ 写路径」，继续验写路径的下一段。
 
 **保存：通的。** 打字后 `workspace.save(false, …)`，读回文件是 `xabc` —— 缓冲到磁盘这一段没问题，
@@ -3004,6 +3007,34 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 
 **为什么不再往下修**：修错方向的代价比记一条精确的缺口高。这条已经写清了「查了哪个文件、哪一行、
 还剩哪一步」，下一次接着做的人不用从头再来。
+
+### 22.38 更正：⌘Z 没有坏，是测试的按键不查键位表
+
+§22.37 把「打字后 ⌘Z 没反应」记成了一条缺口，理由是 gpui-base 有绑定、有实现，而本仓 `dispatch` 只发一句提示。
+当时**没有验证最后一环**：这条链路在测试里到底走不走得通。
+
+这一轮补上验证，结论是**误判**：
+
+| 试验 | 结果 |
+| --- | --- |
+| 普通输入框（查找条）里打字后 `cmd-z` | 没反应 |
+| 同处 `backspace` | **没反应** |
+| 同处 `cmd-a` | 没反应 |
+| 编辑器里 `cmd-s`（本仓自己的绑定） | **文件没变** |
+
+`backspace` 和 `cmd-s` 在真实应用里显然是好用的 —— 它们也"不生效"，说明问题不在撤销，在量具：
+
+* `Window::dispatch_keystroke`（`window.press` 走的这条路）先派发 `PlatformInput::KeyDown`，
+  然后只处理 `key_char` 的文本输入，**全程不查键位表**（`window.rs:5551`）；
+* 本仓的 `default_bindings()` 绑定的是动作，而应用里没有任何 `on_action` 注册它们 ——
+  真实应用里快捷键走的是 **macOS 原生菜单的 key equivalent**，那条路在 headless 测试里不存在。
+
+所以：**键位绑定在这套 UI 测试里无法被验证**，`window.press` 只能验证「捕获阶段的 key_down 处理器」
+（§22.30 以来的 Esc/Enter 正是这一类，它们能过是因为写在 `capture_key_down` 里，不是绑定）。
+
+**修正后**：缺口表里那条删除（26 → 25）；§22.37 顶部加了更正块。
+**留下的教训**：一条「没反应」的观察，要先问「这条路在测试里通不通」，再问「功能有没有坏」。
+这一轮之所以发现，是因为把 `cmd-s` 也试了一遍 —— **拿一个已知可用的操作做对照**，比继续深挖坏掉的那个快得多。
 
 ### 22.36 打开文档后不能打字
 
@@ -3864,5 +3895,4 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」。§22.28 / §22.29 两次尝试都没驱动起来：先按「按下 → 左移 80px → 抬起」在七个偏移量上试，再把「先 hover、分四步移动」加上，基准元素的左边缘始终不动。查到的边界：面板没有 `.test_support()`（`find(("resizable-panel", n))` 全 None），手柄自绘且无 `ElementId`，而`TestWindowExt::drag_to` 需要两个**可查到的**元素、它内部用的 `Window::drag` 也不在公开 API 里。要闭这条，得让 `ResizablePanelGroup` 给手柄一个可查的 id，或者框架公开按坐标的拖拽模拟。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
-| 编辑器的 ⌘Z / ⌘⇧Z 不生效 | §22.37 实测：在编辑器里打字后，`cmd-z` 与 `ctrl-z` 都没反应（缓冲不变）。gpui-base 把 `cmd-z` 绑到 `Undo`（context `"Input"`，`input/base/state.rs:273`），本仓 `dispatch` 对 `Undo` 只发一句「Handled by the text engine」的提示 —— 等于承认这条没接。下一步：确认 `gpui_component::input::Editor` 的 key context 是否也是 `"Input"`；不一致就在 Editor 上补绑定，一致则说明动作没被 input 的 `on_action` 接住。 |
 
