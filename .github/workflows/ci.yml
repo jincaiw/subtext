@@ -29,6 +29,13 @@ jobs:
         run: cargo fmt --all --check
       - name: Test
         run: cargo test --workspace --locked
+      # The UI integration tests need `gpui-kit`'s `test-support`, which pulls
+      # `gpui-fast-*` into the graph; the feature is off by default so the
+      # ordinary test run stays the cheap one. They open a real workspace in a
+      # headless window and click the controls, which is the only check that
+      # catches "the button is there but nothing happens".
+      - name: Test (UI)
+        run: cargo test -p subtext-app --features ui-tests --test ui --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # `cargo check` does not link, so a crate's platform branches

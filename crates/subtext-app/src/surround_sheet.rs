@@ -164,9 +164,16 @@ impl Render for SurroundSheet {
                     .gap_2()
                     .child(field(
                         "Begin:",
-                        Input::new(&self.begin).w(rems(FIELD_WIDTH)),
+                        Input::new(&self.begin)
+                            .id("surround-begin")
+                            .w(rems(FIELD_WIDTH)),
                     ))
-                    .child(field("End:", Input::new(&self.end).w(rems(FIELD_WIDTH)))),
+                    .child(field(
+                        "End:",
+                        Input::new(&self.end)
+                            .id("surround-end")
+                            .w(rems(FIELD_WIDTH)),
+                    )),
             )
             .child(self.render_buttons(can_submit, cx))
     }

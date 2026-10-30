@@ -1307,7 +1307,11 @@ impl Workspace {
     }
 
     /// The buffer of the active document, straight from the focused editor.
-    fn active_text(&self, cx: &App) -> Option<String> {
+    ///
+    /// Public because a UI test has to read back what a command did, and the
+    /// editor's own buffer is the honest place to read it: going through the
+    /// painted text would be asserting on a picture of the buffer.
+    pub fn active_text(&self, cx: &App) -> Option<String> {
         let document = self.documents.get(self.active)?;
         Some(document.editor().read(cx).value().to_string())
     }

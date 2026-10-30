@@ -9,6 +9,10 @@ description = "The SubText desktop application: windows, menus, key bindings and
 name = "subtext"
 path = "src/main.rs"
 
+[features]
+# Off by default: enabling it pulls `gpui-fast-*` into the graph (see below).
+ui-tests = ["gpui-kit/test-support"]
+
 [dependencies]
 subtext-core.workspace = true
 subtext-syntax.workspace = true
@@ -25,3 +29,8 @@ dirs.workspace = true
 clap.workspace = true
 # The console stamps each entry with the local time, the way CotEditor does.
 jiff.workspace = true
+
+[dev-dependencies]
+# `gpui-fast-macos` pins `cocoa = 0.26.0` exactly, while the rest of the graph
+# takes 0.26.1. Naming the version here is what lets both resolve to one.
+cocoa = "=0.26.0"

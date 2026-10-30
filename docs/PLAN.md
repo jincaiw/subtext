@@ -2982,6 +2982,48 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.25 UI 集成测试：不是「不可用」，是一个版本号
+
+缺口表里有一条从 v0.2 就写下的结论：「UI 集成测试不可用 —— 打开 `test-support` 会把 `gpui-fast`
+家族拉进依赖图，而那一族把补丁版本钉死」。三轮走查里，这条被引用了至少五次，用来解释「为什么只能靠
+截图」。
+
+这一轮把它当结论去验，结果是一行：
+
+```
+error: failed to select a version for `cocoa`.
+    ... required by package `gpui-fast-macos v0.1.7`   (=0.26.0)
+    ... previously selected package `cocoa v0.26.1`    (^0.26.0, from gpui-pre-macos)
+```
+
+不是「拉不进来」，是**整个图里只能有一个 `cocoa`**，而 `gpui-fast-macos` 要 `=0.26.0`、锁文件里是
+`0.26.1`。把 `cocoa = "=0.26.0"` 写成 `subtext-app` 的 dev-dependency，两边就都解析到 0.26.0：
+
+```toml
+[features]
+ui-tests = ["gpui-kit/test-support"]
+
+[dev-dependencies]
+cocoa = "=0.26.0"
+```
+
+**特性默认关着**：打开它会把 `gpui-fast-*` 拖进依赖图，普通 `cargo test --workspace` 没必要付这份
+编译成本。测试文件整篇 `#![cfg(feature = "ui-tests")]`，没有特性时它是一个空 target，普通跑不受影响。
+
+两个测试（`crates/subtext-app/tests/ui.rs`）：
+
+| 测试 | 断言什么 |
+| --- | --- |
+| `the_harness_itself_clicks_and_reads_back` | 点击真的走到 handler、`find` 真的读到结果 —— 先证明量具在工作 |
+| `custom_surround_shows_cancel_and_ok_and_ok_needs_a_begin` | 打开真实的 `Workspace`，`surround_sheet` 之后 `surround-cancel` 与 `surround-apply` 都在；`Begin` 为空时点 OK 不动缓冲；填了 `«` 再点，sheet 关掉 |
+
+第二条是 §22.24 的回归测试：那一节修的就是「按钮看不见」，而这条会直接失败在 `try_find` 上。
+第一次写它时还踩了两件事，都记在文件里：`open_path` 读文件是异步的（要先 `run_until_parked`），
+对话框要在下一帧才进元素树。
+
+**没断言的**：确认之后缓冲里的文本。`text_op` 走 `window.defer`，落库在后续周期，而这条测试要锁的是
+对话框本身 —— `textops::surround` 有自己的单元测试。
+
 ### 22.24 两个对话框的按钮：三个错结论一次修完
 
 §22.18 给包围与颜色码对话框加 footer，理由是「没有 footer 对话框会塌到 `min_h`，内容被裁」。这一轮
@@ -3500,7 +3542,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
-| UI 集成测试不可用（`gpui-kit` 0.7.3 的 `test-support` 无法启用） | 组件库的 `#[gpui_kit::test]` + `TestWindowExt` 需要给 `gpui-kit` 打开 `test-support`。打开它会把整个 `gpui-fast` 家族拉进依赖图，而那一族把补丁版本钉死：`gpui-fast-macos` 要 `cocoa = "=0.26.0"`、`gpui-fast-web` 要 `unicode-properties = "=0.1.3"`，本项目依赖的 `gpui-pre-*` 0.3.9 拿的是 `cocoa 0.26.1` 与 `unicode-properties 0.1.4`，`^` 都兼容、`=` 都不兼容——**依赖解析直接失败**，连降级都过不去（降到 0.26.0 后下一个冲突是 `unicode-properties`）。`gpui-kit` 的 `test-support` 里写的是 `gpui-fast?/test-support`（`?` 表示「已启用才带上」），但实测它仍被激活，这是上游打包的问题，不是本仓能改的。因此交互层只能按本仓既有做法测：可测的规则全部抽成纯函数（§8.11 的 18 条编辑器测试就是这么来的），跨窗口与 overlay 那条路径用一次性冒烟钩子验证后还原（§8.11 结尾）。`gpui_kit::test` 模块本身也被 `#[cfg(feature = "test-support")]` 挡住，所以「只给子 crate 开 feature」这条绕法不通。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
@@ -3519,7 +3560,7 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
-| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
+| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作还没有测试：§22.25 之后 `TestWindowExt` 有 `drag_to`，缺的是分隔线自己的 `ElementId`（`resize_handle` 目前没挂），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）仍然只有跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
 

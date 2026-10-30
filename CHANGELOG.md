@@ -6,6 +6,19 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **UI 集成测试可用了**。缺口表里「UI 集成测试不可用」的说法是错的：打开 `gpui-kit` 的
+  `test-support` 时，冲突只是 `cocoa` 被 `gpui-fast-macos` 钉在 `=0.26.0` 而锁文件里是 `0.26.1`。
+  把它写进 `subtext-app` 的 dev-dependency 就解析得开，再用默认关闭的 `ui-tests` 特性隔离编译成本。
+- **新增两个 UI 测试**（`crates/subtext-app/tests/ui.rs`）：一个证明测试框架本身能点击并读回结果，
+  一个打开真实的 `Workspace` 与 Custom Surround 对话框，断言两个按钮都在、`Begin` 为空时 OK 不动缓冲、
+  填了内容再点会关掉 sheet —— 这是 §22.24 的回归测试。
+- CI 增加 `cargo test -p subtext-app --features ui-tests --test ui --locked`。
+- 缺口表 27 → 26。
+
 ## [0.3.26] — 2026-10-30
 
 ### 修复
