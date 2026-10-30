@@ -6,6 +6,16 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **`closing_a_sheet_gives_the_keyboard_back_to_the_editor`**：打开包围面板 → Esc 关闭 → 不点任何东西
+  直接打字，字落在文档里。验的是设计指南那条「浮层关闭后焦点回到触发器」，结果本来就对（16 条 UI 测试）。
+- **记下第二条测试边界**：即使装上 `bridge::install` + `register`，`window.dispatch_action` 也到不了
+  应用级的 `on_action` —— `NewDocument` 派发后文档数都没变。所以命令层（绑定 / 动作 / bridge）在这套
+  harness 里整体不可达，能验的只有元素自身的处理器与捕获阶段的键盘。
+
 ## [0.3.39] — 2026-10-30
 
 ### 更正

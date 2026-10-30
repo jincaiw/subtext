@@ -745,3 +745,39 @@ fn typing_then_saving_writes_the_file(cx: &mut TestAppContext) {
         "saving after typing should write the edited buffer, not the original"
     );
 }
+
+/// Closing a sheet gives the keyboard back to the document.
+///
+/// The design guide's rule is that an overlay returns focus to what opened it.
+/// Here that is the editor: if closing the sheet left the focus nowhere, the
+/// user would have to click the text before typing again — and nothing in the
+/// UI would say so.
+#[gpui_kit::test]
+fn closing_a_sheet_gives_the_keyboard_back_to_the_editor(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "focus-back", "abc");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        workspace.update(cx, |workspace, cx| workspace.surround_sheet(window, cx));
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        // Escape closes it; the caret then has to be back in the document.
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("surround-begin").is_none(),
+            "the sheet should be closed"
+        );
+
+        window.input("x", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("xabc".to_owned()),
+            "typing after closing the sheet should land in the document"
+        );
+    })
+    .expect("focus back");
+}
