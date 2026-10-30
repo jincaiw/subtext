@@ -556,3 +556,48 @@ fn opening_find_puts_the_caret_in_the_query_field(cx: &mut TestAppContext) {
     })
     .expect("find");
 }
+
+/// Enter in the find field goes to the next match.
+///
+/// CotEditor's find field answers Return with *find next*; a field that does
+/// nothing is a field the user has to leave to reach the button. Pressed twice,
+/// so the assertion is about the step rather than about the first search.
+#[gpui_kit::test]
+fn enter_in_the_find_field_goes_to_the_next_match(cx: &mut TestAppContext) {
+    let (document, workspace) =
+        open_workspace_with_document(cx, "find-enter", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.show_find(false, window, cx));
+    })
+    .expect("open the find bar");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    cx.update_window(bar, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("alpha", cx);
+        window.render_frame(cx);
+
+        window.press("enter", cx);
+        window.render_frame(cx);
+        let first = workspace.read_with(cx, |workspace, _| workspace.find_status());
+        assert_eq!(first.0, 2, "two matches in this document ({first:?})");
+
+        window.press("enter", cx);
+        window.render_frame(cx);
+        let second = workspace.read_with(cx, |workspace, _| workspace.find_status());
+        assert_eq!(second.0, 2, "still two matches ({second:?})");
+        assert_ne!(
+            first.1, second.1,
+            "the second Return should move to the next match ({first:?} → {second:?})"
+        );
+    })
+    .expect("return");
+}

@@ -257,9 +257,21 @@ impl Render for FindPanel {
             // Escape closes the bar, as it closes a sheet (§22.30). It has to be
             // taken on the way down: the query field holds the caret from the
             // moment the bar opens, and would swallow the key otherwise.
-            .capture_key_down(|event: &gpui_kit::KeyDownEvent, window, _| {
-                if event.keystroke.key == "escape" {
-                    window.remove_window();
+            .capture_key_down({
+                let query = query.clone();
+                let workspace = workspace.clone();
+                move |event: &gpui_kit::KeyDownEvent, window, cx| {
+                    match event.keystroke.key.as_str() {
+                        "escape" => window.remove_window(),
+                        // Return in the find field is *find next*, as it is
+                        // upstream. Taken here rather than on the field so that
+                        // Return in the replacement field keeps its own
+                        // meaning.
+                        "enter" if query.read(cx).focus_handle(cx).is_focused(window) => {
+                            workspace.update(cx, |workspace, cx| workspace.find_step(true, cx));
+                        }
+                        _ => {}
+                    }
                 }
             })
             .child(self.render_field(&query, message, FindField::Query, window, cx))
