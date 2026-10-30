@@ -304,3 +304,59 @@ fn settings_buttons_keep_their_width(cx: &mut TestAppContext) {
     })
     .expect("render the settings window");
 }
+
+/// The Mode pane's switches are one line tall.
+///
+/// §22.19 left this as a gap: *Smart copy/paste* wrapped onto two lines in a
+/// 760 px window, and the reason was arithmetic — the options column sits
+/// beside the mode list, so a 12 rem label column left about 150 px for the
+/// switches. The label column there is 7 rem now, and this is the number that
+/// says so. A screenshot showed it too, but only after someone thought to look.
+///
+/// *Automatically insert closing brackets and quotes* is allowed to wrap — it
+/// is longer than the column can ever be, and upstream's `Toggle` says
+/// `fixedSize(horizontal: false, vertical: true)` for exactly that reason — so
+/// it is not in this list.
+#[gpui_kit::test]
+fn mode_pane_switches_stay_on_one_line(cx: &mut TestAppContext) {
+    use subtext_app::settings::SettingsPane;
+    use subtext_app::settings_window::SettingsWindow;
+
+    let (_document, workspace) = open_workspace_with_document(cx, "mode", "abc");
+
+    let window = cx.update(|cx| {
+        let weak = workspace.downgrade();
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(760.), px(580.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                cx.new(|cx| SettingsWindow::new(weak, Some(SettingsPane::Mode), window, cx))
+            },
+        )
+        .expect("open the settings window")
+        .0
+    });
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        for id in ["smart-insert-delete", "smart-quotes", "smart-dashes"] {
+            let row = window
+                .try_find(id)
+                .unwrap_or_else(|| panic!("the Mode pane should show {id}"));
+            assert!(
+                row.bounds().size.height < px(26.),
+                "{id} is {} tall — its label wrapped onto a second line",
+                row.bounds().size.height
+            );
+        }
+    })
+    .expect("render the Mode pane");
+}

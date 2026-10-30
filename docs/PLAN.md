@@ -2982,6 +2982,37 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.27 Mode 设置页：一个 7 rem 的列宽，加一个空 tooltip
+
+§22.19 把这条记成「没修成」：Mode 页的标签列与控件之间空隙偏大、`Smart copy/paste` 换行，当时给
+`options` 和它所在的行各加 `w_full`，截图 md5 三次相同，于是回退并记进缺口表。
+
+**现在能量了**，答案也简单 —— 不是那两处：
+
+| 量什么 | 改之前 | 改之后 |
+| --- | --- | --- |
+| 控件列起点 | 608 px | 528 px |
+| 控件可用宽度 | 136 px | 216 px |
+| `Smart copy/paste` 高度 | **35 px（两行）** | 18 px（一行） |
+
+原因是算术：Mode 页的选项列**与模式列表并排**，总共只有约 340 px；`field()` 的标签列固定 12 rem（192 px），
+留给开关的只剩 150 px，连 `Smart copy/paste` 都放不下。上游的 `Form` 给标签的是宽度的**份额**而不是常数，
+同一个意思、更小的数：这一页用 `MODE_LABEL_COLUMN = 7.`（`field_with_column` 的第二个参数），
+其它页仍是 12 rem。
+
+`Automatically insert closing brackets and quotes` 仍然换行 —— **那是对的**：上游的 `Toggle` 那行写着
+`fixedSize(horizontal: false, vertical: true)  // allow line break in Toggle`，长标签本来就允许折。所以
+测试只盯短的三个。
+
+**顺手抓到一个空 tooltip**：改完再截图，`Completion list includes:` 上压着一个白色圆角块。先怀疑是布局，
+把 `mode_switch` 的 tooltip 去掉再截 —— 块没了；再改成「只有 `appkit_only` 时才挂 tooltip」，块也没了，
+而那一行文字完整。原因是 `.tooltip("")` 会**照样造一张卡片**，鼠标停在没有说明的开关上就弹出一个白框。
+现在是 `.when(appkit_only, |this| this.tooltip(…))`。
+
+**这条缺口的教训**：当时判「与布局无关」是因为改了代码、截图逐字节相同 —— 那个推理对，但结论跳过了
+「那到底是什么」。三条等价的截图只能说明「我改的不是那一处」，不能说明「那一处没问题」。现在有
+`bounds()`，量一次就够。
+
 ### 22.26 把三次截图修出来的缺陷，变成三条会失败的断言
 
 §22.25 让 UI 测试能用之后，先补的不是新功能，而是**过去三轮靠截图发现的那些布局缺陷** —— 它们的共同
@@ -3591,5 +3622,4 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作还没有测试：§22.25 之后 `TestWindowExt` 有 `drag_to`，缺的是分隔线自己的 `ElementId`（`resize_handle` 目前没挂），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）仍然只有跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
-| Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
 

@@ -6,6 +6,21 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **Mode 设置页里 `Smart copy/paste` 不再折成两行**。选项列与模式列表并排，一共只有约 340 px，而标签列
+  固定 12 rem（192 px），留给开关的 150 px 放不下一个短标签。这一页改用 7 rem 的标签列
+  （`field_with_column`），其它页不变。控件可用宽度 136 → 216 px。
+- **没有说明的开关不再弹出空白 tooltip**：`.tooltip("")` 会照样造一张卡片。改成只有 `appkit_only` 的
+  开关才挂 tooltip（`.when(...)`）。
+
+### 工程
+
+- 新增 UI 测试 `mode_pane_switches_stay_on_one_line`：三个短标签开关的高度必须 < 26 px（做过对照组，
+  把列宽改回 12 rem 会得到「35px tall」）。缺口表 26 → 25。
+
 ## [0.3.28] — 2026-10-30
 
 ### 工程

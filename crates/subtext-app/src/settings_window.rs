@@ -60,6 +60,15 @@ use crate::workspace::Workspace;
 /// How wide the label column of a settings row is, in rem.
 const LABEL_COLUMN: f32 = 12.;
 
+/// The label column inside the Mode pane's options half.
+///
+/// That half is a column *beside* the mode list, so it has about 340 px to work
+/// with — 12 rem of label column leaves 150 for the switches, and short labels
+/// like *Smart copy/paste* wrapped onto two lines. Upstream's `Form` gives the
+/// label a share of the width rather than a constant, which is the same idea
+/// with a smaller number.
+const MODE_LABEL_COLUMN: f32 = 7.;
+
 /// How tall the Snippets pane's tab body is, in rem.
 ///
 /// Upstream gives its `TabView` a fixed 380 points, which is what keeps the
@@ -1136,8 +1145,9 @@ impl SettingsWindow {
 
         let options = v_flex()
             .gap_4()
-            .child(field(
+            .child(field_with_column(
                 "Font:",
+                MODE_LABEL_COLUMN,
                 radio_row(
                     "mode-font",
                     &["Standard", "Monospaced"],
@@ -1152,8 +1162,9 @@ impl SettingsWindow {
                     }),
                 ),
             ))
-            .child(field(
+            .child(field_with_column(
                 "Substitution:",
+                MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
                     .child(mode_switch(
@@ -1205,8 +1216,9 @@ impl SettingsWindow {
                         |settings, checked| settings.mode.automatic_symbol_balancing = checked,
                     )),
             ))
-            .child(field(
+            .child(field_with_column(
                 "Spelling:",
+                MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
                     .child(mode_switch(
@@ -1234,8 +1246,9 @@ impl SettingsWindow {
                         |settings, checked| settings.mode.automatic_spelling_correction = checked,
                     )),
             ))
-            .child(field(
+            .child(field_with_column(
                 "Completion:",
+                MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
                     .child(note("Completion list includes:", cx))
@@ -2409,6 +2422,16 @@ fn section(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoE
 /// This is CotEditor's `Grid(alignment: .leadingFirstTextBaseline)`. The label
 /// column is a fixed width so the controls line up down the pane.
 fn field(label: impl Into<SharedString>, control: impl IntoElement) -> impl IntoElement {
+    field_with_column(label, LABEL_COLUMN, control)
+}
+
+/// The same row with a narrower label column, for panes that share their width
+/// with a second column.
+fn field_with_column(
+    label: impl Into<SharedString>,
+    column: f32,
+    control: impl IntoElement,
+) -> impl IntoElement {
     let label = label.into();
     let has_label = !label.is_empty();
 
@@ -2418,7 +2441,7 @@ fn field(label: impl Into<SharedString>, control: impl IntoElement) -> impl Into
         .when(has_label, |this| {
             this.child(
                 div()
-                    .w(rems(LABEL_COLUMN))
+                    .w(rems(column))
                     .flex_shrink_0()
                     .flex()
                     .justify_end()
@@ -2635,10 +2658,10 @@ fn mode_switch(
         .checked(checked)
         .disabled(appkit_only)
         .label(label)
-        .tooltip(if appkit_only {
-            "Provided by the system text engine, which SubText does not use"
-        } else {
-            ""
+        // Only when there is something to say: `.tooltip("")` still builds a
+        // bubble, so a switch that has no note would hover up an empty card.
+        .when(appkit_only, |this| {
+            this.tooltip("Provided by the system text engine, which SubText does not use")
         })
         .on_click(cx.listener(move |this, checked, _, cx| {
             let checked = *checked;
