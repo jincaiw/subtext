@@ -33,12 +33,13 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, WeakEntity, Window, div, rems,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, WeakEntity, Window, div, rems,
 };
 
 use subtext_core::textops::{SortKey, SortOptions};
 
+use crate::dialog_escape::DismissOnEscape as _;
 use crate::workspace::Workspace;
 
 /// Which sort key the sheet is on, in CotEditor's order.
@@ -91,6 +92,8 @@ pub struct SortSheet {
     uses_capture_group: bool,
     group: Entity<InputState>,
     options: SortOptions,
+    /// Whether the sheet has already put the caret in the delimiter field.
+    focused_once: bool,
 }
 
 impl SortSheet {
@@ -120,6 +123,7 @@ impl SortSheet {
             uses_capture_group: false,
             group,
             options: SortOptions::default(),
+            focused_once: false,
         }
     }
 
@@ -342,7 +346,17 @@ impl SortSheet {
 }
 
 impl Render for SortSheet {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The caret goes into the sheet's first field, so the keyboard stops
+        // belonging to the editor behind (see `SurroundSheet::render`). The
+        // sheet opens on *Column*, whose delimiter is that field.
+        if !self.focused_once {
+            self.focused_once = true;
+            let caret = gpui_kit::component::input::AnyInputState::from(self.delimiter.clone())
+                .focus_handle(cx);
+            window.focus(&caret, cx);
+        }
+
         let key = self.sort_key(cx);
         let error = key.validate().map(|error| error.message());
 
@@ -364,6 +378,19 @@ impl Render for SortSheet {
 
         v_flex()
             .gap_3()
+            .dismiss_on_escape()
+            // Enter confirms, as in the other sheets. The pattern field holds
+            // the caret when this sheet opens (it is the one thing worth
+            // typing), so the key never reaches the dialog's own confirm
+            // action — see §22.30/§22.31.
+            .capture_key_down(
+                cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "enter" && this.sort_key(cx).validate().is_none() {
+                        this.submit(cx);
+                        window.close_dialog(cx);
+                    }
+                }),
+            )
             .child(self.render_sample(&key, cx))
             .child(field("Sort key:", keys))
             .child(field("Sort option:", self.render_options(cx)))

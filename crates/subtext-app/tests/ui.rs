@@ -464,3 +464,47 @@ fn the_surround_sheet_opens_with_the_caret_in_begin(cx: &mut TestAppContext) {
     })
     .expect("open with focus");
 }
+
+/// The sort sheet answers Enter and Escape without a click first.
+///
+/// Same family as §22.30/§22.31: a sheet with text fields in it loses the
+/// keyboard to the editor unless something inside takes it.
+#[gpui_kit::test]
+fn the_sort_sheet_answers_enter_and_escape(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "sort", "b\na\nc\n");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.pattern_sort_dialog(window, cx)
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("sort-apply").is_some(),
+            "the sort sheet should be open"
+        );
+
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("sort-apply").is_none(),
+            "Escape should close the sort sheet without a click first"
+        );
+
+        // Enter sorts and closes, from the same place the caret opens in.
+        workspace.update(cx, |workspace, cx| {
+            workspace.pattern_sort_dialog(window, cx)
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("sort-apply").is_none(),
+            "Enter should sort and close"
+        );
+    })
+    .expect("keys");
+}

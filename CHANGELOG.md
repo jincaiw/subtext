@@ -6,6 +6,19 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **`Sort Lines by Pattern` 面板也拿走键盘了**：此前焦点留在编辑器，打开后按 Esc / Enter 都没有反应。
+  现在打开即把光标放进分隔符字段（这一屏的第一个输入框），根元素在捕获阶段接管 Esc（关闭）与
+  Enter（排序并关闭，`sort_key` 不合法时不提交）。
+
+### 工程
+
+- 扫了一遍同类面板：`Saved Scopes` 只有列表、没有输入框，`Dialog` 自身的 Esc 已经够用，因此没有改动。
+- 新增 `the_sort_sheet_answers_enter_and_escape`（9 条 UI 测试）。
+
 ## [0.3.32] — 2026-10-30
 
 ### 修复
