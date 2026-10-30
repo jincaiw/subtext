@@ -259,6 +259,7 @@ impl Render for FindPanel {
             // moment the bar opens, and would swallow the key otherwise.
             .capture_key_down({
                 let query = query.clone();
+                let replacement = replacement.clone();
                 let workspace = workspace.clone();
                 move |event: &gpui_kit::KeyDownEvent, window, cx| {
                     match event.keystroke.key.as_str() {
@@ -269,6 +270,13 @@ impl Render for FindPanel {
                         // meaning.
                         "enter" if query.read(cx).focus_handle(cx).is_focused(window) => {
                             workspace.update(cx, |workspace, cx| workspace.find_step(true, cx));
+                        }
+                        // Return in *Replace with* replaces the current match
+                        // and moves on, the same as the button beside it.
+                        "enter" if replacement.read(cx).focus_handle(cx).is_focused(window) => {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.replace_and_find_next(window, cx)
+                            });
                         }
                         _ => {}
                     }

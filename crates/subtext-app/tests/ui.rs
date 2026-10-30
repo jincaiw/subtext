@@ -601,3 +601,49 @@ fn enter_in_the_find_field_goes_to_the_next_match(cx: &mut TestAppContext) {
     })
     .expect("return");
 }
+
+/// Enter in the replacement field replaces the match and moves on.
+///
+/// The companion to §22.34: Return in the *other* field means "replace and
+/// find next", which is what the button beside it does. Keeping them apart is
+/// why the handler checks which field holds the caret.
+#[gpui_kit::test]
+fn enter_in_the_replacement_field_replaces_and_finds_next(cx: &mut TestAppContext) {
+    let (document, workspace) =
+        open_workspace_with_document(cx, "find-replace", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        // `show_find(true)` focuses the *replacement* field, so the query is
+        // typed with the bar opened the plain way and the caret moved after.
+        workspace.update(cx, |workspace, cx| workspace.show_find(false, window, cx));
+    })
+    .expect("open the find bar");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    cx.update_window(bar, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("alpha", cx);
+        window.render_frame(cx);
+
+        window.click("find-replacement", cx);
+        window.input("beta", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .expect("replace");
+
+    cx.run_until_parked();
+    let text = cx.update(|cx| workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)));
+    assert_eq!(
+        text.as_deref(),
+        Some("beta beta alpha\n"),
+        "Return in the replacement field should have replaced the first match"
+    );
+}
