@@ -2982,6 +2982,35 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.26 把三次截图修出来的缺陷，变成三条会失败的断言
+
+§22.25 让 UI 测试能用之后，先补的不是新功能，而是**过去三轮靠截图发现的那些布局缺陷** —— 它们的共同
+点是「元素在，只是尺寸不对」，而 `ElementSnapshot::bounds()` 量的正是这个。
+
+四条测试，三条带尺寸断言：
+
+| 测试 | 断言 | 对应缺陷 |
+| --- | --- | --- |
+| `the_harness_itself_clicks_and_reads_back` | 点击进 handler、`find` 读回 | 先证明量具 |
+| `custom_surround_shows_cancel_and_ok_and_ok_needs_a_begin` | 两个按钮都在且**宽度 < 200 px**；`Begin` 空时点 OK 不动缓冲；填了再点 sheet 关掉 | §22.24 |
+| `multiple_replace_done_is_a_button_not_a_bar` | `Done` 宽度 < 200 px | §22.24 的「横贯对话框的横幅」 |
+| `settings_buttons_keep_their_width` | General 的 *Manage Warnings…* 与 Format 的 *Edit List…* 宽度 < 200 px | §22.19 |
+
+**每条断言都做过对照**，确认它真的会失败：
+
+| 人为放回的缺陷 | 断言给出的信息 |
+| --- | --- |
+| `Done` 外再包一层 `div().size_full()` | `Done is 510px wide — it should be a button, not a bar across the dialog` |
+| 去掉 *Manage Warnings…* 外面的 `h_flex()` | `Manage Warnings… is 536px wide — it should not fill the pane` |
+| 把 `Done` 换回 `DialogClose` | 连 id 都不是 `multiple-replace-done` 了，`try_find` 直接失败 |
+
+这一步值得单记：**没有对照过的断言不算断言**。`< 200 px` 这个阈值如果写错（比如写成 `< 600`），
+测试会一直绿着，而界面会和修复前一样。
+
+顺带把公共的启动步骤抽成 `open_workspace_with_document` —— 真实 `Workspace`、真实窗口、一份自己的
+文档。里面有两处坑，注释里都写了：`open_path` 读文件在主线程之外（先 `run_until_parked`），对话框要
+下一帧才进元素树（`render_frame` 两次）。
+
 ### 22.25 UI 集成测试：不是「不可用」，是一个版本号
 
 缺口表里有一条从 v0.2 就写下的结论：「UI 集成测试不可用 —— 打开 `test-support` 会把 `gpui-fast`

@@ -6,6 +6,18 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **UI 测试从 2 条扩到 4 条，新增的三条都是尺寸断言**，锁住过去三轮靠截图修出来的布局缺陷：
+  Custom Surround 的两个按钮、Multiple Replace 的 `Done`、设置窗口的 *Manage Warnings…* 与
+  *Edit List…* 都不能超过 200 px（§22.24、§22.19）。
+- **每条断言都做过对照**：人为把 `div().size_full()` 或去掉 `h_flex()` 放回去，确认测试会失败并给出
+  实际宽度（510 px / 536 px）。没有对照过的阈值等于没断言。
+- 公共的启动步骤抽成 `open_workspace_with_document`，注释记下两个坑（`open_path` 是异步的、
+  对话框要下一帧才进元素树）。
+
 ## [0.3.27] — 2026-10-30
 
 ### 工程
