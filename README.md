@@ -79,7 +79,10 @@ tools/peek-panel.sh 14 Settings /tmp/shortcuts.png   # 真窗口
 tools/peek-overlay.sh 0 /tmp/surround.png            # 对话框：在窗口之上的独立层
 ```
 
-两条命令不能互相替代 —— `screencapture -l` 截不到对话框。改 UI 前先读
+两条命令不能互相替代 —— `screencapture -l` 截不到对话框。
+
+**浮动面板**（Quick Actions，第 21 步）还要多一步：它是 `NSPanel`，**应用不是前台时不上屏**，
+截出来是空白。先用 `open <应用>` 让它到前台，再截图；`winlist` 里看到 `onscreen=false` 就是没上屏。改 UI 前先读
 [`docs/UI-CHECKLIST.md`](docs/UI-CHECKLIST.md)：那份清单里每一条都是本项目实际踩过的坑。
 
 ### 打包（macOS）

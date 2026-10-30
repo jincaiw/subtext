@@ -8466,7 +8466,7 @@ impl Workspace {
     #[cfg(debug_assertions)]
     pub fn panel_sweep(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            for step in 0..21u32 {
+            for step in 0..22u32 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(250))
                     .await;
@@ -8481,7 +8481,7 @@ impl Workspace {
                     return;
                 }
             }
-            eprintln!("panel sweep: 21 of 21 opened");
+            eprintln!("panel sweep: 22 of 22 opened");
             let _ = this.update_in(cx, |_, _, cx| cx.quit());
         })
         .detach();
@@ -8551,6 +8551,13 @@ impl Workspace {
             }
             // Not a panel, but a whole document the command builds.
             20 => self.create_bug_report(window, cx),
+            // The floating command bar — a panel over this window. It is the
+            // one step whose pass says the least: the panel is a floating
+            // `NSPanel`, and one of those stays off screen while the app is
+            // inactive, so this sweep can only prove it was built without
+            // panicking. Photographing it needs the app in front — see
+            // `docs/PLAN.md` §22.23.
+            21 => self.show_quick_actions(window, cx),
             _ => {}
         }
     }

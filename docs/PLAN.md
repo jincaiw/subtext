@@ -2982,6 +2982,55 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.23 Quick Actions：面板画得对，但一半的结果够不着
+
+上一轮列的「可走查界面」里漏了 Quick Actions（浮动命令面板）。补进 sweep 第 22 步后，它第一次被拍照——
+中间卡了四轮，卡的不是应用，是**看不见的窗口**。
+
+**为什么之前拍不到**。面板是 `WindowKind::Floating`（`NSPanel`），窗口一直在：
+
+```
+6389  layer=3  alpha=1.0  onscreen=false  500x333  Quick Actions
+```
+
+有尺寸、有层级、alpha 1，`winlist` 也能列出来，但 `onscreen=false` —— **应用不是前台时，浮动面板不上屏**。
+`screencapture -l` 截它得到空白，全屏截图里也没有它。三次二分把这条钉死：
+
+| 试验 | 结果 |
+| --- | --- |
+| 同代码改 `WindowKind::Normal` | `onscreen=true`，立刻可见 |
+| 打开后连调两次 `activate_window()`（都返回 Ok） | 仍 `onscreen=false` |
+| 用 `open <app>` 让应用成为前台 | `onscreen=true`，出现 |
+
+第三条同时是**对照组**：把 `activate_window()` 那两行注释掉重做一遍，应用前台时面板照样出现 —— 说明
+「打开后要显式激活」这个判断是错的，那两行改动已撤回。留下的只有 sweep 第 22 步。
+
+**拍到的样子**（预填 `save`、注入击键得到）：
+
+```
+🔍 save
+◻ Save                                      ⌘S      ← 高亮
+◻ Save As…                                 ⇧⌘S
+◻ Revert to Saved
+◻ Syntax › Verilog                    Format › Syntax
+◻ Transformations › Convert to Full Width
+◻ Transformations › Convert to Half Width     ← 被下边切掉一半
+```
+
+字段、图标、面包屑、快捷键、高亮都对。**但第九条只露出半行，而它够不着**：
+
+* 窗口高度被 `LIST_MAX = 18.75rem` 封顶（`window_height` 里 `.min(rem * LIST_MAX)`），行高实测 54.25 px，
+  9 条候选 → 只能放 5.5 行；
+* 组件库的列表容器是 `.max_h(..).overflow_hidden()`（`gpui-component/src/command/state.rs:1006`）——
+  **不滚动，直接裁掉**；
+* 连按 8 次下箭头，`dispatch_keystroke` 全部返回 `handled=false`，高亮不动。
+
+也就是说第 6 条之后的结果**既看不到也选不到**。这是真缺陷，记进缺口表：要修得把面板的结果区换成能滚动的
+列表（上游是 `NSTableView`，本来就滚），不是调一个数能解决的。
+
+**量具的第四次**：前三次是「旧进程还在」「`-l` 截不到 overlay」「侧栏根本没开」，这次是「窗口存在但不在
+屏幕上」。四次的共同形状一样 —— **工具没报错，但答的不是你问的那个问题**。
+
 ### 22.22 走查收官：侧栏两页与查找面板，外加一个「单步不自足」的工具修正
 
 §22.18–22.21 建立了方法，这一轮把剩下的界面看完：Folder Find 侧栏、File Browser 侧栏、
@@ -3416,4 +3465,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 | `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
+| Quick Actions 超出 5 行的结果够不着 | 面板高度被 `LIST_MAX = 18.75rem` 封顶（9 条候选只能放 5.5 行），而组件库的列表容器是 `.max_h(..).overflow_hidden()`（`gpui-component/src/command/state.rs:1006`）—— 不滚动，直接裁；下箭头 `dispatch_keystroke` 返回 `handled=false`，高亮也不动。要修得把结果区换成可滚动列表（上游是 `NSTableView`），不是调数能解决的。§22.23 |
 
