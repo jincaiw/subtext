@@ -130,7 +130,7 @@
 
 (boolean_literal) @values
 
-"null" @values
+(null_literal) @values
 
 
 ; MARK: Numbers

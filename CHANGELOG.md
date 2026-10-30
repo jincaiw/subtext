@@ -6,6 +6,15 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **Kotlin 的高亮接线了**。门禁测试给出真实报错：`Invalid node type "null"` at 133:2 —— 查询写
+  的匿名节点 `"null"`，在 `tree-sitter-kotlin-sg` 里是命名节点 `null_literal`。缺口表原来的诊断
+  （`type_identifier`、`break` 被改名）是错的，查过 `node-types.json`，两个都还在。改一处节点名、
+  门禁计数 19 → 20，Kotlin 高亮回到与上游一致的着色。
+
 ## [0.3.54] — 2026-10-30
 
 ### 修复
