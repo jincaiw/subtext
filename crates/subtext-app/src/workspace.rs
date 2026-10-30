@@ -1086,7 +1086,23 @@ impl Workspace {
         });
         self.active = self.documents.len() - 1;
         self.refresh_menus(cx);
+        // A document that opens without the caret cannot be typed into: the
+        // keystrokes go to the window and stop there (§22.36). Every path that
+        // makes a document active ends here or at `focus_pane`.
+        self.focus_active_editor(window, cx);
         cx.notify();
+    }
+
+    /// Put the caret in the active document's focused pane.
+    ///
+    /// Called when a document becomes the one in front — opened, or switched to
+    /// — because the editor only takes the keyboard when something asks it to.
+    fn focus_active_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let pane = document.active_pane;
+        self.focus_pane(pane, window, cx);
     }
 
     /// Build one editor pane showing `text`.
@@ -1340,6 +1356,7 @@ impl Workspace {
         {
             self.active = index;
             self.refresh_menus(cx);
+            self.focus_active_editor(window, cx);
             cx.notify();
             return;
         }
@@ -3877,7 +3894,11 @@ impl Workspace {
     }
 
     /// Move to the next or previous open document.
-    pub fn next_tab(&mut self, forward: bool, cx: &mut Context<Self>) {
+    ///
+    /// The caret goes into the document that becomes active: without it the
+    /// keyboard stays with the editor of the document that was just left, and
+    /// the next keystroke edits a document the user cannot see (§22.36).
+    pub fn next_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.documents.len() < 2 {
             return;
         }
@@ -3887,6 +3908,7 @@ impl Workspace {
         } else {
             (self.active + count - 1) % count
         };
+        self.focus_active_editor(window, cx);
         cx.notify();
     }
 
@@ -3998,7 +4020,7 @@ impl Workspace {
         };
         let count = document.pane_count();
         if count < 2 {
-            self.next_tab(forward, cx);
+            self.next_tab(forward, window, cx);
             return;
         }
 

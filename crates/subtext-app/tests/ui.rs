@@ -647,3 +647,72 @@ fn enter_in_the_replacement_field_replaces_and_finds_next(cx: &mut TestAppContex
         "Return in the replacement field should have replaced the first match"
     );
 }
+
+/// Typing in the editor changes the document.
+///
+/// The most basic thing a text editor does, and not asserted anywhere: every
+/// earlier test read the buffer after a command. It also covers the same
+/// question the dialogs had (§22.31) — does the document window take the
+/// keyboard when it opens, or must the user click first?
+#[gpui_kit::test]
+fn typing_lands_in_the_editor_without_a_click(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "typing", "abc");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("x", cx);
+        window.render_frame(cx);
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("xabc".to_owned()),
+            "the opening document should take the keyboard"
+        );
+    })
+    .expect("type");
+}
+
+/// Switching documents takes the caret with it.
+///
+/// Without it the keyboard stays with the editor of the document just left, and
+/// the next keystroke edits a document the user cannot see — the worst kind of
+/// bug to have in an editor.
+#[gpui_kit::test]
+fn switching_documents_moves_the_caret_with_the_document(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "tabs", "first");
+
+    let second = std::env::temp_dir()
+        .join("subtext-ui-tests-tabs")
+        .join("b.txt");
+    std::fs::write(&second, "second").expect("write the second document");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.open_path(second.clone(), window, cx)
+        });
+    })
+    .expect("open the second document");
+    cx.run_until_parked();
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("second".to_owned()),
+            "the second document should be in front"
+        );
+
+        // Back to the first, then type: the text has to land *there*.
+        workspace.update(cx, |workspace, cx| workspace.next_tab(false, window, cx));
+        window.render_frame(cx);
+        window.input("Q", cx);
+        window.render_frame(cx);
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("Qfirst".to_owned()),
+            "typing after a tab switch should land in the document now in front"
+        );
+    })
+    .expect("switch");
+}

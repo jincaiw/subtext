@@ -6,6 +6,21 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **打开文档后可以直接打字了**。此前没人把焦点交给编辑器，光标停在窗口上，按键无处可去 ——
+  用户必须先点一下正文。`push_document` 与 `open_path` 的「已打开」分支现在都调 `focus_active_editor`。
+- **切换文档会把光标带过去**。此前 ⌃⇥ 之后继续打字，字会进**上一个文档**（用户看不见的那个）——
+  编辑器里最糟的一类 bug。`next_tab` 现在也接 `window` 并聚焦新文档。
+
+### 工程
+
+- 两条 UI 测试（14 条）：`typing_lands_in_the_editor_without_a_click`、
+  `switching_documents_moves_the_caret_with_the_document`。两条都是先红后绿。
+- 记一条方法论：此前的测试**只读缓冲、从没写过**。读走 `active_text`，写要靠焦点 —— 两条路径。
+
 ## [0.3.36] — 2026-10-30
 
 ### 修复
