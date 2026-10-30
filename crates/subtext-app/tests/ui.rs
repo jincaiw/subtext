@@ -781,3 +781,87 @@ fn closing_a_sheet_gives_the_keyboard_back_to_the_editor(cx: &mut TestAppContext
     })
     .expect("focus back");
 }
+
+/// Find All lists every match.
+///
+/// The result table is the one part of the find bar nothing has touched: the
+/// button fills it, the table draws it, and the row click jumps to the match.
+/// This asserts the first step — two matches in this document become two rows.
+#[gpui_kit::test]
+fn find_all_lists_every_match(cx: &mut TestAppContext) {
+    let (document, workspace) = open_workspace_with_document(cx, "find-all", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.show_find(false, window, cx));
+    })
+    .expect("open find");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    cx.update_window(bar, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("alpha", cx);
+        window.render_frame(cx);
+        window.click("find-all", cx);
+        window.render_frame(cx);
+    })
+    .expect("find all");
+
+    let (rows, open) = cx.update(|cx| {
+        workspace.read_with(cx, |workspace, _| {
+            let (rows, open) = workspace.find_results();
+            (rows.len(), open)
+        })
+    });
+    assert_eq!(rows, 2, "two matches in this document should be two rows");
+    assert!(open, "Find All should open the result table");
+}
+
+/// Replace All rewrites every match.
+///
+/// The bulk half of Replace: the button calls `replace_all`, which goes through
+/// the editor's own `replace_all` so the whole pass is one undo transaction.
+#[gpui_kit::test]
+fn replace_all_rewrites_every_match(cx: &mut TestAppContext) {
+    let (document, workspace) =
+        open_workspace_with_document(cx, "replace-all", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.show_find(false, window, cx));
+    })
+    .expect("open find");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    cx.update_window(bar, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("alpha", cx);
+        window.render_frame(cx);
+        window.click("find-replacement", cx);
+        window.input("X", cx);
+        window.render_frame(cx);
+        window.click("replace-all", cx);
+        window.render_frame(cx);
+    })
+    .expect("replace all");
+    cx.run_until_parked();
+
+    let text = cx.update(|cx| workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)));
+    assert_eq!(
+        text.as_deref(),
+        Some("X beta X\n"),
+        "Replace All should rewrite both matches"
+    );
+}

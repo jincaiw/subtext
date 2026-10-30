@@ -6,6 +6,16 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **查找的两条按钮路径补上断言**：`find_all_lists_every_match`（两处匹配 → 结果表两行）、
+  `replace_all_rewrites_every_match`（`alpha`→`X` 两处都替换）。两条都通过 —— 功能本来就对，缺的是守护。
+  18 条 UI 测试。
+- 记一条未覆盖：结果表的**行点击**（跳到匹配）没有可寻址的 `ElementId`，`window.click` 点不到，
+  与 §22.28 的分隔线同类。要闭它得先给行加 id。
+
 ## [0.3.40] — 2026-10-30
 
 ### 工程
