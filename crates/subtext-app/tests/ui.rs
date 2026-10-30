@@ -865,3 +865,84 @@ fn replace_all_rewrites_every_match(cx: &mut TestAppContext) {
         "Replace All should rewrite both matches"
     );
 }
+
+/// Clicking a result row selects that match.
+///
+/// Two things had to be true before this could be written, and neither was:
+///
+/// * the rows have to exist — the panel has to be tall enough for the table,
+///   which is what §22.41 fixed (a click on *Find All* could not resize the
+///   window it was running in);
+/// * the cells have to be observable — a delegate-drawn row is not in the
+///   window's element tree for tests unless it says `.test_support()`.
+///
+/// `bounds_changed` is the harness's half of the deal: `resize` only sets the
+/// platform size, and layout reads `viewport_size`, which the platform updates
+/// through that call. Without it every frame lays out at the old height and the
+/// rows stay out of reach.
+#[gpui_kit::test]
+fn clicking_a_result_row_selects_that_match(cx: &mut TestAppContext) {
+    let (document, workspace) =
+        open_workspace_with_document(cx, "result-click", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.show_find(false, window, cx));
+    })
+    .expect("open the find bar");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    let second = cx
+        .update_window(bar, |_, window, cx| {
+            window.render_frame(cx);
+            window.input("alpha", cx);
+            window.render_frame(cx);
+            window.click("find-all", cx);
+            window.render_frame(cx);
+
+            // The click grew the panel (§22.41); tell the window its size changed,
+            // which is what the platform does on a real resize.
+            window.bounds_changed(cx);
+            window.render_frame(cx);
+
+            let expected = workspace.read_with(cx, |workspace, _| workspace.find_panel_height());
+            assert_eq!(
+                window.bounds().size.height,
+                px(expected),
+                "Find All should leave the panel tall enough to show the table"
+            );
+
+            let rows = workspace.read_with(cx, |workspace, _| {
+                workspace
+                    .find_results()
+                    .0
+                    .iter()
+                    .map(|row| row.range.clone())
+                    .collect::<Vec<_>>()
+            });
+            assert_eq!(rows.len(), 2, "two matches in this document");
+            let second = rows[1].clone();
+
+            // The row drawn second, not the first: a click that always landed on
+            // row 0 would pass a weaker assertion.
+            window.click("find-result-1-text", cx);
+            window.render_frame(cx);
+            second
+        })
+        .expect("click the second row");
+
+    let selected = workspace.read_with(cx, |workspace, _| {
+        workspace.selected_find_result_ranges().to_vec()
+    });
+    assert_eq!(
+        selected,
+        vec![second],
+        "clicking a result row should select exactly that match"
+    );
+}

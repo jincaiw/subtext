@@ -39,8 +39,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, App, AppContext as _, Context, ElementId, Entity, Focusable as _, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, hsla, px,
-    rems,
+    StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, WeakEntity,
+    Window, div, hsla, px, rems,
 };
 
 use subtext_core::findresult::CELL_HEAD_OFFSET;
@@ -641,6 +641,7 @@ impl TableDelegate for FindResultTable {
                 // anything could point at one. Note that the row still has to
                 // be laid out to exist: see §22.41.
                 .id(ElementId::Name(format!("find-result-{row_ix}-line").into()))
+                .test_support()
                 .into_any_element(),
             _ => {
                 let colors = highlighter_colors(row.capture_ranges.len());
@@ -664,6 +665,7 @@ impl TableDelegate for FindResultTable {
                         font_size,
                     ))
                     .id(ElementId::Name(format!("find-result-{row_ix}-text").into()))
+                    .test_support()
                     .into_any_element()
             }
         }

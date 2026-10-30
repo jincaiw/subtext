@@ -6,6 +6,18 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **结果表的行点击终于有测试了**（`clicking_a_result_row_selects_that_match`）：点第二行、断言选中的
+  正是第二个匹配。它同时是 §22.41 那条修复的**红/绿对照** —— 临时删掉 `reconcile_panel_height`，
+  测试立刻红在 `190px vs 390px`。
+- 补齐了两件让测试可行的事：单元格加 `.test_support()`（自绘的行默认不进 observation 的注册表，
+  无 `test-support` 特性时原样返回、零成本）；测试里 `resize` 之后调 `Window::bounds_changed(cx)` ——
+  布局读的是 `viewport_size`，只有它会把平台尺寸搬进去。
+- 更正 §22.41 结尾的两句「没验到」：不是 harness 不重排，也不是点不到按钮，而是上面两件没做。
+
 ## [0.3.42] — 2026-10-30
 
 ### 修复

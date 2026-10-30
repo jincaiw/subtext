@@ -3057,6 +3057,11 @@ resize」之后不会重排。沙箱里也没有鼠标可点：写了个调试�
 但更要紧的是**表格在 harness 里从来没拿到过高度**。这一轮把它改成了「该长高的时候长高」，
 剩下的一半要靠真机确认。
 
+> **§22.42 更正**：上面两段「没验到」的原因都找到了 —— 布局不重排是因为测试没调
+> `Window::bounds_changed`，而点击本来就能在 harness 里走到按钮。行点击测试已经写成，
+> 而且它把这一节的修复变成了**红/绿对照**：删掉 `reconcile_panel_height` 那句，测试立刻红在
+> 190 vs 390。修复是真的，只是上一轮没找到量具。
+
 ### 22.40 查找的两条主路径：Find All 与 Replace All
 
 §22.30–§22.35 一直在修查找条的**键盘**。这一轮回头验它的**按钮** —— 结果表和批量替换从来没被断言过。
@@ -3072,8 +3077,41 @@ resize」之后不会重排。沙箱里也没有鼠标可点：写了个调试�
 **没有测到的**：结果表的**行点击**（跳到对应匹配）。表的行由 delegate 渲染，没有可寻址的
 `ElementId`，`window.click` 点不到 —— 与 §22.28 的分隔线是同一类限制。要闭它得先给行一个 id。
 
+> **§22.42 补**：「行没有 id」只是三件事里的一件 —— 行还得有高度（§22.41），单元格还得
+> `.test_support()`，测试还得在 `resize` 之后 `bounds_changed`。三件补齐后这条测试已经写成了。
+
 **这一轮没有改产品代码**：两条断言都是"本来就对"。连着三轮的收益都不是修复，而是**把"应该没问题"
 变成"验证过没问题"** —— 对一个已经能用的编辑器来说，这是这一阶段最该做的事。
+
+### 22.42 行点击终于测到了：差的是 `bounds_changed` 与 `test_support`
+
+上一轮结尾留了两句「没验到」：布局不重排、合成点击点不到。这一轮都解开了，而且是同一次实验里一起解开的。
+
+**第一块：`window.resize` 不等于重排。** 布局读的是 `Window::viewport_size`，而 `resize` 只改平台窗口。
+把平台尺寸搬进 `viewport_size` 的是 `Window::bounds_changed(cx)` —— 源码注释写着
+「Normally called automatically by the platform's resize callback, but **exposed publicly for test
+infrastructure**」（`window.rs:2787`）。测试里 `resize` 之后不调它，之后每一帧都还按旧高度排：
+窗口 390、`table` 仍是 0px、`find-result-close` 的 y 停在 142。补一句 `window.bounds_changed(cx)`，
+`table` 立刻 117.5px。
+
+**第二块：delegate 画的行不在元素树里。** 上一轮补了 id 仍然 `find` 不到。原因：observation 只记录
+**主动声明**过的元素 —— `TestSupportExt::test_support()`（`observe.rs:20`，没有该特性时原样返回、
+零成本）。组件自己的 `table` / `header` / `col-header` 都是这么来的。给两个单元格加上
+`.test_support()`，`find-result-1-text` 才出现。
+
+**于是 §22.41 的修复有了对照组。** `clicking_a_result_row_selects_that_match` 先断言窗口高度等于
+`find_panel_height()`（190 → 390），再点**第二行**、断言选中的正是第二个匹配。把
+`reconcile_panel_height` 那句临时删掉，测试立刻红在 `left: 190px right: 390px` —— 上一轮只能靠推理
+的那个缺陷，现在是一条会红的断言。
+
+**纠正上一轮的两句话**（写在这里，免得下次又沿着错的结论走）：§22.41 末尾说「harness 不重排」
+「合成点击点不到」。前者是缺了 `bounds_changed`；后者根本不需要 —— 面板窗口自己的 `click` 就能走到
+按钮，`find_all` 那条路一直是通的。
+
+**两条新经验**（都进了备忘）：
+
+* 测试里改过窗口尺寸，之后必须 `window.bounds_changed(cx)`，否则布局还按旧尺寸；
+* 要 `find` 自绘的行或自定义元素，得给它 `.test_support()` —— 有 id 不等于可观测。
 
 ### 22.39 两条边界与一条新断言
 
