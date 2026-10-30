@@ -6,6 +6,16 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **`typing_then_saving_writes_the_file`**：打字后保存，读回文件确认是编辑后的内容 —— 缓冲到磁盘这一段
+  现在有断言（15 条 UI 测试）。
+- **⌘Z 不生效，记成缺口**：打字后 `cmd-z` / `ctrl-z` 都无反应。gpui-base 有 `cmd-z → Undo` 的绑定
+  （context `"Input"`）也有 undo 实现，而本仓 `dispatch` 对 `Undo` 只发一句「Handled by the text engine」
+  的提示。缺口表里写了下一步：确认 Editor 的 key context 与 `"Input"` 是否一致。缺口 25 → 26。
+
 ## [0.3.37] — 2026-10-30
 
 ### 修复

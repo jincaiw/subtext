@@ -716,3 +716,32 @@ fn switching_documents_moves_the_caret_with_the_document(cx: &mut TestAppContext
     })
     .expect("switch");
 }
+
+/// Typing then saving writes the new text to the file.
+///
+/// The other half of §22.36: that test proved a keystroke reaches the buffer,
+/// this one proves the buffer reaches the disk. Both are "the write path", and
+/// neither had a test before.
+#[gpui_kit::test]
+fn typing_then_saving_writes_the_file(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "save", "abc");
+    let path = std::env::temp_dir()
+        .join("subtext-ui-tests-save")
+        .join("a.txt");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("x", cx);
+        window.render_frame(cx);
+        workspace.update(cx, |workspace, cx| workspace.save(false, window, cx));
+        window.render_frame(cx);
+    })
+    .expect("save");
+    cx.run_until_parked();
+
+    let written = std::fs::read_to_string(&path).expect("the file should still be there");
+    assert_eq!(
+        written, "xabc",
+        "saving after typing should write the edited buffer, not the original"
+    );
+}
