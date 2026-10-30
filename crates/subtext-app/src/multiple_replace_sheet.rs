@@ -62,6 +62,7 @@ use gpui_kit::{
 
 use subtext_core::multireplace::{MultipleReplace, PatternError, Replacement, Settings};
 
+use crate::dialog_escape::DismissOnEscape as _;
 use crate::workspace::Workspace;
 
 /// Stable identity for one rule.
@@ -721,6 +722,7 @@ impl Render for MultipleReplaceSheet {
             .collect();
 
         v_flex()
+            .dismiss_on_escape()
             .w_full()
             .gap_3()
             .child(

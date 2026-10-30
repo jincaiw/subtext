@@ -2982,6 +2982,58 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.30 Escape 关不掉对话框（输入框把它吃掉了）
+
+写 §22.29 时顺手想给对话框加一条「Escape 关闭」的测试 —— 设计指南把它写成规则（「Escape dismisses
+the topmost surface」），而 §22.24 改按钮时从没验过键盘这条路。
+
+**测试立刻红了**，而且两种情形都红：不点输入框、点进去之后，`Escape` 都没关掉 `Custom Surround`。
+在对话框上装一个只在取消时打印的 `on_cancel` 探针，Escape 按下后**一行都没打** —— 说明按键根本没到
+对话框那一层。
+
+原因在 `Dialog` 的实现里读得到：它靠 `close_on_escape` 收键（默认开），但那是**冒泡阶段**的处理；
+焦点在 `Input` 里时，输入框先把 Escape 吃掉（清空/取消编辑），对话框永远收不到。用户正在 `Begin:`
+里打字时按 Esc —— 一点反应都没有。
+
+**改法**：在 sheet 的**根元素**上，用 `capture_key_down` 在**捕获阶段**先接住 Escape。抽成一个
+扩展 trait，三个带输入框的 sheet 共用：
+
+```rust
+pub trait DismissOnEscape: InteractiveElement + Sized {
+    fn dismiss_on_escape(self) -> Self { /* capture_key_down: escape → close_dialog */ }
+}
+```
+
+`Custom Surround`、`Edit Color Code`、`Multiple Replace` 的根都已挂上。顺带把颜色码面板的输入框加了
+`id("color-code-field")`，测试才点得进去。
+
+**两条回归测试**（`escape_dismisses_the_custom_surround_sheet` / `…_color_code_sheet`）：先点进输入框，
+再按 Escape，断言 sheet 消失。前面的对照就是它们自己 —— 修之前这两条都是红的。
+
+顺带记一笔「对话框打开时不抢焦点」：不点任何东西就按 Escape 同样无效，因为焦点还在编辑器里。
+上游的 sheet 是 `beginSheet`，系统会把焦点移过去。这是另一件事，没有在本轮改。
+
+### 22.29 分栏拖拽的第二次尝试：hover 也不是缺的那一环
+
+§22.28 记下的下一步是「补 `ElementId` + `test_support()`，再用 `drag_to`」。先不动代码，把假设验一遍：
+
+**假设一：缺 hover。** GPUI 的 `on_drag` 需要元素先被指到。改成「先把指针移到分隔线上、渲染一帧、
+再按下」，然后分四步（10 / 20 / 40 / 80 px）移动，每步都渲染一帧。结果与第一次一模一样：
+基准元素的左边缘 **716px → 716px**，六个偏移量全不动。
+
+**假设二：`drag_to` 能绕过去。** 读了它的实现 ——
+`drag_targets` 先解析两个元素的位置，再调 `window.drag(from, to, cx)`。两个障碍：
+
+* `drag_to` 要两个**可查到**的元素，而手柄没有 id、面板没注册（§22.28 已查）；
+* `window.drag` 在 `gpui-pre` 的公开 API 里找不到 —— 它只出现在 gpui-kit 自己的 `test.rs` 调用处。
+
+所以「补个 id 就能测」这句话也不够：`drag_to` 从面板拖到面板，拖的不是分隔线；从手柄拖，手柄查不到。
+真正缺的是**框架层**的两样之一 —— 让 `ResizablePanelGroup` 给手柄一个可查的 id，或者公开按坐标的
+拖拽模拟。
+
+**这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
+缺口表里的理由已经按这个改写。
+
 ### 22.28 分栏拖拽：没测成，但终于知道卡在哪
 
 缺口表里「拖动分栏的手势没测过」从 §8.13 挂到现在，理由一直写「没有 UI 集成测试可用」。§22.25 之后这句
@@ -3644,6 +3696,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
-| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。§22.28 试过用 UI 测试驱动：面板没注册 `test_support()`（`find("resizable-panel", n)` 全部返回 None），分隔线由 `ResizablePanelGroup` 自绘、没有可取到的 `ElementId`；按「按下 → 左移 80 px → 抬起」在七个偏移量上各试一次，内侧元素的左边缘一动不动。要闭这条得先给手柄或面板一个 `ElementId` + `test_support()`，然后用 `TestWindowExt::drag_to`。 |
+| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」。§22.28 / §22.29 两次尝试都没驱动起来：先按「按下 → 左移 80px → 抬起」在七个偏移量上试，再把「先 hover、分四步移动」加上，基准元素的左边缘始终不动。查到的边界：面板没有 `.test_support()`（`find(("resizable-panel", n))` 全 None），手柄自绘且无 `ElementId`，而`TestWindowExt::drag_to` 需要两个**可查到的**元素、它内部用的 `Window::drag` 也不在公开 API 里。要闭这条，得让 `ResizablePanelGroup` 给手柄一个可查的 id，或者框架公开按坐标的拖拽模拟。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 

@@ -360,3 +360,72 @@ fn mode_pane_switches_stay_on_one_line(cx: &mut TestAppContext) {
     })
     .expect("render the Mode pane");
 }
+
+/// Escape dismisses the sheet.
+///
+/// The design guide states it as a rule ("Escape dismisses the topmost
+/// surface"), and §22.24 rewrote this dialog's buttons without ever checking
+/// the keyboard way out. The sheet's Cancel and Escape both go through
+/// `close_dialog`, but they are different code paths — the button is a click
+/// handler, Escape is a dialog action.
+#[gpui_kit::test]
+fn escape_dismisses_the_custom_surround_sheet(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "escape", "abc");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.surround_sheet(window, cx);
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("surround-begin").is_some(),
+            "the sheet should be open before Escape"
+        );
+
+        // Real use: the user is typing in `Begin:` when they change their mind.
+        // Focus has to be in the dialog for the key to reach it.
+        window.click("surround-begin", cx);
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("surround-begin").is_none(),
+            "Escape should have dismissed the sheet"
+        );
+    })
+    .expect("dismiss with Escape");
+}
+
+/// The same Escape rule on the other sheet with a text field.
+///
+/// `Edit Color Code` has a hexadecimal field, so it hits the same thing the
+/// Custom Surround sheet did: the field takes Escape before the dialog sees it.
+#[gpui_kit::test]
+fn escape_dismisses_the_color_code_sheet(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "escape-color", "#ff0000");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.color_code_dialog(window, cx);
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("color-insert").is_some(),
+            "the sheet should be open before Escape"
+        );
+
+        // Focus in the sheet: a field takes Escape for itself, which is the
+        // whole reason `dismiss_on_escape` captures it on the way down.
+        window.click("color-code-field", cx);
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("color-insert").is_none(),
+            "Escape should have dismissed the sheet"
+        );
+    })
+    .expect("dismiss with Escape");
+}

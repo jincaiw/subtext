@@ -6,6 +6,28 @@
 
 ---
 
+## [Unreleased]
+
+### 文档
+
+- **分栏拖拽第二次尝试的记录**：加「先 hover、分四步移动」之后结果不变（基准元素左边缘 716px → 716px），
+  说明不是 hover、不是偏移、不是事件顺序；`drag_to` 也绕不过去（它要两个可查到的元素，而手柄没有 id、
+  面板没注册）。缺口理由改成「缺的是框架层：手柄可寻址，或公开按坐标的拖拽模拟」。
+
+## [Unreleased]
+
+### 修复
+
+- **Escape 现在能关掉带输入框的对话框**。此前焦点在输入框里时按 Escape 毫无反应：`Input` 在冒泡阶段
+  就把键吃掉了，`Dialog` 的 `close_on_escape` 收不到。现在 sheet 的根元素在**捕获阶段**先接住它
+  （`DismissOnEscape` 扩展 trait），`Custom Surround`、`Edit Color Code`、`Multiple Replace` 三处都用上了。
+
+### 工程
+
+- 新增两条 UI 测试：`escape_dismisses_the_custom_surround_sheet`、`escape_dismisses_the_color_code_sheet`
+  —— 修之前都是红的。颜色码的输入框补了 `id("color-code-field")` 供测试聚焦。
+- 分栏拖拽的第二次尝试记进 §22.29（加 hover 后结果不变，`drag_to` 也绕不过去）。
+
 ## [0.3.30] — 2026-10-30
 
 ### 文档

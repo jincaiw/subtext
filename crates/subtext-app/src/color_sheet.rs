@@ -44,6 +44,7 @@ use gpui_kit::{
 
 use subtext_core::colorcode::{self, Color, ColorCodeType};
 
+use crate::dialog_escape::DismissOnEscape as _;
 use crate::workspace::Workspace;
 
 /// The label column, wide enough for the longest label the panel uses.
@@ -278,9 +279,11 @@ impl ColorSheet {
         // The code is monospaced: a colour code is a token, not prose, and the
         // digits of `#336699` line up under `#336699` only in a fixed pitch.
         v_flex().w_full().gap_1().child(
-            div()
-                .w_full()
-                .child(Input::new(&self.code).font_family(cx.theme().mono_font_family.clone())),
+            div().w_full().child(
+                Input::new(&self.code)
+                    .id("color-code-field")
+                    .font_family(cx.theme().mono_font_family.clone()),
+            ),
         )
     }
 
@@ -334,6 +337,7 @@ impl ColorSheet {
 impl Render for ColorSheet {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
+            .dismiss_on_escape()
             .gap_3()
             .child(self.render_code(cx))
             .child(self.render_picker())

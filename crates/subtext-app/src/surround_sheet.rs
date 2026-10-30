@@ -36,6 +36,7 @@ use gpui_kit::{
     Styled as _, Subscription, WeakEntity, Window, div, rems,
 };
 
+use crate::dialog_escape::DismissOnEscape as _;
 use crate::workspace::Workspace;
 
 /// How wide the label column beside each field is.
@@ -150,6 +151,7 @@ impl Render for SurroundSheet {
         let can_submit = self.pair(cx).is_some();
         v_flex()
             .gap_3()
+            .dismiss_on_escape()
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)

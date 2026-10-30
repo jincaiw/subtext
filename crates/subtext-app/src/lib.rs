@@ -34,6 +34,7 @@ pub mod color_sheet;
 pub mod command_bar;
 pub mod console;
 pub mod count_panel;
+pub mod dialog_escape;
 pub mod dialogs;
 pub mod dispatch;
 pub mod encoding_list_sheet;
