@@ -3375,7 +3375,7 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 
 截图（`peek-panel.sh 3`，混合换行的文档）：Inconsistent Line Endings 表两列完整落在检查器内，
 右列贴右边、不再溢出。**三列的 Incompatible Characters 表没截到** —— 那张表要先把文档编码改成
-窄编码才会出行，而改编码要点菜单，本机没有辅助功能权限。机制是同一套（表头/单元格同一处改），
+窄编码才会出行，而改编码要点菜单，这条 shell 拿不到 AppleEvents（`-10004`，与系统设置里的开关无关）。机制是同一套（表头/单元格同一处改），
 但「三列挤在一起长什么样」还是没人眼看过。
 
 ### 22.47 编码列表改成拖拽排序，去掉那对箭头
@@ -3444,7 +3444,7 @@ dev-dependencies 加了一行 `subtext-core`：集成测试只能命名包自己
 从「一条门控」改成「三条」。
 
 截图：`outline-demo.md`（三个标题）打开后大纲面板列出 Alpha / Beta / Gamma，导航栏与菜单栏都在。
-**菜单展开的样子没有截** —— 本机没有辅助功能权限，AppleScript 点不动菜单栏（`-10004`）。
+**菜单展开的样子没有截** —— 这条 shell 拿不到 AppleEvents（`-10004`，与系统设置里的开关无关），AppleScript 点不动菜单栏（`-10004`）。
 门控的断言在 `the_outline_items_follow_the_caret` 里，读的就是平台收到的那份树，比截图更硬。
 
 **还没治的**：抽取仍在主线程，1 MB 的 Markdown 每敲一个字 112 ms。上游是在后台任务里带延迟解析的。
