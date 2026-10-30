@@ -195,10 +195,16 @@ def load_action_namespaces() -> dict[str, str]:
 # CotEditor answers this in `validateUserInterfaceItem`, which runs every time a
 # menu opens; a GPUI menu is a tree that is set once, so the condition is baked
 # in and the bar is rebuilt when it flips. Only conditions that are cheap to
-# evaluate belong here — the selection is one `read`, while the outline needs a
-# parse of the buffer.
+# evaluate belong here — the selection is one `read`, and the outline is the
+# extraction the document already keeps for its navigation bar, so neither costs
+# a parse at the moment the gate is asked.
 GATED_ACTIONS = {
     "StraightenQuotesInSelection": "state.selection_empty",
+    # `OutlineNavigator.canSelectPreviousItem` / `canSelectNextItem`, which are
+    # not "is the outline empty": with the caret above the first heading there
+    # is nothing to go back to, and below the last one nothing to go forward to.
+    "SelectPrevItemOfOutlineMenu": "!state.can_previous_outline",
+    "SelectNextItemOfOutlineMenu": "!state.can_next_outline",
 }
 
 

@@ -252,6 +252,21 @@ pub struct OpenDocument {
     /// is rebuilt on **every repaint**, which includes every caret move and the
     /// caret's blink. Recomputed when the text changes, not when the frame does.
     counts: Option<charinfo::CharacterCount>,
+    /// The outline, kept until the text or the syntax changes.
+    ///
+    /// Both readers of it run on every repaint: the navigation bar draws the
+    /// two arrows and the picker from it, and the menu gates ask whether there
+    /// is an item before and after the caret. Extracting means running every
+    /// outline rule of the syntax over the whole buffer — **184 ms** for a
+    /// megabyte of Markdown in release, measured — and the navigation bar alone
+    /// used to pay that once per repaint, which is once per keystroke. One
+    /// extraction per edit is what upstream's `syntaxController.outlineItems`
+    /// costs too.
+    ///
+    /// Dropped by the two things that can make it wrong: an edit
+    /// ([`Workspace::on_editor_changed`]) and a syntax change
+    /// ([`Workspace::set_syntax`]).
+    outline: Option<Rc<Vec<OutlineEntry>>>,
 }
 
 impl OpenDocument {
@@ -731,7 +746,15 @@ pub struct Workspace {
     /// built already greyed or already live. This is what notices the flip —
     /// and it is compared on every edit, which is a boolean, rather than
     /// rebuilding the bar (and re-reading the script folder) on every keystroke.
-    menu_selection_empty: bool,
+    /// The editor conditions the menu bar was last built with.
+    ///
+    /// The bar is a tree that is set once, so `Straighten Quotes` and the two
+    /// outline items are built already greyed or already live. This is what
+    /// notices a flip — compared on every edit, which is three booleans, rather
+    /// than rebuilding the bar (and re-reading the script folder) on every
+    /// keystroke. One value rather than three fields: they describe the same
+    /// caret, so they are read, written and compared together.
+    menu_gates: menus::MenuGates,
     /// Watches for the find panel closing.
     ///
     /// The panel is a window of its own and reports nothing on the way out, but
@@ -881,7 +904,10 @@ impl Workspace {
             find_indicator: 0,
             incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
-            menu_selection_empty: true,
+            menu_gates: menus::MenuGates {
+                selection_empty: true,
+                ..Default::default()
+            },
             count_capsule_offset: (0., 0.),
             count_capsule_drag: None,
             _find_panel_closed: None,
@@ -1083,6 +1109,9 @@ impl Workspace {
             // text, and counting it there would put a megabyte's worth of work
             // in front of the window appearing.
             counts: None,
+            // Likewise: the outline is extracted on the first repaint that asks
+            // for it, not while the window is still being put together.
+            outline: None,
         });
         self.active = self.documents.len() - 1;
         self.refresh_menus(cx);
@@ -1270,6 +1299,10 @@ impl Workspace {
         }
         // The text changed, so the status bar's counts are stale.
         self.documents[index].counts = None;
+        // And so is the outline: an edit can add a heading, remove the last
+        // one, or reorder them. Dropped here rather than recomputed here so
+        // that a burst of keystrokes costs one extraction, not one per key.
+        self.documents[index].outline = None;
         // The text moved under the caret, so the pair may have changed even
         // though the selection did not — the de-duplication the flash does for
         // repaints must not skip this one.
@@ -1506,6 +1539,7 @@ impl Workspace {
                     let path = path.to_path_buf();
                     let syntax = self.syntaxes.syntax_for_path(&path).name.clone();
                     self.documents[index].syntax = SharedString::from(syntax);
+                    self.documents[index].outline = None;
                     self.settings.note_recent(&path);
                     let _ = self.settings.save();
                 }
@@ -2492,7 +2526,7 @@ impl Workspace {
             self.theme.name.clone(),
             scripts.clone(),
             self.settings.recent_documents.clone(),
-            self.menu_selection_empty,
+            self.menu_gates,
         );
         if self.menus_built_for.as_ref() == Some(&signature) {
             return;
@@ -2502,19 +2536,45 @@ impl Workspace {
         crate::menus::install(cx, &self.menu_state());
     }
 
-    /// Keep the menu bar's selection-dependent items in step with the caret.
+    /// Keep the menu bar's editor-dependent items in step with the caret.
     ///
-    /// The bar is a tree that is set once, so `Straighten Quotes` is built
-    /// either greyed or live. Rebuilding re-reads the script folder, so this
-    /// compares first: one boolean per editor repaint, and a rebuild only when
-    /// the answer flips.
+    /// The bar is a tree that is set once, so `Straighten Quotes` and the two
+    /// outline items are built already greyed or already live. Rebuilding
+    /// re-reads the script folder, so this compares first: one `MenuGates` per
+    /// editor repaint, and a rebuild only when one of the three flips.
     fn sync_menu_gates(&mut self, cx: &mut Context<Self>) {
-        let empty = self.active_selection(cx).is_empty();
-        if empty == self.menu_selection_empty {
+        let selection = self.active_selection(cx);
+        let entries = self.ensure_outline(cx);
+        let gates = menus::MenuGates::for_editor(selection.is_empty(), &entries, &selection);
+        if gates == self.menu_gates {
             return;
         }
-        self.menu_selection_empty = empty;
+        self.menu_gates = gates;
         self.refresh_menus(cx);
+    }
+
+    /// The front document's outline, extracted only when the cache is cold.
+    ///
+    /// The cache is dropped by the two things that can make it wrong — an edit
+    /// and a syntax change — so a burst of keystrokes costs one extraction, not
+    /// one per key, and a caret move costs none.
+    fn ensure_outline(&mut self, cx: &App) -> Rc<Vec<OutlineEntry>> {
+        let index = self.active;
+        let Some(document) = self.documents.get(index) else {
+            return Rc::new(Vec::new());
+        };
+        if let Some(outline) = &document.outline {
+            return outline.clone();
+        }
+        let syntax = document.syntax.clone();
+        let text = document.editor().read(cx).value().to_string();
+        let entries = match self.syntaxes.by_name(&syntax) {
+            Some(syntax) => crate::outline::entries(&text, syntax),
+            None => Vec::new(),
+        };
+        let entries = Rc::new(entries);
+        self.documents[index].outline = Some(entries.clone());
+        entries
     }
 
     /// Rebuild the menu bar and the key bindings unconditionally.
@@ -2539,9 +2599,7 @@ impl Workspace {
             snippets: self.settings.snippets.clone(),
             scripts: self.scripts.clone(),
             recent_documents: self.settings.recent_documents.clone(),
-            gates: menus::MenuGates {
-                selection_empty: self.menu_selection_empty,
-            },
+            gates: self.menu_gates,
         }
     }
 
@@ -4315,6 +4373,9 @@ impl Workspace {
             return;
         };
         document.syntax = SharedString::from(name.to_string());
+        // A different syntax means different outline rules, so the cached
+        // extraction belongs to the old one.
+        document.outline = None;
         for editor in document.editors() {
             editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
         }
@@ -7485,20 +7546,26 @@ impl Workspace {
 
     /// The outline entries and the selection, for the navigation bar.
     ///
-    /// Extracted rather than read from `outline_rows`: those are built while the
-    /// Outline inspector renders, and the navigation bar is there whether or not
-    /// the inspector is open. Upstream reads `syntaxController.outlineItems`,
-    /// which is likewise independent of the inspector.
-    fn nav_outline(&self, cx: &App) -> (Vec<OutlineEntry>, Range<usize>) {
+    /// Read from the document's cache when it is warm — which it is on every
+    /// frame that follows an edit, because [`Self::sync_menu_gates`] fills it
+    /// from a deferred callback. Upstream reads `syntaxController.outlineItems`
+    /// the same way: once per edit, and both the picker and the two arrows read
+    /// the same list. The cold path extracts without storing, because `render`
+    /// must not mutate.
+    fn nav_outline(&self, cx: &App) -> (Rc<Vec<OutlineEntry>>, Range<usize>) {
         let selection = self.active_selection(cx);
         let Some(document) = self.active_document() else {
-            return (Vec::new(), selection);
+            return (Rc::new(Vec::new()), selection);
         };
-        let Some(syntax) = self.syntaxes.by_name(&document.syntax) else {
-            return (Vec::new(), selection);
-        };
+        if let Some(outline) = &document.outline {
+            return (outline.clone(), selection);
+        }
         let text = document.editor().read(cx).value().to_string();
-        (crate::outline::entries(&text, syntax), selection)
+        let entries = match self.syntaxes.by_name(&document.syntax) {
+            Some(syntax) => crate::outline::entries(&text, syntax),
+            None => Vec::new(),
+        };
+        (Rc::new(entries), selection)
     }
 
     /// The status bar, as upstream's `StatusBar` lays it out.

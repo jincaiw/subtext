@@ -6,6 +6,30 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **大纲导航的两项菜单跟着光标置灰**。上游的 *Select Previous / Next Outline Item* 由
+  `canSelectPreviousItem` / `canSelectNextItem` 决定能不能用 —— 光标在第一个标题里时后退是灰的、
+  前进是活的，一个「大纲空不空」的布尔值说不出这件事。此前两项恒可用，靠状态栏说一句
+  *No previous outline item*。现在生成器把条件烘进条目
+  （`!state.can_previous_outline` / `!state.can_next_outline`），工作区在光标变化时比较三个布尔值、
+  必要时才重建菜单栏。
+  连带一处行为变化：置灰的命令不出现在 Quick Actions（⌘K）里 —— 与 *Straighten Quotes*
+  在空选区时被剔掉是同一条规则，不是新规矩。
+
+### 工程
+
+- **大纲有了按编辑失效的缓存**。`outline::entries` 跑一份 918 KiB 的 Markdown 要 **112 ms**
+  （release，实测；每 100 字节一个标题的病态文档 182 ms），而导航栏每次重绘都在重算它 ——
+  每敲一个字付一次。现在抽一次存在文档上，只在编辑与换语法时失效；`nav_outline` 读缓存，
+  缓存冷时照旧抽取但不写回（`render` 不该改状态）。
+- 新增 `MenuGates::for_editor`（纯函数：光标 + 大纲 → 三个门控）与两条契约测试；
+  `MenuGates` 的三个布尔值收成一个字段，一起读写、一起比较。
+- 缺口表：删掉「大纲导航两项不能按状态置灰」「大纲导航找不到条目时不置灰」，新增「大纲抽取在
+  主线程上」—— 这一轮把「每帧一次」降到「每次编辑一次」，线程模型没有动（**24 → 23**）。
+
 ## [0.3.47] — 2026-10-30
 
 ### 工程

@@ -518,11 +518,13 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::action(
                     "Select Previous Outline Item",
                     actions::find::SelectPrevItemOfOutlineMenu,
-                ),
+                )
+                .disabled(!state.can_previous_outline),
                 MenuItem::action(
                     "Select Next Outline Item",
                     actions::find::SelectNextItemOfOutlineMenu,
-                ),
+                )
+                .disabled(!state.can_next_outline),
                 MenuItem::separator(),
                 MenuItem::action("Go to Line…", actions::find::GotoLocation),
             ],

@@ -87,6 +87,7 @@
 //! no modifier state, so there is no second and third behaviour to reach. See
 //! [`crate::scripts`].
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{Action, App, Menu, MenuItem};
@@ -185,12 +186,44 @@ pub struct DocumentState {
 /// when it flips — see `Workspace::sync_menu_gates`.
 ///
 /// Only conditions that are cheap to read belong here: the selection is one
-/// `read` of the editor, while "does the outline have entries" needs a parse of
-/// the buffer, so that one is still open (PLAN §13.5).
+/// `read` of the editor, and the outline is the extraction the document already
+/// keeps for its navigation bar (`OpenDocument::outline`), so neither of them
+/// costs a parse at the moment the gate is asked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct MenuGates {
     /// No selection: *Straighten Quotes* has nothing to work on.
     pub selection_empty: bool,
+    /// Nothing before the caret to jump back to: *Select Previous Outline Item*.
+    ///
+    /// Upstream's `OutlineNavigator.canSelectPreviousItem`, which is a
+    /// different question from "is the outline empty" — with the caret above
+    /// the first heading there is nothing to go back to, and with the caret
+    /// below the last one there is nothing to go forward to.
+    pub can_previous_outline: bool,
+    /// Nothing after the caret to jump forward to: *Select Next Outline Item*.
+    pub can_next_outline: bool,
+}
+
+impl MenuGates {
+    /// The gates for a caret at `selection` in a document with `entries` as its
+    /// outline.
+    ///
+    /// The two outline answers are upstream's `canSelectPreviousItem` /
+    /// `canSelectNextItem`, asked of the same walk the commands themselves use
+    /// — so a greyed item and a command that would do nothing cannot disagree.
+    /// The walk is a scan of the entries, not a parse: the outline itself is
+    /// the document's cached extraction.
+    pub fn for_editor(
+        selection_empty: bool,
+        entries: &[crate::outline::OutlineEntry],
+        selection: &Range<usize>,
+    ) -> Self {
+        Self {
+            selection_empty,
+            can_previous_outline: crate::outline::previous_item(entries, selection).is_some(),
+            can_next_outline: crate::outline::next_item(entries, selection).is_some(),
+        }
+    }
 }
 
 pub struct MenuState {
@@ -244,10 +277,12 @@ pub struct MenuSignature {
     theme: String,
     scripts: Vec<ScriptItem>,
     recent_documents: Vec<PathBuf>,
-    /// Whether the bar was built with an empty selection — the one gate that
-    /// changes often enough to matter, and the reason a caret move can rebuild
-    /// the bar.
-    selection_empty: bool,
+    /// The editor conditions the bar was built against.
+    ///
+    /// All of them, not just the one that changes most often: two of the three
+    /// flip with the caret, and the third with the selection, so a signature
+    /// that carried only the selection would leave a stale outline item live.
+    gates: MenuGates,
 }
 
 impl MenuSignature {
@@ -258,14 +293,14 @@ impl MenuSignature {
         theme: impl Into<String>,
         scripts: Vec<ScriptItem>,
         recent_documents: Vec<PathBuf>,
-        selection_empty: bool,
+        gates: MenuGates,
     ) -> Self {
         Self {
             document,
             theme: theme.into(),
             scripts,
             recent_documents,
-            selection_empty,
+            gates,
         }
     }
 }
@@ -278,7 +313,7 @@ impl MenuState {
             self.theme.clone(),
             self.scripts.clone(),
             self.recent_documents.clone(),
-            self.gates.selection_empty,
+            self.gates,
         )
     }
 }
@@ -1837,6 +1872,15 @@ mod tests {
     fn the_live_bar_agrees_with_the_generated_table() {
         let mut state = state();
         state.recent_documents = vec![PathBuf::from("/notes/todo.txt")];
+        // `commands` leaves out an item that is greyed at the moment, and this
+        // is a test about the table the bar is built from — so open the gates
+        // rather than let two outline items be absent for a reason that has
+        // nothing to do with the table.
+        state.gates = MenuGates {
+            selection_empty: false,
+            can_previous_outline: true,
+            can_next_outline: true,
+        };
 
         let live: Vec<(String, &'static str)> = commands(&state)
             .into_iter()
@@ -1860,6 +1904,46 @@ mod tests {
                 entry.path
             );
         }
+    }
+
+    /// The two outline gates answer "is there an item before / after the
+    /// caret", not "is the outline empty".
+    ///
+    /// That distinction is the whole reason these are two fields rather than
+    /// one: with the caret inside the first heading there is nothing to go back
+    /// to and something to go forward to, which a single "has entries" flag
+    /// could not say.
+    #[test]
+    fn the_outline_gates_follow_the_caret() {
+        let entry = |start: usize| crate::outline::OutlineEntry {
+            id: format!("e{start}"),
+            title: format!("Heading at {start}"),
+            range: start..start + 5,
+            indent: crate::outline::Indent::Level(0),
+            kind: None,
+        };
+        let entries = vec![entry(0), entry(100), entry(200)];
+
+        // In the first heading: nothing behind, the second ahead.
+        let gates = MenuGates::for_editor(false, &entries, &(0..0));
+        assert!(!gates.can_previous_outline);
+        assert!(gates.can_next_outline);
+
+        // Between the first and the second: both ways.
+        let gates = MenuGates::for_editor(false, &entries, &(150..150));
+        assert!(gates.can_previous_outline);
+        assert!(gates.can_next_outline);
+
+        // Past the last one: back only.
+        let gates = MenuGates::for_editor(false, &entries, &(300..300));
+        assert!(gates.can_previous_outline);
+        assert!(!gates.can_next_outline);
+
+        // A document whose syntax has no outline rules: neither.
+        let gates = MenuGates::for_editor(true, &[], &(0..0));
+        assert!(!gates.can_previous_outline);
+        assert!(!gates.can_next_outline);
+        assert!(gates.selection_empty);
     }
 
     /// Every command carries an action rather than a name, which is the only

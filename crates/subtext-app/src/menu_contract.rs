@@ -191,26 +191,100 @@ fn every_bound_name_is_answered() {
 fn the_generated_table_gates_exactly_the_commands_that_say_so() {
     // The menu bar is a tree that is set once, so a state-dependent item is
     // greyed by the *generator* rather than by the item. That makes the
-    // generated line the contract: one gate, on the one command that has it,
-    // and it tests the field the workspace actually maintains.
+    // generated line the contract: one gate per command that has one, and each
+    // tests a field the workspace actually maintains.
     let gated = gated_items();
     assert_eq!(
         gated.len(),
-        1,
-        "expected exactly one state-dependent item, found {}:\n  {}",
+        3,
+        "expected three state-dependent items, found {}:\n  {}",
         gated.len(),
         gated.join("\n  ")
     );
-    assert!(
-        gated[0].contains("StraightenQuotesInSelection"),
-        "the gate is on the wrong command: {}",
-        gated[0]
+    let expected = [
+        ("StraightenQuotesInSelection", "state.selection_empty"),
+        ("SelectPrevItemOfOutlineMenu", "!state.can_previous_outline"),
+        ("SelectNextItemOfOutlineMenu", "!state.can_next_outline"),
+    ];
+    for (action, gate) in expected {
+        let item = gated
+            .iter()
+            .find(|item| item.contains(action))
+            .unwrap_or_else(|| panic!("{action} carries no gate:\n  {}", gated.join("\n  ")));
+        assert!(
+            item.contains(gate),
+            "{action} tests a field the workspace does not maintain: {item}"
+        );
+    }
+}
+
+/// The gates reach the tree the platform is handed, not just the source text.
+///
+/// The test above proves the generator wrote a condition; this proves the
+/// condition is the one the workspace fills in. Built twice with the two
+/// answers the workspace can give and read back out of the menu bar.
+#[test]
+fn the_outline_items_follow_the_caret() {
+    let nothing = crate::menu::app_menus(&crate::menus::MenuGates::default());
+    assert_eq!(
+        disabled(&nothing, "Select Previous Outline Item"),
+        Some(true),
+        "with no document the item has nothing to select"
     );
-    assert!(
-        gated[0].contains("state.selection_empty"),
-        "the gate tests a field the workspace does not maintain: {}",
-        gated[0]
+    assert_eq!(
+        disabled(&nothing, "Select Next Outline Item"),
+        Some(true),
+        "with no document the item has nothing to select"
     );
+
+    let both_ways = crate::menu::app_menus(&crate::menus::MenuGates {
+        selection_empty: false,
+        can_previous_outline: true,
+        can_next_outline: true,
+    });
+    assert_eq!(
+        disabled(&both_ways, "Select Previous Outline Item"),
+        Some(false)
+    );
+    assert_eq!(
+        disabled(&both_ways, "Select Next Outline Item"),
+        Some(false)
+    );
+
+    // And each one follows its own field, rather than both following one.
+    let forward_only = crate::menu::app_menus(&crate::menus::MenuGates {
+        can_next_outline: true,
+        ..Default::default()
+    });
+    assert_eq!(
+        disabled(&forward_only, "Select Previous Outline Item"),
+        Some(true)
+    );
+    assert_eq!(
+        disabled(&forward_only, "Select Next Outline Item"),
+        Some(false)
+    );
+}
+
+/// Whether the item titled `title` is greyed, wherever it sits in the bar.
+fn disabled(menus: &[gpui_kit::Menu], title: &str) -> Option<bool> {
+    fn walk(items: &[gpui_kit::MenuItem], title: &str) -> Option<bool> {
+        for item in items {
+            match item {
+                gpui_kit::MenuItem::Action { name, disabled, .. } if name.as_ref() == title => {
+                    return Some(*disabled);
+                }
+                gpui_kit::MenuItem::Submenu(menu) => {
+                    if let Some(found) = walk(&menu.items, title) {
+                        return Some(found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    menus.iter().find_map(|menu| walk(&menu.items, title))
 }
 
 /// Every generated item that carries a state-dependent `.disabled(…)`.
@@ -223,7 +297,10 @@ fn gated_items() -> Vec<String> {
     let lines: Vec<&str> = MENU.lines().collect();
     let mut found = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        if !line.contains(".disabled(state.") {
+        // `.disabled(state.…)` for "greyed while this is true", and
+        // `.disabled(!state.…)` for "live only while this is true" — both are
+        // gates, and both have to be counted.
+        if !line.contains(".disabled(state.") && !line.contains(".disabled(!state.") {
             continue;
         }
         let start = (0..=index)

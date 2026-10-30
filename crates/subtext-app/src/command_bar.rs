@@ -634,8 +634,20 @@ mod tests {
     }
 
     /// The commands the bar offers, as the panel would read them.
+    ///
+    /// Built with every gate open. The palette omits a command that is greyed
+    /// at the moment — a command you cannot run is not offered — and these
+    /// tests are about the table the bar is built from, not about which items
+    /// happen to be live with the caret where it is.
     fn commands() -> Vec<menus::Command> {
-        menus::commands(&state())
+        menus::commands(&menus::MenuState {
+            gates: menus::MenuGates {
+                selection_empty: false,
+                can_previous_outline: true,
+                can_next_outline: true,
+            },
+            ..state()
+        })
     }
 
     fn command(path: &str) -> menus::Command {

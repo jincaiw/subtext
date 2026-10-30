@@ -1337,6 +1337,9 @@ GPUI 的菜单项只有一个固定的 `disabled` 标志，没有「按当前选
 就得每次选区变化重建整条菜单栏（与 §8.9h 同一个理由）。所以保持可用，状态栏说
 `No previous outline item` / `No next outline item`，选区不动、文本不动。
 
+> **§22.46 关掉了这一条。** 当时说「不划算」的前提是每问一次都要解析缓冲区；而大纲本来就该有
+> 一份缓存 —— 导航栏每帧都在重算它。缓存之后，这个问题只是三个布尔值。
+
 验收：**8 条新测试**——上游 `OutlineCollectionTests` 的 `previousItem()` / `nextItem()` 逐例照搬
 （含 `NSRange(40..<61)` 这种跨两个条目的选区）、分隔符在两个方向上都不是答案、多字节条目按字节
 偏移、同跨度同标签才合并、同行不同跨度是两个条目；删掉 2 条随 `line_of_offset` 一起走的测试。
@@ -3357,6 +3360,46 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
+### 22.46 大纲导航两项跟着光标置灰 —— 以及导航栏每帧都在重算的那份大纲
+
+上游的 `validateUserInterfaceItem` 每次菜单打开都问一遍：*Select Previous / Next Outline Item*
+能不能用，取决于 `canSelectPreviousItem` / `canSelectNextItem`。这两个问的不是「大纲空不空」，
+是「光标前后还有没有条目」—— 光标在第一个标题里时，后退没有、前进有。一个布尔值说不出这件事。
+
+§8.10 把这条记成偏差，理由很实在：GPUI 的菜单项 `disabled` 是烘进去的，要跟着光标动就得在选区
+变化时重建菜单栏，而判断要解析缓冲区，`refresh_menus` 每两秒被脚本轮询一次，每次解析不划算。
+
+**这一轮先量了那个「不划算」。** 在 release 下，`outline::entries` 跑一份 **918 KiB** 的 Markdown
+（四十个标题）要 **112 ms**；同样大小、每 100 字节一个标题的病态文档要 **182 ms**。而导航栏的
+`nav_outline` 每次重绘都在调它 —— 也就是说每敲一个字都在付这笔钱，只是没人拿大文件量过。
+
+于是先补缓存，再谈置灰：
+
+* `OpenDocument.outline: Option<Rc<Vec<OutlineEntry>>>`，失效点只有两个：`on_editor_changed`
+  （与 `counts` 一起）和 `set_syntax`（换语法就是换规则）。一次编辑一次抽取，光标移动零次。
+* `nav_outline` 读缓存；缓存冷时照旧抽取但**不写回** —— `render` 不该改状态。
+* `MenuGates::for_editor(selection_empty, entries, selection)` 是纯函数，把「光标 + 大纲」映射成
+  三个布尔值；`sync_menu_gates` 只负责比较与重建，三个字段收成一个 `MenuGates` 一起读写。
+* 生成器 `GATED_ACTIONS` 多两条，产出 `.disabled(!state.can_previous_outline)`。门控解析器原来
+  只认 `.disabled(state.…)`，这一轮补上 `!` 那一半。
+
+**一处连带的行为变化**：`commands()` 会把置灰的命令从 Quick Actions 里剔掉，所以这两个命令在没有
+大纲、或光标已在尽头时不再出现在 ⌘K 里。这与 *Straighten Quotes* 在空选区时被剔掉是同一条规则，
+不是新行为 —— 两处测试因此改成「把三个门都打开再比对」。
+
+验收：**740** 项测试（738 → 740）、21 个 UI 测试、clippy 零警告、fmt 零差异。新增两条：
+`the_outline_items_follow_the_caret` 直接读平台收到的那份菜单树，断言三条门控各自跟着自己的字段走
+（不是两条共用一个）；`the_outline_gates_follow_the_caret` 单测那个纯函数 —— 第一个标题里、
+两条之间、最后一条之后、空大纲。`the_generated_table_gates_exactly_the_commands_that_say_so`
+从「一条门控」改成「三条」。
+
+截图：`outline-demo.md`（三个标题）打开后大纲面板列出 Alpha / Beta / Gamma，导航栏与菜单栏都在。
+**菜单展开的样子没有截** —— 本机没有辅助功能权限，AppleScript 点不动菜单栏（`-10004`）。
+门控的断言在 `the_outline_items_follow_the_caret` 里，读的就是平台收到的那份树，比截图更硬。
+
+**还没治的**：抽取仍在主线程，1 MB 的 Markdown 每敲一个字 112 ms。上游是在后台任务里带延迟解析的。
+这一轮把「每帧一次」降到「每次编辑一次」，没有改线程模型；已经记进缺口表。
+
 ### 22.45 UI 框架升到 gpui-kit 0.8.1：唯一的断点是键位
 
 0.7.3 停在 10-12，0.8.0 / 0.8.1 是 10-19 / 10-26。这一轮先不写代码，把「升了会怎样」量出来 ——
@@ -4137,12 +4180,11 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
-| 大纲导航两项不能按状态置灰 | *Straighten Quotes* 已能按选区置灰（§13.5，生成器把条件烘进条目）。剩下「Select Previous/Next Outline Item」：判断「大纲有没有条目」要解析缓冲区，而 `refresh_menus` 每两秒被脚本轮询触发，为此每次解析不划算；需要先给大纲条目做一份轻量缓存再谈置灰 |
+| 大纲抽取在主线程上 | `outline::entries` 跑一份 918 KiB 的 Markdown 要 112 ms（release，实测），而现在每次编辑都要跑一次（§22.46 把「每帧一次」降到了「每次编辑一次」）。上游在后台任务里带延迟解析、解析完再回主线程更新。要再进一步，得给 `SyntaxManager` 的规则加一份可跨线程的句柄，再把结果按文档版本回填 —— 比这一轮的缓存大一圈。 |
 | `Words` 走 UAX #29，不走 ICU 的分词 | 上游 `numberOfWords` 是 `enumerateSubstrings(.byWords, .localized)`，即 ICU 的**本地化**分词：除 UAX #29 的规则外还带词典（`こんにちは` 是 1 个词）与 locale。Rust 侧没有 ICU。规则与词典在「词之间写空格」的文字上完全一致（上游 `countWords` 的向量全过：`"Clarus says moof!"` 3、`"plain-text"` 2、`"!"` 0），只在 CJK 一类文字上分道：`こんにちは` 规则 5 / ICU 1，`漢字テスト` 规则 3 / ICU 2（实测见 §8.16）。ICU 的答案本身随 locale 变，所以没有「上游的那个数」。 |
 | 检查器的 `Created` 在部分平台为空 | `std::fs::Metadata::created()` 在 Linux 上没有 birthtime 时报错，那一格就是空的（上游的 `.creationDate` 在 APFS 上总有值）。 |
 | 检查器的 `Owner` 在 Windows 上为空 | `getpwuid_r` 是 unix 的调用。`std::fs` 在 Windows 上没有「取拥有者名字」的接口，所以返回 `None` 而不是一个数字替身。 |
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
-| 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
