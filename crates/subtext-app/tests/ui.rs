@@ -946,3 +946,85 @@ fn clicking_a_result_row_selects_that_match(cx: &mut TestAppContext) {
         "clicking a result row should select exactly that match"
     );
 }
+
+/// Dragging the inspector divider resizes the pane — and the setting.
+///
+/// The gesture is the one thing about the split view no test could reach. §22.28
+/// and §22.29 concluded it needed a framework change; that was wrong on both
+/// counts. `TestWindowExt::drag` takes plain coordinates, and the handle is not
+/// an unaddressable hairline — it straddles the inspector panel's **left edge**,
+/// one inspector width in from the window's right edge. `inspector-path` sits a
+/// whole label column inside the pane, which is what the earlier attempts were
+/// aiming at (§22.43).
+#[gpui_kit::test]
+fn dragging_the_inspector_divider_resizes_the_pane(cx: &mut TestAppContext) {
+    use subtext_app::settings::InspectorPane;
+
+    let (window, workspace) = open_workspace_with_document(cx, "drags", "abc");
+
+    // `Settings::load()` reads the real settings file, so the starting width is
+    // whatever a previous run left behind. Take it as it is — the assertions are
+    // about the change — and write it back at the end so the file stops moving.
+    let original =
+        workspace.read_with(cx, |workspace, _| workspace.settings.window.inspector_width);
+
+    let (window_width, rem) = cx
+        .update_window(window, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.show_inspector(InspectorPane::Document, cx);
+            });
+            window.render_frame(cx);
+            window.render_frame(cx);
+            (
+                window.bounds().size.width,
+                gpui_kit::component::theme::ActiveTheme::theme(cx)
+                    .font_size
+                    .as_f32(),
+            )
+        })
+        .expect("open the inspector");
+
+    // The live pane's width is what positions the handle — it came from the same
+    // setting, but it is the pane, not the value, that decides where the press
+    // has to land.
+    let pane_width =
+        workspace.read_with(cx, |workspace, _| workspace.settings.window.inspector_width);
+
+    // Two points in from the edge puts the press inside the handle's band
+    // rather than on the boundary itself.
+    let divider = window_width - px(pane_width * rem) + px(2.);
+    let y = px(300.);
+
+    cx.update_window(window, |_, window, cx| {
+        let before = window.find("inspector-path").bounds().origin.x;
+        window.drag(
+            gpui_kit::point(divider, y),
+            gpui_kit::point(divider - px(60.), y),
+            cx,
+        );
+        window.render_frame(cx);
+        let after = window.find("inspector-path").bounds().origin.x;
+        let moved = f32::from(before - after);
+        assert!(
+            (40.0..=80.0).contains(&moved),
+            "dragging 60 points left should move the pane about 60 (moved {moved})"
+        );
+    })
+    .expect("drag the divider");
+
+    // The inspector is the right-hand pane, so its left edge moving left makes
+    // it *wider* — and that width is what the next launch restores.
+    let after_width =
+        workspace.read_with(cx, |workspace, _| workspace.settings.window.inspector_width);
+    assert!(
+        after_width > pane_width,
+        "the drag should widen the inspector in the settings ({pane_width} → {after_width})"
+    );
+
+    // Leave the settings file as it was found.
+    workspace.update(cx, |workspace, cx| {
+        workspace.settings.window.inspector_width = original;
+        let _ = workspace.settings.save();
+        cx.notify();
+    });
+}

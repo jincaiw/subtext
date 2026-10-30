@@ -3357,6 +3357,42 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
+### 22.43 分栏拖拽：前三次都错在坐标，不在 API
+
+> 本节之前是 §22.28 / §22.29 的两次失败记录，结论都**不对** —— 保住原文，把更正写在前面。
+
+**§22.28 说**「面板没有 `test_support()`、手柄没有 `ElementId`、`drag_to` 要两个可查元素、`Window::drag`
+不公开」。**§22.29 说**「缺的是框架层：手柄可寻址，或者公开按坐标的拖拽模拟」。
+
+这一轮三条全被推翻：
+
+| 当时的结论 | 实际情况 |
+| --- | --- |
+| 没有按坐标的拖拽模拟 | **有**：`TestWindowExt::drag(from, to, cx)`（`gpui-kit/src/test.rs:43`）。当时找的是 `Window::drag`，没往测试扩展 trait 上看 |
+| 手柄没有 `ElementId` | **有**：`resize_handle(("resizable-handle", ix), axis)`（`resizable/panel.rs:377`）→ `NamedInteger("resizable-handle", ix)` |
+| 手柄不可寻址所以拖不到 | 不需要寻址 —— 拖拽按坐标走，问题只是**坐标算错了** |
+
+**真正的错**：手柄横跨的是**面板的左边缘**，不是面板里的内容。Document 检查器里 `inspector-path`
+是「值」那一列，左边还有一整列标签，所以它离分隔线 68px（= 16rem − 该列宽度）。前两次扫描
+分别到 1..=64px 和 56..=96px —— **第一段差 4 像素就能命中**。
+
+**改法：产品代码不用改。** 测试从设置里取宽度自己算位置：
+
+```rust
+let divider = window_width - px(pane_width * rem) + px(2.);
+window.drag(point(divider, y), point(divider - px(60.), y), cx);
+```
+
+断言两件事：`inspector-path` 左移 40..80px；设置里的 `inspector_width` 变大（右栏左边缘左移 =
+更宽）。结尾把宽度写回原值。
+
+**一条测试卫生的发现**：`Settings::load()` 读的是**真实**设置文件，而拖拽会经 `on_resize` 把宽度写回。
+前两次失败的第二个原因就是读到了上一次跑剩下的宽度（19.5 rem），按 16 rem 算的位置落在空处。
+测试现在以读到的值为准，并在结束时恢复 —— 否则每跑一次就把检查器撑宽一点，直到撞上 26 rem 的上限。
+
+**这条缺口从表里删掉了**（25 → 24）。两次「没测成」的记录留着，因为它们记的排除过程仍然有用：
+不是 hover、不是事件顺序、不是偏移量 —— 最后剩下的确实只有坐标。
+
 ### 22.28 分栏拖拽：没测成，但终于知道卡在哪
 
 缺口表里「拖动分栏的手势没测过」从 §8.13 挂到现在，理由一直写「没有 UI 集成测试可用」。§22.25 之后这句
@@ -4019,6 +4055,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
-| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」。§22.28 / §22.29 两次尝试都没驱动起来：先按「按下 → 左移 80px → 抬起」在七个偏移量上试，再把「先 hover、分四步移动」加上，基准元素的左边缘始终不动。查到的边界：面板没有 `.test_support()`（`find(("resizable-panel", n))` 全 None），手柄自绘且无 `ElementId`，而`TestWindowExt::drag_to` 需要两个**可查到的**元素、它内部用的 `Window::drag` 也不在公开 API 里。要闭这条，得让 `ResizablePanelGroup` 给手柄一个可查的 id，或者框架公开按坐标的拖拽模拟。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
