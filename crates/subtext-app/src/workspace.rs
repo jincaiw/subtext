@@ -228,6 +228,15 @@ struct Pane {
     _observed: Subscription,
 }
 
+/// How large a buffer can be before the navigation bar stops extracting its
+/// outline inside a frame.
+///
+/// The parse is 112 ms on a megabyte of Markdown in release (PLAN §22.46), and
+/// the bar is rebuilt on every editor repaint. Past this size the frame draws
+/// without an outline and the deferred gate check fills the cache instead; below
+/// it, a millisecond of parse is cheaper than a bar that blinks empty.
+const INLINE_OUTLINE_LIMIT: usize = 128 * 1024;
+
 /// One open document and its editors.
 pub struct OpenDocument {
     /// Stable identity, independent of the tab's position.
@@ -7578,6 +7587,15 @@ impl Workspace {
             return (outline.clone(), selection);
         }
         let text = document.editor().read(cx).value().to_string();
+        // A cold cache on a big buffer means the deferred gate check has not
+        // run since the last edit. Extracting here would put the whole parse in
+        // the middle of a frame — 112 ms for a megabyte of Markdown — so past
+        // this size the frame draws without an outline and the deferred check
+        // fills the cache for the next one. Below it, extracting is cheap
+        // enough that going without would be the worse trade.
+        if text.len() > INLINE_OUTLINE_LIMIT {
+            return (Rc::new(Vec::new()), selection);
+        }
         let entries = match self.syntaxes.by_name(&document.syntax) {
             Some(syntax) => crate::outline::entries(&text, syntax),
             None => Vec::new(),
