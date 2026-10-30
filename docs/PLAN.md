@@ -3008,6 +3008,55 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 **为什么不再往下修**：修错方向的代价比记一条精确的缺口高。这条已经写清了「查了哪个文件、哪一行、
 还剩哪一步」，下一次接着做的人不用从头再来。
 
+### 22.41 点 Find All 之后，结果区没有高度
+
+上一轮把「结果表的行点击测不了」记成了一条待办，理由是**行没有可寻址的 id**。这一轮先补 id：
+
+```rust
+.id(ElementId::Name(format!("find-result-{row_ix}-text").into()))
+```
+
+然后写测试 —— 它红了，但不是因为 id：`find-result-1-text` **根本不在元素树里**。报错里的
+registered paths 只有表头，而表格本体的 `table` 元素高度是 **0px**。
+
+**顺着高度查下去，找到一个真的缺陷。**
+
+面板打开时窗口是 520×190；结果区展开后应该是 `FIND_PANEL_HEIGHT + FIND_PANEL_RESULT_HEIGHT`
+= 390。点完 *Find All* 之后窗口**仍然是 190**，所以结果区拿到 0 高度，表格一行都画不出来。
+用户看到的是：只有那句「Found N matches in …」，表格不见了。
+
+**为什么没长高**：`resize_find_panel` 走的是
+
+```rust
+self.find_window.update(cx, |_, window, _| window.resize(...))
+```
+
+而 *Find All* 的点击处理器**就在这个窗口自己的 update 里**跑。窗口在更新期间不能被再进入 ——
+`update_window_id` 直接返回 `window not found`（`app.rs:2201`），外层一个 `.ok()` 把它吞掉了，
+既不生效也不报错。
+
+对照实验坐实了这一点：同一个 `find_all`，**从文档窗口调用**时窗口正常长到 390；从面板的按钮
+（面板窗口）调用就停在 190。探针也印证了：打开面板那次（文档窗口发起）闭包执行了，点击那次没有。
+
+**改法**：把「该多高」从「谁来调」里拆开。
+
+* `Workspace::find_panel_height()` —— 唯一的公式（`resize_find_panel` 也改用它，不再两处硬写）；
+* `FindPanel::reconcile_panel_height(window, cx)` —— 面板拿这个数对一下自己的窗口，不一样就
+  `window.resize`。挂在**开/关结果区的两个处理器**上（*Find All* 与 `⌃`），那里 `window` 正是
+  自己要改的那个窗口，resize 合法。
+
+顺带清掉一处提示：*Find All* 的处理器里原本有一句 `let _ = window;` —— 它拿到了窗口又扔掉，
+正是这个 bug 的痕迹。
+
+**没验到的部分，如实记**：修完之后窗口在测试里确实变成 390，但**布局没有跟着重排** ——
+`table` 仍是 0px，`find-result-close` 的 y 也停在 142。也就是说这套 harness 在「窗口更新期间发出的
+resize」之后不会重排。沙箱里也没有鼠标可点：写了个调试钩子，在面板窗口里派发 `MouseDown`/`MouseUp`
+到按钮中心，`find_results()` 仍是 `(0, false)` —— 合成点击没能点到按钮。
+
+所以**行点击这条测试仍然没写成**，而且 §22.40 的诊断只对了一半：行确实没有 id（现在有了），
+但更要紧的是**表格在 harness 里从来没拿到过高度**。这一轮把它改成了「该长高的时候长高」，
+剩下的一半要靠真机确认。
+
 ### 22.40 查找的两条主路径：Find All 与 Replace All
 
 §22.30–§22.35 一直在修查找条的**键盘**。这一轮回头验它的**按钮** —— 结果表和批量替换从来没被断言过。

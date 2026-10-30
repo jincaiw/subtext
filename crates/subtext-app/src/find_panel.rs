@@ -37,7 +37,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, App, AppContext as _, Context, Entity, Focusable as _, FontWeight,
+    Anchor, App, AppContext as _, Context, ElementId, Entity, Focusable as _, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, hsla, px,
     rems,
@@ -319,6 +319,29 @@ impl Render for FindPanel {
 }
 
 impl FindPanel {
+    /// Give the window the height its sections need.
+    ///
+    /// The workspace knows the number (`find_panel_height`) and normally applies
+    /// it through the panel's window handle — which cannot work when *the panel
+    /// itself* is the one asking: a click on *Find All* runs inside this
+    /// window's own update, and a window cannot be re-entered while it is being
+    /// updated. `handle.update` returns an error there and the resize is lost,
+    /// leaving the result section zero height. Pressing the button then looks
+    /// like it did nothing but count the matches.
+    ///
+    /// Called from the handlers that open or close the section, where this
+    /// window is already the one being updated, so `window.resize` is legal.
+    fn reconcile_panel_height(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let target = workspace.read(cx).find_panel_height();
+        let size = window.bounds().size;
+        if (size.height.as_f32() - target).abs() > 0.5 {
+            window.resize(gpui_kit::size(size.width, px(target)));
+        }
+    }
+
     /// The **Find All** result list: the middle section of upstream's split.
     ///
     /// Upstream's `FindPanelResultView` is a `⌃` collapse button and a bold
@@ -376,10 +399,13 @@ impl FindPanel {
                             .icon(gpui_kit::assets::IconName::ChevronUp)
                             .accessibility_label("Close")
                             .tooltip("Close find result.")
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_document(cx, |workspace, _, cx| {
                                     workspace.close_find_results(cx);
                                 });
+                                // And shrink back, or the panel keeps the height
+                                // the section no longer needs.
+                                this.reconcile_panel_height(window, cx);
                             })),
                     )
                     .child(
@@ -611,6 +637,10 @@ impl TableDelegate for FindResultTable {
                 .pr_2()
                 .when(selected, |cell| cell.bg(cx.theme().tokens.table_active))
                 .child(row.line_number.to_string())
+                // A row is drawn by the delegate, so this id is the only way
+                // anything could point at one. Note that the row still has to
+                // be laid out to exist: see §22.41.
+                .id(ElementId::Name(format!("find-result-{row_ix}-line").into()))
                 .into_any_element(),
             _ => {
                 let colors = highlighter_colors(row.capture_ranges.len());
@@ -633,6 +663,7 @@ impl TableDelegate for FindResultTable {
                         &colors,
                         font_size,
                     ))
+                    .id(ElementId::Name(format!("find-result-{row_ix}-text").into()))
                     .into_any_element()
             }
         }
@@ -1169,7 +1200,9 @@ impl FindPanel {
                                 this.on_document(cx, |workspace, _window, cx| {
                                     workspace.find_all(cx)
                                 });
-                                let _ = window;
+                                // The section just opened; the window has to
+                                // grow to show it (§22.41).
+                                this.reconcile_panel_height(window, cx);
                             })),
                     )
                     .dropdown_menu(move |menu, _, _| {

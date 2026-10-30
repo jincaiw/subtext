@@ -3363,12 +3363,11 @@ impl Workspace {
         let Some(handle) = self.find_window else {
             return;
         };
-        let height = FIND_PANEL_HEIGHT
-            + if self.find.results_open {
-                FIND_PANEL_RESULT_HEIGHT
-            } else {
-                0.0
-            };
+        let height = self.find_panel_height();
+        // This fails when the caller is the panel itself — a click on *Find All*
+        // runs inside that window's own update, and a window cannot be
+        // re-entered while it is being updated. The panel reconciles its own
+        // height in that case; see `FindPanel::reconcile_panel_height`.
         handle
             .update(cx, |_, window, _| {
                 // Keep whatever width the user has dragged the panel to; only
@@ -3401,6 +3400,20 @@ impl Workspace {
             self.settings.find_panel_frame = Some(frame);
             let _ = self.settings.save();
         }
+    }
+
+    /// The height the panel should have with its current sections showing.
+    ///
+    /// `resize_find_panel` applies it through the window handle, which cannot
+    /// reach the panel while the panel itself is the one asking (a click on
+    /// *Find All*). The panel reads this and resizes its own window instead.
+    pub fn find_panel_height(&self) -> f32 {
+        FIND_PANEL_HEIGHT
+            + if self.find.results_open {
+                FIND_PANEL_RESULT_HEIGHT
+            } else {
+                0.0
+            }
     }
 
     /// Apply a click on the result row whose match is `range`.

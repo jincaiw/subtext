@@ -6,6 +6,23 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **点 *Find All* 之后面板会长高了**。此前结果区展开、窗口却停在折叠高度：`resize_find_panel` 用
+  `find_window.update(...)` 去改尺寸，而 *Find All* 的点击处理器就跑在那个窗口自己的 update 里 ——
+  窗口在更新期间不能再被进入，`update_window_id` 返回 `window not found`，外层 `.ok()` 把它吞掉，
+  于是结果区拿到 0 高度、表格一行都画不出来。现在高度由面板自己在**开/关结果区的两个处理器**里应用
+  （`FindPanel::reconcile_panel_height`），公式只留在 `Workspace::find_panel_height` 一处。
+
+### 工程
+
+- 结果表的单元格补了 id（`find-result-<row>-line` / `-text`），为将来的行点击测试铺路。
+- **记录一条未验证**：harness 在「窗口更新期间发出的 resize」之后不重排（窗口已 390，`table` 仍 0px），
+  沙箱也无法点按钮（合成点击后 `find_results()` 仍是 `(0, false)`）。所以行点击测试仍未写成，
+  真机确认留给下一轮。§22.40 的「行没有 id」只对了一半。
+
 ## [0.3.41] — 2026-10-30
 
 ### 工程
