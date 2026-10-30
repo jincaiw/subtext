@@ -6877,11 +6877,18 @@ impl Workspace {
 
         if !items.is_empty() {
             // Upstream shows the character, and for one the encoding cannot
-            // spell at all a `�` stands in for it.
+            // spell at all Foundation writes `?` in its place. Measured, not
+            // guessed: `String.data(using:allowLossyConversion:)` answers U+003F
+            // for Shift-JIS, EUC-JP, Latin-1 and CP1252 alike (a probe in
+            // `tools/` would be the permanent form of that check). `encoding_rs`
+            // marks the same positions with U+FFFD instead, which is the
+            // *decoder's* marker — showing it here would put a different glyph
+            // in the column than CotEditor puts there.
             let converted = |item: &subtext_core::IncompatibleCharacter| {
                 item.converted
                     .clone()
                     .unwrap_or_else(|| "\u{FFFD}".to_string())
+                    .replace('\u{FFFD}', "?")
             };
             let _ = encoding;
             let rows: Vec<WarningRow> = items

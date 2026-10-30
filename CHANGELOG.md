@@ -6,6 +6,15 @@
 
 ---
 
+## [0.3.51] — 2026-10-30
+
+### 修复
+
+- **警告检查器 *Converted* 列显示 `?`，与 CotEditor 一致**。此前编码写不出的字符在这一列显示
+  `�`（U+FFFD）—— 那是 `encoding_rs` 标位置用的解码器记号，不是 Foundation 的替换物。用 Swift
+  探针问过 Foundation 本人：`String.data(using:allowLossyConversion:)` 对 Shift-JIS、EUC-JP、
+  Latin-1、CP1252 一律写 U+003F，没有第二种答案（缺口表原来记的「`?` / `＼`」是记错了）。
+
 ## [0.3.50] — 2026-10-30
 
 ### 修复
