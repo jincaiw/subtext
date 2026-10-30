@@ -1084,6 +1084,16 @@ impl EncodingList {
         index
     }
 
+    /// Put `item` in at `index`, shifting what is below it down.
+    ///
+    /// [`insert_after`](Self::insert_after) is the Add button's rule — it takes
+    /// a selection and puts the entry below it. Dragging a row needs a plain
+    /// index instead: the landing place is already known, and asking
+    /// "after what?" would be a second way to say the same thing.
+    pub fn insert_at(&mut self, index: usize, item: Option<TextEncoding>) {
+        self.0.insert(index.min(self.0.len()), item);
+    }
+
     /// Move the entry at `index` one place up, and return where it landed.
     pub fn move_up(&mut self, index: usize) -> Option<usize> {
         let target = index.checked_sub(1)?;

@@ -6,6 +6,23 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **编码列表改成拖拽排序**，与上游的 `List(selection:)` 一致：拖动行改顺序（拖选中行带走整个
+  选区），⌫ 删除选中项，说明文字回到 *Drag encodings to change the order:*。此前是一对上下箭头
+  —— 能力相同、手势不同，缺口表从 §8.11 起记着这条。行换成组件库的 `ListItem`：GPUI 的拖拽挂在
+  元素自身的 interactivity 上，`Button` 没有 `on_drag`，外面套一层 `div` 也收不到按下的命中。
+  拖动时跟随指针的是 `DragPreview`，指针下的那一行用 `drag_over` 染色。
+
+### 工程
+
+- `EncodingList::insert_at`：拖拽的落点是一个下标，而 `insert_after` 只服务 Add 按钮。
+- 落点算术抽成 `landing_index()`（Foundation `move(fromOffsets:toOffset:)` 的纯函数形式），
+  向下 / 向上 / 成块 / 原地 / 分隔符 / 末尾六条测试覆盖。
+- 拖拽手势本身还没有真机验证（本机无辅助功能权限），记在 `docs/PLAN.md` §22.47。
+
 ## [0.3.48] — 2026-10-30
 
 ### 修复

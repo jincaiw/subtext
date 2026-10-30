@@ -50,16 +50,17 @@
 //! can be wrong about the *data* lives.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Sizable as _,
+    button::Button,
     h_flex,
+    list::ListItem,
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
-    Anchor, AnyElement, App, ClickEvent, Context, InteractiveElement as _, IntoElement, Modifiers,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, rems,
+    Anchor, AnyElement, App, AppContext as _, ClickEvent, Context, FocusHandle,
+    InteractiveElement as _, IntoElement, KeyDownEvent, Modifiers, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, rems,
 };
 
 use subtext_core::encoding::{EncodingList, FileEncoding, TextEncoding};
@@ -119,6 +120,16 @@ pub struct EncodingListSheet {
     /// by name. Rebuilt whenever the list changes rather than on every frame,
     /// because it sorts the whole registry.
     addable: Vec<TextEncoding>,
+    /// The list's own focus, which is where ⌫ arrives.
+    ///
+    /// Upstream hangs `.onDeleteCommand` off the `List`, so the key only
+    /// deletes while the list is what has the focus. The same here: the rows
+    /// are not focusable themselves, and clicking one focuses the list.
+    ///
+    /// `None` only in tests, which build the sheet without a window: a
+    /// `FocusHandle` cannot be made without an `App`, and every rule the tests
+    /// are about lives in the model rather than in this handle.
+    focus: Option<FocusHandle>,
 }
 
 impl EncodingListSheet {
@@ -137,6 +148,7 @@ impl EncodingListSheet {
             anchor: None,
             default_encoding,
             addable: Vec::new(),
+            focus: Some(cx.focus_handle()),
         };
         this.rebuild_rows();
         this.refresh(cx);
@@ -221,12 +233,6 @@ impl EncodingListSheet {
 
     fn is_selected(&self, id: u64) -> bool {
         self.selection.contains(&id)
-    }
-
-    fn is_selected_at(&self, index: usize) -> bool {
-        self.rows
-            .get(index)
-            .is_some_and(|row| self.is_selected(row.id))
     }
 
     /// Handle a click on a row, the way a `List(selection:)` does.
@@ -360,68 +366,64 @@ impl EncodingListSheet {
         self.anchor = None;
     }
 
-    /// Whether at least one selected row can move in `up`'s direction.
+    /// Move the rows that are being dragged so that they land at `target`.
     ///
-    /// A selected run at the edge is blocked as a unit, but a non-contiguous
-    /// selection can still move its other rows. This is what the button's
-    /// disabled state promises before the user activates it.
-    fn can_move_selected(&self, up: bool) -> bool {
-        self.rows.iter().enumerate().any(|(index, row)| {
-            if !self.is_selected(row.id) {
-                return false;
-            }
-            if up {
-                index > 0 && !self.is_selected_at(index - 1)
-            } else {
-                index + 1 < self.rows.len() && !self.is_selected_at(index + 1)
-            }
-        })
-    }
-
-    /// Move every selected row one place up or down, keeping their order.
+    /// Dragging a selected row drags the whole selection, which is what
+    /// SwiftUI's `List` does; dragging an unselected one drags just that row.
+    /// The run keeps its internal order either way.
     ///
-    /// This is SwiftUI's `move(fromOffsets:toOffset:)` with the destination one
-    /// place over, which is what dragging a run by one row does: the run swaps
-    /// with the single row above or below it. The walk goes from the end the
-    /// move heads towards, so that a row swapped into a position already passed
-    /// is not examined a second time — going the other way would shuffle a run
-    /// into reverse. Rows at an edge stay put; a separate selected row that can
-    /// move still does so.
-    fn move_selected(&mut self, up: bool) {
-        let mut indices: Vec<usize> = self
-            .selection
-            .iter()
-            .filter_map(|id| self.index_of(*id))
-            .collect();
-        indices.sort_unstable();
-        if indices.is_empty() {
+    /// Dropping *onto* a row means taking that row's place: the run goes where
+    /// the row was and the row steps aside. So a run dragged downwards lands
+    /// after its target and one dragged upwards lands before it — the only rule
+    /// under which dropping on the last row can reach the end of the list.
+    fn move_dragged(&mut self, dragged: u64, target: u64) {
+        let (Some(dragged_index), Some(target_index)) =
+            (self.index_of(dragged), self.index_of(target))
+        else {
+            return;
+        };
+        let mut from: Vec<usize> = if self.is_selected(dragged) {
+            self.selection
+                .iter()
+                .filter_map(|id| self.index_of(*id))
+                .collect()
+        } else {
+            vec![dragged_index]
+        };
+        from.sort_unstable();
+        if from.contains(&target_index) {
             return;
         }
-
-        if up {
-            for index in indices {
-                if index > 0 && !self.is_selected_at(index - 1) {
-                    self.swap_adjacent(true, index);
-                }
-            }
+        let downwards = target_index > *from.last().expect("a drag carries at least one row");
+        let to = if downwards {
+            target_index + 1
         } else {
-            for index in indices.into_iter().rev() {
-                if index + 1 < self.rows.len() && !self.is_selected_at(index + 1) {
-                    self.swap_adjacent(false, index);
-                }
-            }
-        }
+            target_index
+        };
+        self.move_run(&from, to);
     }
 
-    /// Swap the row at `index` with its neighbour, moving the identity with it.
-    fn swap_adjacent(&mut self, up: bool, index: usize) {
-        let landed = if up {
-            self.list.move_up(index)
-        } else {
-            self.list.move_down(index)
-        };
-        if let Some(landed) = landed {
-            self.rows.swap(index, landed);
+    /// Take the rows at `from` out and put them back before `to`.
+    ///
+    /// `to` is an index into the list as it stands, which is how Foundation's
+    /// `move(fromOffsets:toOffset:)` counts — so the landing place is `to` less
+    /// however many of the moved rows sat above it. Both structures are moved
+    /// in the same pass, which is what keeps them in step.
+    fn move_run(&mut self, from: &[usize], to: usize) {
+        if from.is_empty() || to > self.rows.len() {
+            return;
+        }
+        let landing = landing_index(from, to, self.rows.len());
+        let mut moved = Vec::with_capacity(from.len());
+        for index in from.iter().rev() {
+            let item = self.list.item(*index).flatten();
+            self.list.remove(*index);
+            moved.push((self.rows.remove(*index), item));
+        }
+        moved.reverse();
+        for (offset, (row, item)) in moved.into_iter().enumerate() {
+            self.rows.insert(landing + offset, row);
+            self.list.insert_at(landing + offset, item);
         }
     }
 
@@ -450,10 +452,17 @@ impl EncodingListSheet {
     fn render_row(&self, row: &Row, cx: &Context<Self>) -> AnyElement {
         let id = row.id;
         let sheet = cx.entity().downgrade();
-        let on_click = move |event: &ClickEvent, _window: &mut Window, cx: &mut App| {
+        let on_click = move |event: &ClickEvent, window: &mut Window, cx: &mut App| {
             let modifiers = event.modifiers();
             sheet
                 .update(cx, |sheet, cx| {
+                    // Clicking a row takes the focus to the list, which is
+                    // where ⌫ arrives — upstream's `List` does the same, and it
+                    // is what makes `.onDeleteCommand` work without selecting a
+                    // row twice.
+                    if let Some(focus) = &sheet.focus {
+                        focus.focus(window, cx);
+                    }
                     sheet.click(id, modifiers);
                     cx.notify();
                 })
@@ -469,13 +478,48 @@ impl EncodingListSheet {
             Some(encoding) => encoding.name.to_string(),
             None => "Separator".to_string(),
         };
-        let button = Button::new(("encoding-row", id))
-            .ghost()
-            .small()
-            .w_full()
+
+        // What the pointer carries: the row's identity, and the label the
+        // floating preview draws. The preview is an entity of its own because
+        // GPUI draws it above the window for as long as the drag lasts.
+        let label: SharedString = match row.item {
+            Some(encoding) => encoding.name.into(),
+            None => "Separator".into(),
+        };
+        let dragged = Dragging {
+            id,
+            label: label.clone(),
+        };
+        let dropped = {
+            let sheet = cx.entity().downgrade();
+            move |dragged: &Dragging, _window: &mut Window, cx: &mut App| {
+                let dragged = dragged.id;
+                sheet
+                    .update(cx, |sheet, cx| {
+                        sheet.move_dragged(dragged, id);
+                        sheet.refresh(cx);
+                    })
+                    .ok();
+            }
+        };
+        // The row under the pointer, while a row is in flight. A drop lands on
+        // the row that lights up, so the highlight *is* the answer to "where
+        // will this go?" — the same thing SwiftUI's insertion gap says.
+        let target = cx.theme().accent.opacity(0.15);
+
+        let row_item = ListItem::new(("encoding-row", id))
             .selected(self.is_selected(id))
+            .w_full()
+            .px_2()
+            .py_1()
             .accessibility_label(accessible_label)
-            .on_click(on_click);
+            .on_click(on_click)
+            .on_drag(dragged, |drag: &Dragging, _, _, cx| {
+                let label = drag.label.clone();
+                cx.new(|_| DragPreview { label })
+            })
+            .on_drop::<Dragging>(dropped)
+            .drag_over::<Dragging>(move |style, _, _, _| style.bg(target));
 
         match row.item {
             Some(encoding) => {
@@ -505,9 +549,9 @@ impl EncodingListSheet {
                         encoding.identifier(),
                     ));
                 }
-                button.child(body).into_any_element()
+                row_item.child(body).into_any_element()
             }
-            None => button
+            None => row_item
                 .child(div().w_full().border_t_1().border_color(cx.theme().border))
                 .into_any_element(),
         }
@@ -525,15 +569,26 @@ impl EncodingListSheet {
             rows = rows.child(self.render_row(row, cx));
         }
 
-        div()
+        let mut list = div()
             .id("encoding-list")
             .h(rems(LIST_HEIGHT))
             .overflow_y_scroll()
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(rows)
-            .into_any_element()
+            // Upstream hangs `.onDeleteCommand` off its `List`, so ⌫ deletes
+            // only while the list has the focus. Clicking a row takes it there.
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if matches!(event.keystroke.key.as_str(), "backspace" | "delete") {
+                    this.remove_selected();
+                    this.refresh(cx);
+                    cx.stop_propagation();
+                }
+            }));
+        if let Some(focus) = &self.focus {
+            list = list.track_focus(focus);
+        }
+        list.child(rows).into_any_element()
     }
 
     /// The Add button: a separator, then every encoding the list does not hold.
@@ -601,49 +656,52 @@ impl EncodingListSheet {
             }))
             .into_any_element()
     }
+}
 
-    /// The two arrow buttons, which move whatever is selected.
-    fn render_arrows(&self, cx: &Context<Self>) -> AnyElement {
-        let can_move_up = self.can_move_selected(true);
-        let can_move_down = self.can_move_selected(false);
-        let sheet = cx.entity().downgrade();
-        let up = sheet.clone();
-        let down = sheet;
+/// What a row carries while it is being dragged.
+///
+/// The identity is what the drop needs; the label is what the floating preview
+/// draws, because that preview is an entity of its own and cannot read the
+/// sheet the drag came from.
+#[derive(Clone)]
+struct Dragging {
+    id: u64,
+    label: SharedString,
+}
 
-        h_flex()
-            .gap_0p5()
-            .child(
-                Button::new("encoding-move-up")
-                    .small()
-                    .icon(gpui_kit::assets::IconName::ArrowUp)
-                    .accessibility_label("Move selected entries up")
-                    .disabled(!can_move_up)
-                    .tooltip("Move up")
-                    .on_click(move |_, _, cx| {
-                        up.update(cx, |sheet, cx| {
-                            sheet.move_selected(true);
-                            sheet.refresh(cx);
-                        })
-                        .ok();
-                    }),
-            )
-            .child(
-                Button::new("encoding-move-down")
-                    .small()
-                    .icon(gpui_kit::assets::IconName::ArrowDown)
-                    .accessibility_label("Move selected entries down")
-                    .disabled(!can_move_down)
-                    .tooltip("Move down")
-                    .on_click(move |_, _, cx| {
-                        down.update(cx, |sheet, cx| {
-                            sheet.move_selected(false);
-                            sheet.refresh(cx);
-                        })
-                        .ok();
-                    }),
-            )
-            .into_any_element()
+/// The row under the pointer while it is in flight.
+///
+/// GPUI asks the drag's origin for one of these and draws it above the window
+/// for as long as the gesture lasts, which is what tells the user they are
+/// carrying a row rather than dragging a selection.
+struct DragPreview {
+    label: SharedString,
+}
+
+impl Render for DragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .shadow_md()
+            .text_sm()
+            .child(self.label.clone())
     }
+}
+
+/// Where a run taken out of `from` lands when it is put back before `to`.
+///
+/// Foundation's `move(fromOffsets:toOffset:)` counts `to` in the array as it was
+/// before anything came out, so the landing place is `to` less the moved rows
+/// that sat above it. Clamped: `to` can name one place past the end (an append),
+/// and a run that is the whole list has nowhere to go.
+fn landing_index(from: &[usize], to: usize, len: usize) -> usize {
+    let removed_above = from.iter().filter(|index| **index < to).count();
+    to.saturating_sub(removed_above).min(len - from.len())
 }
 
 impl Render for EncodingListSheet {
@@ -657,7 +715,7 @@ impl Render for EncodingListSheet {
             .child(
                 div()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Move encodings up or down to change the order:"),
+                    .child("Drag encodings to change the order:"),
             )
             .child(self.render_list(cx))
             .child(
@@ -666,7 +724,6 @@ impl Render for EncodingListSheet {
                     .gap_1()
                     .child(self.render_add(cx))
                     .child(self.render_remove(cx))
-                    .child(self.render_arrows(cx))
                     .child(div().flex_1())
                     .child(
                         Button::new("encoding-restore")
@@ -715,6 +772,8 @@ mod tests {
             anchor: None,
             default_encoding: TextEncoding::UTF8,
             addable: Vec::new(),
+            // No window, so no focus: the tests are about the model.
+            focus: None,
         };
         sheet.rebuild_rows();
         sheet.addable = sheet.list.addable();
@@ -841,85 +900,45 @@ mod tests {
         assert_eq!(sheet.selection, vec![rows[1]]);
     }
 
-    /// Moving a run of rows keeps their order and takes them one place at a
-    /// time, which is what SwiftUI's `move(fromOffsets:toOffset:)` does with
-    /// the destination one over: the run swaps with the single row beside it.
+    /// Dragging a row onto one below it puts it after that row.
+    ///
+    /// "Take the target's place" is the rule: the row that was dragged lands
+    /// where the target was, and the target steps up. It is the only rule under
+    /// which dropping on the last row can reach the end of the list.
     #[test]
-    fn moving_a_run_swaps_it_with_its_neighbour() {
+    fn dragging_down_lands_after_the_target() {
         let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
         let rows = ids(&sheet);
 
-        // The first two rows moving down: the third steps up in front of them.
-        sheet.selection = vec![rows[0], rows[1]];
-        sheet.move_selected(false);
+        sheet.move_dragged(rows[0], rows[2]);
+        assert_in_step(&sheet);
+        assert_eq!(
+            entries(&sheet),
+            vec![Some("shift_jis"), Some("windows-1252"), Some("utf-8")]
+        );
+        assert_eq!(
+            sheet.rows[2].id, rows[0],
+            "the identity travelled with the row"
+        );
+    }
+
+    /// Dragging a row onto one above it puts it before that row.
+    #[test]
+    fn dragging_up_lands_before_the_target() {
+        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
+        let rows = ids(&sheet);
+
+        sheet.move_dragged(rows[2], rows[0]);
         assert_in_step(&sheet);
         assert_eq!(
             entries(&sheet),
             vec![Some("windows-1252"), Some("utf-8"), Some("shift_jis")]
         );
-        assert_eq!(
-            sheet.selection,
-            vec![rows[0], rows[1]],
-            "the identities travelled with their rows"
-        );
-
-        sheet.move_selected(true);
-        assert_in_step(&sheet);
-        assert_eq!(
-            entries(&sheet),
-            vec![Some("utf-8"), Some("shift_jis"), Some("windows-1252")]
-        );
-
-        // Every row selected is a run with nowhere to go in either direction.
-        sheet.selection = rows;
-        sheet.move_selected(true);
-        sheet.move_selected(false);
-        assert_eq!(
-            entries(&sheet),
-            vec![Some("utf-8"), Some("shift_jis"), Some("windows-1252")]
-        );
     }
 
-    /// A run in the middle moves as a block.
+    /// A selected row drags the whole selection, and the run keeps its order.
     #[test]
-    fn a_run_in_the_middle_moves_as_a_block() {
-        let mut sheet = sheet(&[
-            Some("utf-8"),
-            Some("shift_jis"),
-            Some("windows-1252"),
-            Some("euc-jp"),
-        ]);
-        let rows = ids(&sheet);
-
-        sheet.selection = vec![rows[1], rows[2]];
-        sheet.move_selected(false);
-        assert_in_step(&sheet);
-        assert_eq!(
-            entries(&sheet),
-            vec![
-                Some("utf-8"),
-                Some("euc-jp"),
-                Some("shift_jis"),
-                Some("windows-1252")
-            ]
-        );
-
-        sheet.move_selected(true);
-        assert_eq!(
-            entries(&sheet),
-            vec![
-                Some("utf-8"),
-                Some("shift_jis"),
-                Some("windows-1252"),
-                Some("euc-jp")
-            ]
-        );
-    }
-
-    /// A run is not reversed by a move, which is what walking the selection
-    /// from the wrong end would do.
-    #[test]
-    fn a_long_run_keeps_its_order() {
+    fn dragging_a_selected_row_takes_the_whole_run() {
         let mut sheet = sheet(&[
             Some("utf-8"),
             Some("shift_jis"),
@@ -930,7 +949,7 @@ mod tests {
         let rows = ids(&sheet);
 
         sheet.selection = rows[1..=3].to_vec();
-        sheet.move_selected(false);
+        sheet.move_dragged(rows[2], rows[4]);
         assert_in_step(&sheet);
         assert_eq!(
             entries(&sheet),
@@ -940,45 +959,55 @@ mod tests {
                 Some("shift_jis"),
                 Some("windows-1252"),
                 Some("euc-jp")
-            ]
+            ],
+            "the run is moved as a block, not reversed"
         );
-
-        sheet.move_selected(true);
-        assert_eq!(
-            entries(&sheet),
-            vec![
-                Some("utf-8"),
-                Some("shift_jis"),
-                Some("windows-1252"),
-                Some("euc-jp"),
-                Some("koi8-r")
-            ]
-        );
+        assert_eq!(sheet.selection, rows[1..=3].to_vec());
     }
 
-    /// The ends stop a move rather than wrapping it.
+    /// Dragging a row that is not selected moves just that row, even when
+    /// something else is selected.
     #[test]
-    fn a_move_at_the_end_does_nothing() {
-        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis")]);
+    fn dragging_an_unselected_row_leaves_the_selection_alone() {
+        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
         let rows = ids(&sheet);
 
         sheet.selection = vec![rows[0]];
-        sheet.move_selected(true);
-        assert_eq!(entries(&sheet), vec![Some("utf-8"), Some("shift_jis")]);
-
-        sheet.selection = vec![rows[1]];
-        sheet.move_selected(false);
-        assert_eq!(entries(&sheet), vec![Some("utf-8"), Some("shift_jis")]);
+        sheet.move_dragged(rows[2], rows[0]);
+        assert_in_step(&sheet);
+        assert_eq!(
+            entries(&sheet),
+            vec![Some("windows-1252"), Some("utf-8"), Some("shift_jis")]
+        );
+        assert_eq!(
+            sheet.selection,
+            vec![rows[0]],
+            "the selection did not travel with a row it was not on"
+        );
     }
 
-    /// A separator moves like anything else — it is a row, not a gap.
+    /// A row dropped on itself, or on a row of its own run, changes nothing.
     #[test]
-    fn a_separator_moves_with_the_rest() {
+    fn dropping_a_run_on_itself_changes_nothing() {
+        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
+        let rows = ids(&sheet);
+        let before = entries(&sheet);
+
+        sheet.move_dragged(rows[1], rows[1]);
+        assert_eq!(entries(&sheet), before);
+
+        sheet.selection = vec![rows[0], rows[1]];
+        sheet.move_dragged(rows[0], rows[1]);
+        assert_eq!(entries(&sheet), before, "a drop inside the run is a no-op");
+    }
+
+    /// A separator drags like any other row — it is a row, not a gap.
+    #[test]
+    fn a_separator_drags_like_any_other_row() {
         let mut sheet = sheet(&[Some("utf-8"), None, Some("shift_jis")]);
         let rows = ids(&sheet);
 
-        sheet.selection = vec![rows[1]];
-        sheet.move_selected(true);
+        sheet.move_dragged(rows[1], rows[0]);
         assert_in_step(&sheet);
         assert_eq!(
             entries(&sheet),
@@ -986,110 +1015,20 @@ mod tests {
         );
     }
 
-    /// The two arrow buttons are greyed independently: a selection that cannot
-    /// go up may still be able to go down.
+    /// Foundation's `move(fromOffsets:toOffset:)`, which is what SwiftUI's
+    /// `.onMove` calls, on the cases a drag produces.
     #[test]
-    fn each_direction_is_offered_on_its_own() {
-        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
-        let rows = ids(&sheet);
-
-        assert!(
-            !sheet.can_move_selected(true),
-            "nothing selected, nothing to move"
-        );
-        assert!(!sheet.can_move_selected(false));
-
-        sheet.selection = vec![rows[0]];
-        assert!(
-            !sheet.can_move_selected(true),
-            "the first row has nothing above it"
-        );
-        assert!(sheet.can_move_selected(false));
-
-        sheet.selection = vec![rows[2]];
-        assert!(sheet.can_move_selected(true));
-        assert!(
-            !sheet.can_move_selected(false),
-            "the last row has nothing below it"
-        );
-
-        // A run of adjacent rows is blocked as a unit, in the direction it is
-        // already packed against.
-        sheet.selection = vec![rows[0], rows[1], rows[2]];
-        assert!(!sheet.can_move_selected(true));
-        assert!(!sheet.can_move_selected(false));
-
-        // Two neighbours selected leave one free row in each direction.
-        sheet.selection = vec![rows[1], rows[2]];
-        assert!(sheet.can_move_selected(true));
-        assert!(!sheet.can_move_selected(false));
-    }
-
-    /// A selection that reaches an edge still moves the rows that can: the
-    /// blocked row stays put and the rest travel, which is what the separate
-    /// arrow enablement promises.
-    #[test]
-    fn a_blocked_row_does_not_hold_back_the_others() {
-        // Down: the first row is blocked at the top, the third still steps
-        // back past its neighbour.
-        let mut downward = sheet(&[
-            Some("utf-8"),
-            Some("shift_jis"),
-            Some("windows-1252"),
-            Some("euc-jp"),
-        ]);
-        let rows = ids(&downward);
-        downward.selection = vec![rows[0], rows[2]];
-        assert!(downward.can_move_selected(false));
-        downward.move_selected(false);
-        assert_in_step(&downward);
-        assert_eq!(
-            entries(&downward),
-            vec![
-                Some("shift_jis"),
-                Some("utf-8"),
-                Some("euc-jp"),
-                Some("windows-1252")
-            ]
-        );
-
-        // Up: the first row is blocked again, the last still steps forward.
-        let mut upward = sheet(&[
-            Some("utf-8"),
-            Some("shift_jis"),
-            Some("windows-1252"),
-            Some("euc-jp"),
-        ]);
-        let rows = ids(&upward);
-        upward.selection = vec![rows[0], rows[3]];
-        assert!(
-            upward.can_move_selected(true),
-            "the last row can still move"
-        );
-        upward.move_selected(true);
-        assert_in_step(&upward);
-        assert_eq!(
-            entries(&upward),
-            vec![
-                Some("utf-8"),
-                Some("shift_jis"),
-                Some("euc-jp"),
-                Some("windows-1252")
-            ]
-        );
-    }
-
-    /// Nothing selected is nothing to move, and nothing to delete.
-    #[test]
-    fn an_empty_selection_does_nothing() {
-        let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis")]);
-        let before = entries(&sheet);
-
-        sheet.move_selected(true);
-        sheet.move_selected(false);
-        sheet.remove_selected();
-        assert_eq!(entries(&sheet), before);
-        assert!(matches!(sheet.removal(), Removal::Nothing));
+    fn the_landing_place_is_foundations() {
+        // One row down over the row below it: [a, b, c] -> [b, a, c].
+        assert_eq!(landing_index(&[0], 2, 3), 1);
+        // One row up over the row above it: [a, b, c] -> [c, a, b].
+        assert_eq!(landing_index(&[2], 0, 3), 0);
+        // A run of two down past one row: [a, b, c, d] -> [c, a, b, d].
+        assert_eq!(landing_index(&[0, 1], 3, 4), 1);
+        // A run that is the whole list has nowhere to go.
+        assert_eq!(landing_index(&[0, 1, 2], 0, 3), 0);
+        // An append: `to` one past the end.
+        assert_eq!(landing_index(&[0], 3, 3), 2);
     }
 
     /// UTF-8 and the default encoding refuse, and the reason names the entry.

@@ -3360,6 +3360,34 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
+### 22.47 编码列表改成拖拽排序，去掉那对箭头
+
+上游的 `EncodingListView` 是一个 `List(selection:)`：`.onMove` 拖拽排序、`.onDeleteCommand`
+按 ⌫ 删除，列表下面只有 Add / Delete 两个图标按钮。SubText 一直是一对上下箭头 —— 能力相同、
+手势不同，缺口表从 §8.11 起记着这条。
+
+这一轮换成上游的手势：
+
+* **行从 `Button` 换成 `ListItem`。** `Button` 没有 `on_drag`：GPUI 的拖拽挂在元素自己的
+  interactivity 上，鼠标按下的命中目标是子元素时，外层包一个 `div().on_drag(…)` 收不到。
+  `ListItem` 是组件库的列表行，`.selected()` / `.accessibility_label()` / `.on_click()` 与
+  `Button` 等价，还自带 `on_drag` / `on_drop` / `drag_over`。
+* **载荷是 `Dragging { id, label }`。** id 给落点用；label 给跟随指针的预览（`DragPreview`，
+  GPUI 在窗口之上画它）。`drag_over` 把指针下的那一行染成强调色 —— 它会亮，就说明松手落在那里。
+* **落点语义取「占位」。** 拖到某一行上就占那一行的位置，那一行让开：向下拖落在目标之后、向上拖
+  落在目标之前。只有这条规则能让「拖到最后一行」真的到末尾。底层是 Foundation 的
+  `move(fromOffsets:toOffset:)`，`landing_index()` 是它的纯函数形式。
+* **拖选中行带走整个选区**（SwiftUI 的 `List` 也是如此），拖没选中的行只带它自己。
+* **⌫ 删除。** 列表容器 `track_focus` + `on_key_down` 认 `backspace` / `delete`，点行时把焦点
+  交给它 —— 上游是 `.onDeleteCommand` 挂在 `List` 上，行为一致。
+* 说明文字改成上游那句 *Drag encodings to change the order:*。
+
+**没验到的，写在这里**：拖拽手势本身。本机没有辅助功能权限，`osascript` 既点不动菜单栏也拖不动
+行（`-10004`）；`TestWindowExt::drag` 够得着工作区里的元素，够不着这个对话框 —— sheet 由
+`SettingsWindow::edit_encoding_list` 打开，UI 测试没有那条路径，而给它开一条只为一个手势，
+代价大于收益。模型侧的六条测试覆盖了落点算术、选区行为与分隔符；**`on_drop` 有没有接上
+`move_dragged` 只有真机能回答**。所以这一轮先不发布，等授权后补一次真机拖拽与截图。
+
 ### 22.46 大纲导航两项跟着光标置灰 —— 以及导航栏每帧都在重算的那份大纲
 
 上游的 `validateUserInterfaceItem` 每次菜单打开都问一遍：*Select Previous / Next Outline Item*
@@ -4168,7 +4196,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | SQL 的查询跑不起来 | 大纲与高亮两条都受影响：上游从 `DerekStride/tree-sitter-sql` 的 `gh-pages` 分支构建语法，那份语法有 `drop_procedure` 等节点；crates.io 上同源的 `tree-sitter-sequel` 0.3.11 没有，`Query::new` 直接报错 —— SQL 的大纲与高亮都还是空的。两道常设门禁（`every_bundled_query_parses_against_its_grammar` 与 `every_bundled_highlight_query_parses`）把 SQL 写进 `NOT_YET`，语法追上的那天测试会失败并提醒接线。 |
 | LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
-| 编码列表编辑器的手势与上游不同 | 上游的列表是 SwiftUI 的 `List`，靠**拖拽**排序、靠 **Delete 键**删除；`gpui-component` 0.7.3 既没有拖拽重排，也没有能上报 Delete 键的列表。SubText 用一对箭头按钮与一个 Delete 按钮，能力相同（任何条目都能一次挪一格、任何可删条目都能删），手势不同。两个箭头**各自**判断能否移动：选区里只要有一行能走，那个方向的按钮就是活的，走到边上的那一行自己停住——上游的 `move(fromOffsets:toOffset:)` 对整段一起处理，这里对「选区同时含边界行与可动行」的情形略有不同。列表上方那句指示因此写成 *Move encodings up or down…* 而非上游的 *Drag encodings…*。另一条装饰性差异：对话框标题用 *Encoding List*（上游的 sheet 没有标题栏）。选择器里没有分隔线这条已在 §8.14 关掉（`pick_list_with_gaps`）。详见 §8.11。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |
 | 捕获组着色不跟随系统强调色 | 上游 `textHighlighterColor` = 系统强调色（WFColorCode `NSColor.accent`）α0.4，用户改系统强调色时结果表与编辑器高亮一起变。GPUI 不暴露 macOS 系统强调色，SubText 固定用实测的默认强调蓝（§8.24），自定义强调色的用户会看到固定蓝。 |
