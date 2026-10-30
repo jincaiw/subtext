@@ -2982,6 +2982,30 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.28 分栏拖拽：没测成，但终于知道卡在哪
+
+缺口表里「拖动分栏的手势没测过」从 §8.13 挂到现在，理由一直写「没有 UI 集成测试可用」。§22.25 之后这句
+话不成立了，于是试一次。
+
+**做了什么**：`Workspace` 起来、显示检查器，先取一个面板**内部**元素的左边缘当基准（`inspector-path`，
+§22.17 那个路径按钮），然后按平台的样子发三个事件 —— 在分隔线上按下、左移 80 px、抬起，看基准有没有跟着动。
+
+**结果**：没有。而且不是「偏移量挑错了」—— 在基准左侧 1 / 2 / 3 / 4 / 6 / 8 / 12 px 各试一次，
+七次都一动不动。
+
+**为什么动不了**，两条都查到了：
+
+| 查什么 | 结果 |
+| --- | --- |
+| 面板能不能按 id 找到 | `window.try_find(("resizable-panel", 0/1/2))` **全部 None** —— `ResizablePanelGroup` 画的面板没有 `.test_support()`，不进测试的注册表 |
+| 分隔线有没有 id | 把已注册的路径全打出来（故意 `find` 一个不存在的 id，让 panic 把表列出来），里面**没有任何** `resize-handle` 之类的名字 |
+
+所以现在这条缺口写的是：**要闭它，先给手柄或面板一个 `ElementId` + `test_support()`，再用
+`TestWindowExt::drag_to`。** 这比「没有 UI 测试可用」有用 —— 后者听起来像做不到，前者是一次改动。
+
+**顺带值得记的是那个 dump 技巧**：`find` 一个不存在的 id，panic 消息里会列出全部已注册路径。判断
+「这个元素能不能测」不用猜，一次就够。
+
 ### 22.27 Mode 设置页：一个 7 rem 的列宽，加一个空 tooltip
 
 §22.19 把这条记成「没修成」：Mode 页的标签列与控件之间空隙偏大、`Smart copy/paste` 换行，当时给
@@ -3620,6 +3644,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 最近文档的条目标题不是 AppKit 的渲染 | 上游 `File ▸ Open Recent` 的条目由 `NSDocumentController` 自己画：这个构建既读不到它写什么标题，也没有那个钩子（见 §8.9g）。SubText 用文件名，与侧栏的最近文件行一致。数量（10）与「空历史时 `Clear Menu` 置灰」两条已实测对齐。 |
 | 大纲导航找不到条目时不置灰 | 同一条理由的第二次出现（见 §8.10）：上游按 `canSelectPreviousItem` / `canSelectNextItem` 决定置灰，SubText 保持可用、在状态栏说明方向。 |
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
-| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作还没有测试：§22.25 之后 `TestWindowExt` 有 `drag_to`，缺的是分隔线自己的 `ElementId`（`resize_handle` 目前没挂），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）仍然只有跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽。 |
+| 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。§22.28 试过用 UI 测试驱动：面板没注册 `test_support()`（`find("resizable-panel", n)` 全部返回 None），分隔线由 `ResizablePanelGroup` 自绘、没有可取到的 `ElementId`；按「按下 → 左移 80 px → 抬起」在七个偏移量上各试一次，内侧元素的左边缘一动不动。要闭这条得先给手柄或面板一个 `ElementId` + `test_support()`，然后用 `TestWindowExt::drag_to`。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
 
