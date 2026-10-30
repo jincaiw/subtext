@@ -508,3 +508,51 @@ fn the_sort_sheet_answers_enter_and_escape(cx: &mut TestAppContext) {
     })
     .expect("keys");
 }
+
+/// ⌘F puts the caret in the find field.
+///
+/// The find bar is a window of its own, not a dialog, so the test has to find
+/// that window: it is the last one the app opened after the document.
+#[gpui_kit::test]
+fn opening_find_puts_the_caret_in_the_query_field(cx: &mut TestAppContext) {
+    let (document, workspace) = open_workspace_with_document(cx, "find", "alpha beta alpha\n");
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.show_find(false, window, cx);
+        });
+    })
+    .expect("open the find bar");
+    cx.run_until_parked();
+
+    let bar = cx.update(|cx| {
+        cx.windows()
+            .into_iter()
+            .find(|handle| *handle != document)
+            .expect("the find bar should be a window of its own")
+    });
+
+    cx.update_window(bar, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        let field = window
+            .try_find("find-query")
+            .expect("the find bar should be showing its query field");
+        assert!(field.visible(), "the query field should be visible");
+
+        window.input("alpha", cx);
+        assert_eq!(
+            window.find("find-query").value(),
+            Some("alpha"),
+            "typing after ⌘F should land in the query field"
+        );
+
+        // Escape closes the bar (§22.33), but that is not asserted here: the
+        // handler calls `remove_window`, and the harness neither tears down the
+        // element tree nor drops the window from `cx.windows()` when it does —
+        // a temporary probe showed the handler running and both staying put. A
+        // test that cannot see the effect would be worse than none.
+    })
+    .expect("find");
+}

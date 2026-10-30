@@ -254,6 +254,14 @@ impl Render for FindPanel {
             .p_4()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            // Escape closes the bar, as it closes a sheet (§22.30). It has to be
+            // taken on the way down: the query field holds the caret from the
+            // moment the bar opens, and would swallow the key otherwise.
+            .capture_key_down(|event: &gpui_kit::KeyDownEvent, window, _| {
+                if event.keystroke.key == "escape" {
+                    window.remove_window();
+                }
+            })
             .child(self.render_field(&query, message, FindField::Query, window, cx))
             .child(self.render_field(
                 &replacement,
@@ -1009,6 +1017,10 @@ impl FindPanel {
                 // upstream's `contentInsets` layering on top.)
                 div().w_full().h_full().pl(px(32.)).pr(px(24.)).child(
                     Input::new(&state)
+                        .id(match history {
+                            FindField::Query => "find-query",
+                            FindField::Replacement => "find-replacement",
+                        })
                         .appearance(false)
                         .w_full()
                         .h_full()
