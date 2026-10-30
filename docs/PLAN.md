@@ -3357,6 +3357,43 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
+### 22.44 跑一次测试，改一次用户的设置文件
+
+上一轮为了让拖拽测试「不污染设置」，在结尾把宽度写回原值。这一轮先问了一句：**写回本身是不是也在写？**
+是 —— 而且不止这一处：
+
+* `on_resize` 里 `workspace.settings.save()`（拖一下分隔线就落盘）；
+* `remember_find_frame`（开合查找结果时落盘）；
+* 打开文档时的最近列表。
+
+实测（本轮开始时）：`~/Library/Application Support/subtext/Settings.json` 的修改时间在一次
+`cargo test` 之后变了，`sidebar_width` / `inspector_width` 变成 `15.0` / `16.0`，而**最近文档的
+20 条全是 `/tmp/subtext-ui-tests-*`** —— 用户自己的历史被测试挤掉了。
+
+**根因**：`Settings::load()` / `save()` 都走 `resources::config_directory()`（`dirs::config_dir()`），
+而 UI 测试打开的是**真 workspace**，生命周期和真应用一模一样。
+
+**改法**（产品代码零行为变化）：
+
+* `config_directory()` 在 `ui-tests` 特性下先看一个 `OnceLock<PathBuf>` 覆盖；
+* `use_config_root(path)` 由测试 harness 在**第一次建 workspace 之前**钉住，路径是
+  `temp/subtext-ui-tests-config-<pid>` —— 每次运行一个全新目录，所以 `Settings::load()` 一定读到默认值；
+* 特性之外的构建里这两段都被 `#[cfg]` 编译掉。
+
+**守卫测试** `the_ui_harness_writes_settings_into_a_temporary_directory`：断言 `Settings::path()` 在临时
+目录下，并真切地存一次、读回来确认落在那儿。把覆盖那一句删掉，它立刻红：
+
+```
+settings must live under the temp dir during tests, not at
+/Volumes/…/Library/Application Support/subtext/Settings.json
+```
+
+**顺带删掉的东西**：拖拽测试里「读完写回」那段。有隔离之后它是多余的 —— 而且它治不了根，
+因为它做的事和污染的来源是同一个。
+
+**还没治的一点**：这只隔离了**设置**。测试打开的临时文档、面板截图的临时 HOME 仍会散在 `/tmp`，
+不过那些不影响用户。
+
 ### 22.43 分栏拖拽：前三次都错在坐标，不在 API
 
 > 本节之前是 §22.28 / §22.29 的两次失败记录，结论都**不对** —— 保住原文，把更正写在前面。

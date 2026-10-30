@@ -112,6 +112,15 @@ fn open_workspace_with_document(
     use subtext_app::{load_syntaxes, load_themes};
 
     cx.update(gpui_kit::init);
+    // Keep every settings read and write inside the test's own folder: the
+    // workspaces these tests open save `Settings.json` (a resize does it
+    // outright), and that file is the developer's own until we say otherwise.
+    // A fresh folder per run: the config directory is read by `Settings::load`,
+    // so a leftover file from the last run would decide what this one starts
+    // from.
+    subtext_app::resources::use_config_root(
+        std::env::temp_dir().join(format!("subtext-ui-tests-config-{}", std::process::id())),
+    );
 
     let dir = std::env::temp_dir().join(format!("subtext-ui-tests-{name}"));
     std::fs::create_dir_all(&dir).expect("create the test folder");
@@ -962,12 +971,6 @@ fn dragging_the_inspector_divider_resizes_the_pane(cx: &mut TestAppContext) {
 
     let (window, workspace) = open_workspace_with_document(cx, "drags", "abc");
 
-    // `Settings::load()` reads the real settings file, so the starting width is
-    // whatever a previous run left behind. Take it as it is — the assertions are
-    // about the change — and write it back at the end so the file stops moving.
-    let original =
-        workspace.read_with(cx, |workspace, _| workspace.settings.window.inspector_width);
-
     let (window_width, rem) = cx
         .update_window(window, |_, window, cx| {
             workspace.update(cx, |workspace, cx| {
@@ -1020,11 +1023,39 @@ fn dragging_the_inspector_divider_resizes_the_pane(cx: &mut TestAppContext) {
         after_width > pane_width,
         "the drag should widen the inspector in the settings ({pane_width} → {after_width})"
     );
+}
 
-    // Leave the settings file as it was found.
-    workspace.update(cx, |workspace, cx| {
-        workspace.settings.window.inspector_width = original;
-        let _ = workspace.settings.save();
-        cx.notify();
-    });
+/// A test run must not write into the user's own settings.
+///
+/// Every workspace opened here behaves like the real app: opening a document
+/// notes it in the recents, resizing a pane stores the width, quitting saves.
+/// Until the harness pinned a config root, running the suite rewrote the
+/// developer's `Settings.json` — the drag test did it by dragging a divider.
+#[gpui_kit::test]
+fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "config-root", "abc");
+
+    let path = subtext_app::settings::Settings::path();
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "settings must live under the temp dir during tests, not at {}",
+        path.display()
+    );
+
+    // And a save really lands there rather than at the pinned path only.
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.settings.window.inspector_width = 17.5;
+            workspace.settings.save().expect("save the settings");
+            cx.notify();
+        });
+        window.render_frame(cx);
+    })
+    .expect("save");
+
+    let saved = std::fs::read_to_string(&path).expect("the settings file should exist");
+    assert!(
+        saved.contains("17.5"),
+        "the saved file should hold what this test wrote"
+    );
 }

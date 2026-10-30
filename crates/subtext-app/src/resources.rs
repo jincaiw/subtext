@@ -84,8 +84,30 @@ impl Resources {
     }
 }
 
+/// A config root pinned by the UI tests, so a run cannot touch the user's files.
+///
+/// Only exists under `ui-tests`: the tests open real workspaces, and opening,
+/// resizing or quitting one writes `Settings.json` — which means a test run used
+/// to rewrite the developer's own settings. The override is compiled out of
+/// every other build, so production always reads the real directory.
+#[cfg(feature = "ui-tests")]
+static CONFIG_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Point every settings read and write at `root` for the rest of the process.
+///
+/// Called once by the UI test harness, before it builds anything that reads
+/// settings.
+#[cfg(feature = "ui-tests")]
+pub fn use_config_root(root: PathBuf) {
+    let _ = CONFIG_ROOT.set(root);
+}
+
 /// The user's settings and key-binding files.
 pub fn config_directory() -> PathBuf {
+    #[cfg(feature = "ui-tests")]
+    if let Some(root) = CONFIG_ROOT.get() {
+        return root.clone();
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("subtext")

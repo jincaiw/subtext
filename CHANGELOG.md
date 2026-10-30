@@ -6,6 +6,21 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **跑 UI 测试不再改写用户的 `Settings.json`**。测试打开的是真 workspace，而打开文档、拖动分隔线、
+  开合查找结果都会 `settings.save()` —— 一次 `cargo test` 就把开发者的设置覆盖成测试值，最近文档还会
+  被 `/tmp/subtext-ui-tests-*` 挤满。现在 `config_directory()` 在 `ui-tests` 特性下可以被覆盖，
+  测试 harness 把它钉到每次运行唯一的临时目录；其他构建里这段代码被 `#[cfg]` 编译掉，运行时行为不变。
+
+### 工程
+
+- 新增守卫测试 `the_ui_harness_writes_settings_into_a_temporary_directory`：断言 `Settings::path()`
+  位于临时目录，并写一次确认落点。删掉覆盖那一句，它立刻红在真实路径上。UI 测试 20 → 21 条。
+- 顺带删掉拖拽测试里「读完写回」的补丁：隔离之后它是多余的，而且它和污染的来源是同一个动作。
+
 ## [0.3.44] — 2026-10-30
 
 ### 工程
