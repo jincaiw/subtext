@@ -4224,7 +4224,7 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 正则速查弹层在窗口内限高滚动 | 上游的 `detachablePopover` 可以拖出窗口自由悬浮，内容完整展开；GPUI 的 overlay 无法离开窗口，弹层限高 9rem 内容滚动（§8.26）。上游尾部还有指向本地帮助的 HelpLink（`about_regex` 锚点），SubText 没有帮助系统，省略。 |
 | 高级选项的四个开关在 SubText 里是禁用的 | 上游 *Distinguish characters strictly* / *Ignore diacritical marks* / *Ignore width differences* / *Use Unicode word boundaries*（TR#29）需要 ICU 的对应能力，regex 引擎没有；开关照列、禁用 + tooltip 说明（§8.26b）。 |
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
-| 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
+| 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 入口：`workspace.rs:6881` 的 `converted` 闭包，缺值时回退到 `\u{FFFD}`（`6884`）。**下一轮从这里开始**：先把 Foundation 的替换规则找出来（单字节编码多半是 `?`，日文编码可能是 `＼`），再改 —— 只换成一个 `?` 会把另一种情况改错。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
