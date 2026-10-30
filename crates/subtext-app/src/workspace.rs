@@ -7011,11 +7011,20 @@ impl Workspace {
                 }),
                 _ => None,
             };
-            let mut head = TableHead::new().when(index == 0, |this| this.text_right());
+            // Upstream's SwiftUI `Table` compresses its columns and truncates
+            // what does not fit. `TableHead` ships a `MIN_CELL_WIDTH` floor,
+            // which is what made three columns overflow a narrow inspector and
+            // turned the panel into a two-way scroller; refining it back to
+            // zero lets the columns share the width instead.
+            let mut head = TableHead::new()
+                .min_w(px(0.))
+                .when(index == 0, |this| this.text_right());
             head = head.child(
                 div()
                     .id((id, 1000 + index))
                     .w_full()
+                    .min_w_0()
+                    .truncate()
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -7052,10 +7061,12 @@ impl Workspace {
             for (column, text) in cells.into_iter().take(columns).enumerate() {
                 let range = row.range.clone();
                 table_row = table_row.child(
-                    TableCell::new().child(
+                    TableCell::new().min_w(px(0.)).child(
                         div()
                             .id((id, index * 3 + column))
                             .w_full()
+                            .min_w_0()
+                            .truncate()
                             .cursor_pointer()
                             .when(column == 0, |this| this.text_right())
                             .when(selected, |this| {
@@ -7076,17 +7087,16 @@ impl Workspace {
             body = body.child(table_row);
         }
 
-        // The table's cells each have a minimum width, so three of them do not
-        // fit a narrow inspector. The panel scrolls sideways rather than
-        // dropping a column: a warning whose "Converted" half is unreachable is
-        // not a warning.
+        // Upstream compresses the columns rather than scrolling them: a warning
+        // whose "Converted" half is off to the side is a warning the user has to
+        // go looking for. The cells above give up their minimum width and
+        // truncate, so the three columns share whatever the inspector has.
         div()
             .id(id)
             .w_full()
             .min_w_0()
             .flex_1()
             .min_h_0()
-            .overflow_x_scroll()
             .overflow_y_scroll()
             .child(
                 Table::new()

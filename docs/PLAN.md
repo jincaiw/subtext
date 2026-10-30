@@ -3360,6 +3360,24 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
+### 22.48 警告表：压缩列宽，而不是横向滚动
+
+上游的 SwiftUI `Table` 把列压到面板宽度里、放不下的文字截断。SubText 一直是**双向滚动** ——
+三列塞不进窄检查器时向右滚，理由写在代码里：「一个 Converted 半截够不着的警告，不算警告」。
+这话对，但解法不对：上游根本不需要滚。
+
+根因是组件库的 `TableHead` / `TableCell` 各自带一个 `MIN_CELL_WIDTH` 地板
+（`table.rs:505/596`），三列的最小宽度加起来比窄检查器宽。好消息是地板在 `refine_style` 之前
+上，所以单元格自己的 `min_w(px(0.))` 能把它按回去。
+
+改法三行：表头与单元格都 `.min_w(px(0.))`，内层容器 `.min_w_0().truncate()`，外层去掉
+`overflow_x_scroll()`。列于是按 `flex_basis` 分宽度，长文本带省略号。
+
+截图（`peek-panel.sh 3`，混合换行的文档）：Inconsistent Line Endings 表两列完整落在检查器内，
+右列贴右边、不再溢出。**三列的 Incompatible Characters 表没截到** —— 那张表要先把文档编码改成
+窄编码才会出行，而改编码要点菜单，本机没有辅助功能权限。机制是同一套（表头/单元格同一处改），
+但「三列挤在一起长什么样」还是没人眼看过。
+
 ### 22.47 编码列表改成拖拽排序，去掉那对箭头
 
 上游的 `EncodingListView` 是一个 `List(selection:)`：`.onMove` 拖拽排序、`.onDeleteCommand`
@@ -4207,7 +4225,6 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | 高级选项的四个开关在 SubText 里是禁用的 | 上游 *Distinguish characters strictly* / *Ignore diacritical marks* / *Ignore width differences* / *Use Unicode word boundaries*（TR#29）需要 ICU 的对应能力，regex 引擎没有；开关照列、禁用 + tooltip 说明（§8.26b）。 |
 | 历史菜单的截断条目没有完整文本的 tooltip | 上游给每条历史加了 `.help(string)`，光标停留显示全文；`PopupMenuItem` 没有 tooltip 能力，截断条目只能显示前 64 字符。历史本身已完整存储（§8.25）。 |
 | 警告检查器的 `Converted` 列显示 WHATWG 的替换物 | encoding_rs 对有损替换写 `&#65533;`，Foundation 写 `?` / `＼`。**哪些字符不兼容两边的规则一致**，只是替换物不同。 |
-| 警告检查器的表格在窄检查器里横向滚动 | `Table` 的单元格有最小宽度，三列塞不进窄检查器。§11.4 之后表格在面板剩余高度内**双向**滚动（不再溢出到下一节），但上游的 SwiftUI `Table` 是压缩并截断列宽。 |
 | 补全的候选列表没有虚拟化 | 上游是 AppKit 的弹出列表（本身虚拟化）。SubText 用一列普通行放进 `max_h` + 滚动。**§11.9 试过 `uniform_list` 并回退**：它按首个条目的测量高度布局，在弹窗里量到的是内边距高度（4px、内容高 0），行会重叠；显式行高与自然测量两版都一样。共享前缀的词数通常很小，暂不值得改造。 |
 | 高级计数的胶囊没有 macOS 26 的玻璃效果 | 上游 `.glassEffect(in: .capsule)`。用主题的 `popover` 底色 + 描边 + 阴影，读起来是同一颗胶囊。 |
 | `unicode_tables.rs` 的生成器需要 Swift | `tools/generate_unicode_tables.swift` 从 Swift 标准库读 `age` / `isDeprecated` / `isVariationSelector` —— 那正是上游读的那份数据，比手抄 `DerivedAge.txt` 可靠。代价是**重新生成只能在有 Swift 的机器上做**。生成的文件已入库，所以构建不需要 Swift；`cargo test` 里那条守卫负责发现「表与代码脱节」。 |
