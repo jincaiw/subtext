@@ -6,10 +6,15 @@
 //! `keyEquivalent`, so the storyboard is the only source of truth.
 //! Reading the same table keeps the two shortcut sets identical.
 //!
-//! `command` is written as GPUI's `secondary`, which resolves to Command on
-//! macOS and Control on Windows and Linux. That is the one deliberate
-//! divergence: a Command-only shortcut would be unreachable on the other two
-//! platforms, and CotEditor has no Windows or Linux build to copy from.
+//! `command` is written as `cmd-` on macOS and `ctrl-` on Windows and
+//! Linux, chosen by `cfg!` at compile time. That is the one deliberate
+//! divergence: a Command-only shortcut would be unreachable on the other
+//! two platforms, and CotEditor has no Windows or Linux build to copy
+//! from. It is not written as GPUI's platform-neutral `secondary`, because
+//! `KeyBinding::new` parses with `Keystroke::parse`, which refuses to
+//! resolve `secondary` without an operating system and panics on the
+//! refusal. `SHORTCUTS` keeps the neutral spelling; nothing there reaches
+//! `KeyBinding::new`.
 //!
 //! Cocoa matches a shortcut on the *character* a key produces, so CotEditor's
 //! `Cmd+:` is really `Cmd+Shift+;` on a US layout; that translation is done
@@ -21,61 +26,100 @@ use gpui_kit::KeyBinding;
 
 use crate::actions;
 
+/// A keystroke with `command` written the way the host spells it.
+///
+/// `secondary` is GPUI's platform-neutral name for that modifier, and it
+/// would be the right thing to write — except that since gpui-pre 0.3.10
+/// `Keystroke::parse` refuses to resolve it without an operating system,
+/// and `KeyBinding::new` turns that refusal into a panic at launch. The
+/// substitution `secondary` would have made is made here instead, at
+/// compile time, so the table below still reads like the storyboard it
+/// came from. `$mods` is everything before the key — `"alt-"` for ⌥⌘H.
+macro_rules! secondary {
+    ($mods:literal, $key:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!($mods, "cmd-", $key)
+        } else {
+            concat!($mods, "ctrl-", $key)
+        }
+    };
+}
+
 /// Every default shortcut, in CotEditor's menu order.
 pub fn default_bindings() -> Vec<KeyBinding> {
     vec![
         // CotEditor > Settings…
-        KeyBinding::new("secondary-,", actions::app::ShowSettingsWindow, None),
+        KeyBinding::new(secondary!("", ","), actions::app::ShowSettingsWindow, None),
         // CotEditor > Hide CotEditor
-        KeyBinding::new("secondary-h", actions::app::Hide, None),
+        KeyBinding::new(secondary!("", "h"), actions::app::Hide, None),
         // CotEditor > Hide Others
-        KeyBinding::new("alt-secondary-h", actions::app::HideOtherApplications, None),
+        KeyBinding::new(
+            secondary!("alt-", "h"),
+            actions::app::HideOtherApplications,
+            None,
+        ),
         // CotEditor > Quit CotEditor
-        KeyBinding::new("secondary-q", actions::app::Terminate, None),
+        KeyBinding::new(secondary!("", "q"), actions::app::Terminate, None),
         // File > New
-        KeyBinding::new("secondary-n", actions::file::NewDocument, None),
+        KeyBinding::new(secondary!("", "n"), actions::file::NewDocument, None),
         // File > New Window
         KeyBinding::new(
-            "shift-secondary-n",
+            secondary!("shift-", "n"),
             actions::file::NewDocumentAsWindow,
             None,
         ),
         // File > New Tab
-        KeyBinding::new("secondary-t", actions::file::NewDocumentAsTab, None),
+        KeyBinding::new(secondary!("", "t"), actions::file::NewDocumentAsTab, None),
         // File > Open…
-        KeyBinding::new("secondary-o", actions::file::OpenDocument, None),
+        KeyBinding::new(secondary!("", "o"), actions::file::OpenDocument, None),
         // File > Close
-        KeyBinding::new("secondary-w", actions::file::PerformClose, None),
+        KeyBinding::new(secondary!("", "w"), actions::file::PerformClose, None),
         // File > Save
-        KeyBinding::new("secondary-s", actions::file::SaveDocument, None),
+        KeyBinding::new(secondary!("", "s"), actions::file::SaveDocument, None),
         // File > Save As…
-        KeyBinding::new("shift-secondary-s", actions::file::SaveDocumentAs, None),
+        KeyBinding::new(
+            secondary!("shift-", "s"),
+            actions::file::SaveDocumentAs,
+            None,
+        ),
         // File > Page Setup…
-        KeyBinding::new("shift-secondary-p", actions::file::RunPageLayout, None),
+        KeyBinding::new(
+            secondary!("shift-", "p"),
+            actions::file::RunPageLayout,
+            None,
+        ),
         // File > Print…
-        KeyBinding::new("secondary-p", actions::file::PrintDocument, None),
+        KeyBinding::new(secondary!("", "p"), actions::file::PrintDocument, None),
         // Edit > Undo
-        KeyBinding::new("secondary-z", actions::edit::Undo, None),
+        KeyBinding::new(secondary!("", "z"), actions::edit::Undo, None),
         // Edit > Redo
-        KeyBinding::new("shift-secondary-z", actions::edit::Redo, None),
+        KeyBinding::new(secondary!("shift-", "z"), actions::edit::Redo, None),
         // Edit > Cut
-        KeyBinding::new("secondary-x", actions::edit::Cut, None),
+        KeyBinding::new(secondary!("", "x"), actions::edit::Cut, None),
         // Edit > Copy
-        KeyBinding::new("secondary-c", actions::edit::Copy, None),
+        KeyBinding::new(secondary!("", "c"), actions::edit::Copy, None),
         // Edit > Copy as Rich Text
-        KeyBinding::new("shift-secondary-c", actions::edit::CopyWithStyle, None),
+        KeyBinding::new(
+            secondary!("shift-", "c"),
+            actions::edit::CopyWithStyle,
+            None,
+        ),
         // Edit > Paste
-        KeyBinding::new("secondary-v", actions::edit::Paste, None),
+        KeyBinding::new(secondary!("", "v"), actions::edit::Paste, None),
         // Edit > Paste Exactly
-        KeyBinding::new("alt-secondary-v", actions::edit::PasteAsIs, None),
+        KeyBinding::new(secondary!("alt-", "v"), actions::edit::PasteAsIs, None),
         // Edit > Delete
-        KeyBinding::new("secondary-backspace", actions::edit::Delete, None),
+        KeyBinding::new(secondary!("", "backspace"), actions::edit::Delete, None),
         // Edit > Select > Select All
-        KeyBinding::new("secondary-a", actions::edit::SelectAll, None),
+        KeyBinding::new(secondary!("", "a"), actions::edit::SelectAll, None),
         // Edit > Select > Select Line
-        KeyBinding::new("shift-secondary-a", actions::edit::SelectParagraph, None),
+        KeyBinding::new(
+            secondary!("shift-", "a"),
+            actions::edit::SelectParagraph,
+            None,
+        ),
         // Edit > Select > Select Word
-        KeyBinding::new("secondary-d", actions::edit::SelectWord, None),
+        KeyBinding::new(secondary!("", "d"), actions::edit::SelectWord, None),
         // Edit > Select > Select Column Up
         KeyBinding::new("ctrl-shift-up", actions::edit::SelectColumnUp, None),
         // Edit > Select > Select Column Down
@@ -85,131 +129,187 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         // Edit > Complete
         KeyBinding::new("alt-escape", actions::edit::Complete, None),
         // Edit > Insert Backslash
-        KeyBinding::new("secondary-¥", actions::edit::InputBackSlash, None),
+        KeyBinding::new(secondary!("", "¥"), actions::edit::InputBackSlash, None),
         // Edit > Insert Yen Mark
-        KeyBinding::new("secondary-y", actions::edit::InputYenMark, None),
+        KeyBinding::new(secondary!("", "y"), actions::edit::InputYenMark, None),
         // Edit > Spelling and Grammar > Show Spelling and Grammar
-        KeyBinding::new("shift-secondary-;", actions::spelling::ShowGuessPanel, None),
+        KeyBinding::new(
+            secondary!("shift-", ";"),
+            actions::spelling::ShowGuessPanel,
+            None,
+        ),
         // Edit > Spelling and Grammar > Check Document Now
-        KeyBinding::new("secondary-;", actions::spelling::CheckSpelling, None),
+        KeyBinding::new(secondary!("", ";"), actions::spelling::CheckSpelling, None),
         // Format > Reset Syntax Analysis
-        KeyBinding::new("alt-secondary-r", actions::format::RecolorAll, None),
+        KeyBinding::new(secondary!("alt-", "r"), actions::format::RecolorAll, None),
         // Format > Font > Bigger
-        KeyBinding::new("shift-secondary-=", actions::format::BiggerFont, None),
+        KeyBinding::new(secondary!("shift-", "="), actions::format::BiggerFont, None),
         // Format > Font > Smaller
-        KeyBinding::new("secondary--", actions::format::SmallerFont, None),
+        KeyBinding::new(secondary!("", "-"), actions::format::SmallerFont, None),
         // Format > Font > Reset to Default
-        KeyBinding::new("secondary-0", actions::format::ResetFont, None),
+        KeyBinding::new(secondary!("", "0"), actions::format::ResetFont, None),
         // View > Show Tab Bar
-        KeyBinding::new("shift-secondary-t", actions::view::ToggleTabBar, None),
+        KeyBinding::new(secondary!("shift-", "t"), actions::view::ToggleTabBar, None),
         // View > Hide Toolbar
-        KeyBinding::new("alt-secondary-t", actions::view::ToggleToolbarShown, None),
+        KeyBinding::new(
+            secondary!("alt-", "t"),
+            actions::view::ToggleToolbarShown,
+            None,
+        ),
         // View > Show Quick Actions…
-        KeyBinding::new("secondary-k", actions::view::ShowQuickActions, None),
+        KeyBinding::new(secondary!("", "k"), actions::view::ShowQuickActions, None),
         // View > Sidebar > File Browser
-        KeyBinding::new("ctrl-secondary-1", actions::view::ShowFileBrowser, None),
+        KeyBinding::new(
+            secondary!("ctrl-", "1"),
+            actions::view::ShowFileBrowser,
+            None,
+        ),
         // View > Sidebar > Folder Find
-        KeyBinding::new("ctrl-secondary-2", actions::view::ShowFolderFinder, None),
+        KeyBinding::new(
+            secondary!("ctrl-", "2"),
+            actions::view::ShowFolderFinder,
+            None,
+        ),
         // View > Sidebar > Show Sidebar
-        KeyBinding::new("ctrl-secondary-s", actions::view::ToggleSidebar, None),
+        KeyBinding::new(secondary!("ctrl-", "s"), actions::view::ToggleSidebar, None),
         // View > Inspector > Show Inspector
-        KeyBinding::new("secondary-i", actions::view::ToggleInspector, None),
+        KeyBinding::new(secondary!("", "i"), actions::view::ToggleInspector, None),
         // View > Move Focus to Next Editor
         KeyBinding::new("ctrl-`", actions::view::FocusNextEditor, None),
         // View > Move Focus to Previous Editor
         KeyBinding::new("ctrl-shift-`", actions::view::FocusPreviousEditor, None),
         // View > Enter Full Screen
-        KeyBinding::new("ctrl-secondary-f", actions::view::ToggleFullScreen, None),
+        KeyBinding::new(
+            secondary!("ctrl-", "f"),
+            actions::view::ToggleFullScreen,
+            None,
+        ),
         // Text > Comment > Toggle Comment
-        KeyBinding::new("secondary-/", actions::text::ToggleComment, None),
+        KeyBinding::new(secondary!("", "/"), actions::text::ToggleComment, None),
         // Text > Indentation > Shift Right
-        KeyBinding::new("secondary-]", actions::text::ShiftRight, None),
+        KeyBinding::new(secondary!("", "]"), actions::text::ShiftRight, None),
         // Text > Indentation > Shift Left
-        KeyBinding::new("secondary-[", actions::text::ShiftLeft, None),
+        KeyBinding::new(secondary!("", "["), actions::text::ShiftLeft, None),
         // Text > Surround Selection With > Single Quotes
         KeyBinding::new(
-            "secondary-'",
+            secondary!("", "'"),
             actions::text::SurroundSelectionWithSingleQuotes,
             None,
         ),
         // Text > Surround Selection With > Double Quotes
         KeyBinding::new(
-            "shift-secondary-'",
+            secondary!("shift-", "'"),
             actions::text::SurroundSelectionWithDoubleQuotes,
             None,
         ),
         // Text > Surround Selection With > Parentheses
         KeyBinding::new(
-            "shift-secondary-9",
+            secondary!("shift-", "9"),
             actions::text::SurroundSelectionWithParentheses,
             None,
         ),
         // Text > Surround Selection With > Custom…
-        KeyBinding::new("shift-secondary-l", actions::text::SurroundSelection, None),
+        KeyBinding::new(
+            secondary!("shift-", "l"),
+            actions::text::SurroundSelection,
+            None,
+        ),
         // Text > Lines > Move Up
-        KeyBinding::new("ctrl-secondary-up", actions::text::MoveLineUp, None),
+        KeyBinding::new(secondary!("ctrl-", "up"), actions::text::MoveLineUp, None),
         // Text > Lines > Move Down
-        KeyBinding::new("ctrl-secondary-down", actions::text::MoveLineDown, None),
+        KeyBinding::new(
+            secondary!("ctrl-", "down"),
+            actions::text::MoveLineDown,
+            None,
+        ),
         // Text > Lines > Duplicate Line
-        KeyBinding::new("shift-secondary-d", actions::text::DuplicateLine, None),
+        KeyBinding::new(
+            secondary!("shift-", "d"),
+            actions::text::DuplicateLine,
+            None,
+        ),
         // Text > Lines > Delete Line
-        KeyBinding::new("shift-secondary-backspace", actions::text::DeleteLine, None),
+        KeyBinding::new(
+            secondary!("shift-", "backspace"),
+            actions::text::DeleteLine,
+            None,
+        ),
         // Text > Lines > Join Lines
-        KeyBinding::new("shift-secondary-j", actions::text::JoinLines, None),
+        KeyBinding::new(secondary!("shift-", "j"), actions::text::JoinLines, None),
         // Text > Inspect Character
-        KeyBinding::new("alt-secondary-i", actions::text::ShowSelectionInfo, None),
+        KeyBinding::new(
+            secondary!("alt-", "i"),
+            actions::text::ShowSelectionInfo,
+            None,
+        ),
         // Text > Edit Color Code…
-        KeyBinding::new("ctrl-secondary-h", actions::text::EditColorCode, None),
+        KeyBinding::new(secondary!("ctrl-", "h"), actions::text::EditColorCode, None),
         // Find > Find…
-        KeyBinding::new("secondary-f", actions::find::PerformTextFinderAction, None),
+        KeyBinding::new(
+            secondary!("", "f"),
+            actions::find::PerformTextFinderAction,
+            None,
+        ),
         // Find > Find Next
-        KeyBinding::new("secondary-g", actions::find::FindNext, None),
+        KeyBinding::new(secondary!("", "g"), actions::find::FindNext, None),
         // Find > Find Previous
-        KeyBinding::new("shift-secondary-g", actions::find::FindPrevious, None),
+        KeyBinding::new(secondary!("shift-", "g"), actions::find::FindPrevious, None),
         // Find > Find All
-        KeyBinding::new("shift-secondary-f", actions::find::FindAll, None),
+        KeyBinding::new(secondary!("shift-", "f"), actions::find::FindAll, None),
         // Find > Use Selection for Find
-        KeyBinding::new("secondary-e", actions::find::UseSelectionForFind, None),
+        KeyBinding::new(
+            secondary!("", "e"),
+            actions::find::UseSelectionForFind,
+            None,
+        ),
         // Find > Use Selection for Replace
         KeyBinding::new(
-            "shift-secondary-e",
+            secondary!("shift-", "e"),
             actions::find::UseSelectionForReplace,
             None,
         ),
         // Find > Jump to Selection
         KeyBinding::new(
-            "secondary-j",
+            secondary!("", "j"),
             actions::find::CenterSelectionInVisibleArea,
             None,
         ),
         // Find > Replace and Find Next
-        KeyBinding::new("alt-secondary-g", actions::find::ReplaceAndFindNext, None),
+        KeyBinding::new(
+            secondary!("alt-", "g"),
+            actions::find::ReplaceAndFindNext,
+            None,
+        ),
         // Find > Highlight All
-        KeyBinding::new("shift-secondary-h", actions::find::HighlightAll, None),
+        KeyBinding::new(secondary!("shift-", "h"), actions::find::HighlightAll, None),
         // Find > Remove Highlights
         KeyBinding::new(
-            "ctrl-shift-secondary-h",
+            secondary!("ctrl-shift-", "h"),
             actions::find::RemoveHighlights,
             None,
         ),
         // Find > Select Previous Outline Item
         KeyBinding::new(
-            "alt-secondary-up",
+            secondary!("alt-", "up"),
             actions::find::SelectPrevItemOfOutlineMenu,
             None,
         ),
         // Find > Select Next Outline Item
         KeyBinding::new(
-            "alt-secondary-down",
+            secondary!("alt-", "down"),
             actions::find::SelectNextItemOfOutlineMenu,
             None,
         ),
         // Find > Go to Line…
-        KeyBinding::new("secondary-l", actions::find::GotoLocation, None),
+        KeyBinding::new(secondary!("", "l"), actions::find::GotoLocation, None),
         // Window > Minimize
-        KeyBinding::new("secondary-m", actions::window::PerformMiniaturize, None),
+        KeyBinding::new(
+            secondary!("", "m"),
+            actions::window::PerformMiniaturize,
+            None,
+        ),
         // Help > CotEditor Help
-        KeyBinding::new("shift-secondary-/", actions::help::ShowHelp, None),
+        KeyBinding::new(secondary!("shift-", "/"), actions::help::ShowHelp, None),
     ]
 }
 
@@ -703,7 +803,7 @@ mod tests {
     #[test]
     fn the_table_holds_the_keystrokes_the_key_map_binds() {
         for (binding, row) in default_bindings().iter().zip(SHORTCUTS) {
-            let typed = gpui_kit::Keystroke::parse(row.4).expect(row.4);
+            let typed = gpui_kit::Keystroke::parse_with_os(row.4, crate::host_os()).expect(row.4);
             assert_eq!(
                 binding.match_keystrokes(&[typed]),
                 Some(false),

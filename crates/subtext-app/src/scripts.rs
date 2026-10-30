@@ -31,7 +31,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use gpui_kit::{KeyBinding, Menu, MenuItem};
+use gpui_kit::{App, KeyBinding, Menu, MenuItem};
 
 use subtext_core::scripts::{Item, Launch, Script};
 
@@ -90,22 +90,31 @@ fn entry(item: &Item) -> MenuItem {
 /// A script must not take a key ⌘S or ⌘F already answers to, for the same reason
 /// a snippet must not: the built-in commands are what the user expects those
 /// keys to do, and the settings file can be edited by hand.
+///
+/// The keystrokes come from files on disk, so `KeyBinding::new` cannot take
+/// them — it only accepts literals since gpui-pre 0.3.10. `KeyBinding::load` is
+/// the dynamic equivalent and needs an `App` for the host OS.
 pub(crate) fn bindings(
     keymap: &gpui_kit::Keymap,
     items: &[Item],
     scope: Option<&str>,
+    cx: &App,
 ) -> Vec<KeyBinding> {
     subtext_core::scripts::bindings(items, scope)
         .into_iter()
         .filter(|(_, keystroke)| crate::snippets::free(keymap, keystroke))
-        .map(|(path, keystroke)| {
-            KeyBinding::new(
+        .filter_map(|(path, keystroke)| {
+            KeyBinding::load(
                 &keystroke,
-                actions::script::RunScript {
+                Box::new(actions::script::RunScript {
                     path: path.to_string_lossy().into_owned(),
-                },
+                }),
                 None,
+                false,
+                None,
+                cx,
             )
+            .ok()
         })
         .collect()
 }

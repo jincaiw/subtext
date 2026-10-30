@@ -19,7 +19,7 @@
 //! hand can still hold one, so [`bindings`] drops it here as well: a snippet must
 //! never take a key that ⌘S or ⌘F already answers to.
 
-use gpui_kit::{KeyBinding, Keystroke, MenuItem};
+use gpui_kit::{App, KeyBinding, Keystroke, MenuItem};
 
 use subtext_core::Sections;
 use subtext_core::snippets::Snippet;
@@ -27,14 +27,45 @@ use subtext_core::snippets::Snippet;
 use crate::actions;
 
 /// The snippet bindings to add on top of `keymap`'s own.
-pub(crate) fn bindings(keymap: &gpui_kit::Keymap, sections: &Sections) -> Vec<KeyBinding> {
+///
+/// The keystrokes come from the settings file, so they are not `&'static str`
+/// and `KeyBinding::new` cannot take them: since gpui-pre 0.3.10 that
+/// constructor only accepts literals. `KeyBinding::load` is the dynamic
+/// equivalent, and it needs an `App` to read the host OS from — which is why
+/// this takes one. A keystroke `load` still refuses is dropped rather than
+/// taking the launch down; [`offered`] is what guarantees that cannot happen
+/// for anything but a keystroke the keymap itself cannot read.
+pub(crate) fn bindings(
+    keymap: &gpui_kit::Keymap,
+    sections: &Sections,
+    cx: &App,
+) -> Vec<KeyBinding> {
+    offered(keymap, sections)
+        .into_iter()
+        .filter_map(|(id, keystroke)| {
+            KeyBinding::load(
+                &keystroke,
+                Box::new(actions::snippet::InsertSnippet { id }),
+                None,
+                false,
+                None,
+                cx,
+            )
+            .ok()
+        })
+        .collect()
+}
+
+/// The snippets whose shortcut is free, as `(id, keystroke)` in settings order.
+///
+/// Split out from [`bindings`] because this half is the part worth testing and
+/// it needs no `App`: the rule "a shortcut a built-in already answers to is not
+/// bound" lives here.
+pub(crate) fn offered(keymap: &gpui_kit::Keymap, sections: &Sections) -> Vec<(u64, String)> {
     sections
         .bindings()
         .into_iter()
         .filter(|(_, keystroke)| free(keymap, keystroke))
-        .map(|(id, keystroke)| {
-            KeyBinding::new(&keystroke, actions::snippet::InsertSnippet { id }, None)
-        })
         .collect()
 }
 
@@ -42,15 +73,15 @@ pub(crate) fn bindings(keymap: &gpui_kit::Keymap, sections: &Sections) -> Vec<Ke
 ///
 /// `KeyBinding::new` panics on a keystroke GPUI cannot read, so the parse is
 /// also what keeps a hand-written shortcut in the settings file from taking the
-/// application down at launch. `Keystroke::parse` is not strict enough on its
-/// own: `""` and `"secondary-"` both come back with no key at all, and a
+/// application down at launch. `Keystroke::parse_with_os` is not strict enough
+/// on its own: `""` and `"secondary-"` both come back with no key at all, and a
 /// binding on one of those would never match anything.
 ///
 /// Shared with [`crate::scripts`], which has to ask the same question about the
 /// keys a user's script files name: a script must not take ⌘S any more than a
 /// snippet may.
 pub(crate) fn free(keymap: &gpui_kit::Keymap, keystroke: &str) -> bool {
-    Keystroke::parse(keystroke).is_ok_and(|keystroke| {
+    Keystroke::parse_with_os(keystroke, crate::host_os()).is_ok_and(|keystroke| {
         !keystroke.key.is_empty() && keymap.all_bindings_for_input(&[keystroke]).is_empty()
     })
 }
@@ -136,30 +167,20 @@ mod tests {
 
     /// Which snippets got a binding, and the keystroke each one answers.
     ///
-    /// The match is asserted rather than assumed: a binding whose keystroke the
-    /// keymap cannot resolve would be a binding that never fires.
+    /// The match is asserted rather than assumed: a keystroke the keymap cannot
+    /// resolve would be a binding that never fires. The assertion is made
+    /// against `offered`'s own answer rather than against a `KeyBinding`,
+    /// because building one now needs an `App` — see `bindings`.
     fn bound(sections: &Sections) -> Vec<(u64, String)> {
         let keymap = keymap_of_defaults();
-        bindings(&keymap, sections)
+        offered(&keymap, sections)
             .into_iter()
-            .map(|binding| {
-                let id = binding
-                    .action()
-                    .as_any()
-                    .downcast_ref::<actions::snippet::InsertSnippet>()
-                    .expect("a snippet binding runs a snippet")
-                    .id;
-                let keystroke = sections
-                    .bindings()
-                    .into_iter()
-                    .find(|(bound, _)| *bound == id)
-                    .expect("the snippet was bound without being offered")
-                    .1;
-                let typed = gpui_kit::Keystroke::parse(&keystroke).unwrap();
-                assert_eq!(
-                    binding.match_keystrokes(&[typed]),
-                    Some(false),
-                    "{keystroke} does not match the binding it was made for"
+            .map(|(id, keystroke)| {
+                let typed = gpui_kit::Keystroke::parse_with_os(&keystroke, crate::host_os())
+                    .expect("a bound keystroke has to parse");
+                assert!(
+                    keymap.all_bindings_for_input(&[typed]).is_empty(),
+                    "{keystroke} is offered although the keymap already answers to it"
                 );
                 (id, keystroke)
             })

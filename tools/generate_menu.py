@@ -124,6 +124,14 @@ KEY_GLYPHS = {
 # is concerned — it is a key named `control` followed by something else, and
 # `KeyBinding::new` panics on it. `tests::every_binding_parses` below is what
 # keeps that from happening again.
+#
+# `secondary` is deliberately *not* used for `command`, even though it is the
+# platform-neutral spelling: since gpui-pre 0.3.10, `Keystroke::parse` — which
+# is what `KeyBinding::new` calls — refuses to resolve it without an operating
+# system, and `KeyBinding::new` turns that refusal into a panic at launch. The
+# bindings are written `cmd-` on macOS and `ctrl-` elsewhere instead, chosen at
+# compile time by `cfg!`. `secondary` survives only in `SHORTCUTS`, where it is
+# parsed by `Keystroke::parse_with_os` and never reaches `KeyBinding::new`.
 MODIFIERS = {
     "control": ("ctrl", "⌃"),
     "option": ("alt", "⌥"),
@@ -231,12 +239,16 @@ def physical_key(character: str) -> tuple[str, bool]:
     return character, False
 
 
-def binding_string(mods: list[str], character: str) -> str:
+def binding_string(mods: list[str], character: str, secondary: str = "secondary") -> str:
     key, implied_shift = physical_key(character)
     wanted = set(mods)
     if implied_shift:
         wanted.add("shift")
-    parts = [MODIFIERS[name][0] for name in GPUI_ORDER if name in wanted]
+    parts = [
+        secondary if name == "command" else MODIFIERS[name][0]
+        for name in GPUI_ORDER
+        if name in wanted
+    ]
     parts.append(key)
     return "-".join(parts)
 
@@ -603,10 +615,15 @@ class Renderer:
             "//! `keyEquivalent`, so the storyboard is the only source of truth.",
             "//! Reading the same table keeps the two shortcut sets identical.",
             "//!",
-            "//! `command` is written as GPUI's `secondary`, which resolves to Command on",
-            "//! macOS and Control on Windows and Linux. That is the one deliberate",
-            "//! divergence: a Command-only shortcut would be unreachable on the other two",
-            "//! platforms, and CotEditor has no Windows or Linux build to copy from.",
+            "//! `command` is written as `cmd-` on macOS and `ctrl-` on Windows and",
+            "//! Linux, chosen by `cfg!` at compile time. That is the one deliberate",
+            "//! divergence: a Command-only shortcut would be unreachable on the other",
+            "//! two platforms, and CotEditor has no Windows or Linux build to copy",
+            "//! from. It is not written as GPUI's platform-neutral `secondary`, because",
+            "//! `KeyBinding::new` parses with `Keystroke::parse`, which refuses to",
+            "//! resolve `secondary` without an operating system and panics on the",
+            "//! refusal. `SHORTCUTS` keeps the neutral spelling; nothing there reaches",
+            "//! `KeyBinding::new`.",
             "//!",
             "//! Cocoa matches a shortcut on the *character* a key produces, so CotEditor's",
             "//! `Cmd+:` is really `Cmd+Shift+;` on a US layout; that translation is done",
@@ -617,6 +634,25 @@ class Renderer:
             "use gpui_kit::KeyBinding;",
             "",
             "use crate::actions;",
+            "",
+            "/// A keystroke with `command` written the way the host spells it.",
+            "///",
+            "/// `secondary` is GPUI's platform-neutral name for that modifier, and it",
+            "/// would be the right thing to write — except that since gpui-pre 0.3.10",
+            "/// `Keystroke::parse` refuses to resolve it without an operating system,",
+            "/// and `KeyBinding::new` turns that refusal into a panic at launch. The",
+            "/// substitution `secondary` would have made is made here instead, at",
+            "/// compile time, so the table below still reads like the storyboard it",
+            "/// came from. `$mods` is everything before the key — `\"alt-\"` for ⌥⌘H.",
+            "macro_rules! secondary {",
+            "    ($mods:literal, $key:literal) => {",
+            "        if cfg!(target_os = \"macos\") {",
+            "            concat!($mods, \"cmd-\", $key)",
+            "        } else {",
+            "            concat!($mods, \"ctrl-\", $key)",
+            "        }",
+            "    };",
+            "}",
             "",
             "/// Every default shortcut, in CotEditor's menu order.",
             "pub fn default_bindings() -> Vec<KeyBinding> {",
@@ -640,8 +676,16 @@ class Renderer:
             else:
                 seen[binding] = label
             lines.append(f"    // {label}")
+            mac = binding_string(entry["mods"], entry["key"], "cmd")
+            other = binding_string(entry["mods"], entry["key"], "ctrl")
+            if mac == other:
+                # No `command` in this one: nothing to resolve, so no macro.
+                keystroke = rust_string(mac)
+            else:
+                prefix, key = mac.split("cmd-")
+                keystroke = f"secondary!({rust_string(prefix)}, {rust_string(key)})"
             lines.append(
-                f"    KeyBinding::new({rust_string(binding)}, "
+                f"    KeyBinding::new({keystroke}, "
                 f"actions::{namespace}::{name}, None),"
             )
 
@@ -730,7 +774,8 @@ class Renderer:
         lines.append("    #[test]")
         lines.append("    fn the_table_holds_the_keystrokes_the_key_map_binds() {")
         lines.append("        for (binding, row) in default_bindings().iter().zip(SHORTCUTS) {")
-        lines.append("            let typed = gpui_kit::Keystroke::parse(row.4).expect(row.4);")
+        lines.append("            let typed = gpui_kit::Keystroke::parse_with_os(row.4, crate::host_os())")
+        lines.append("                .expect(row.4);")
         lines.append("            assert_eq!(")
         lines.append("                binding.match_keystrokes(&[typed]),")
         lines.append("                Some(false),")

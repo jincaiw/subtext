@@ -1,0 +1,7 @@
+[toolchain]
+# Pinned rather than "stable": gpui-pre 0.3.10 (which gpui-kit 0.8.1 requires)
+# calls `Option::map_or_default`, and that was still unstable on 1.96. It is a
+# build-time dependency on the compiler, not a style choice, so the version that
+# is known to build the tree belongs in the tree.
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

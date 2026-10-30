@@ -6,6 +6,29 @@
 
 ---
 
+## [Unreleased]
+
+### 工程
+
+- **UI 框架升到 gpui-kit 0.8.1**（底层 gpui-pre 0.3.9 → 0.3.10）。收益都落在编辑器本体上：
+  tab 现在按 tab stop 测量、折行与绘制（#3622），横向滚动范围跟着排好的文本宽度走；
+  单行视口的光标裁切、reflow 之后的光标可见性、垂直滚动 clamp 一并修掉（#3583 等）；
+  编辑器可以自己画滚动条（#3644）；获得焦点的控件会请外层容器把它滚进视野（#3625）。
+  逐条评估与三轮实测见 `docs/UPGRADE-GPUI-0.8.md`。
+- **工具链钉到 1.99.1**（新增 `rust-toolchain.toml`）。gpui-pre 0.3.10 用了
+  `Option::map_or_default`，1.96 上还是 unstable —— 不钉版本的话，「能不能编译」
+  取决于跑 CI 那天 stable 是哪一版，而这件事不该由日期决定。
+- **键位不再写 `secondary`**。0.3.10 的 `Keystroke::parse` 拒绝在没有操作系统时解析
+  `secondary`，而 `KeyBinding::new` 把这次拒绝变成 `.unwrap()` 的 panic：编译期一声不响，
+  启动即死。生成器改成 `secondary!` 宏，在编译期拼出 `cmd-`（macOS）或 `ctrl-`（其余），
+  表里的写法仍然和 storyboard 一样。设置文件与脚本文件里的键位没有字面量可用，改走
+  `KeyBinding::load(…, cx)`，`snippets::bindings` / `scripts::bindings` 因此各多收一个 `App`。
+- `snippets::offered` 从 `bindings` 里拆出来：过滤规则是值得测的那一半，而它不需要 `App`；
+  `bound` 测试改为直接断言 `offered` 的答案，不再借一个 `KeyBinding` 兜一圈。
+- 两条行为变更需要真机确认（`cargo test` 覆盖不到）：0.8.0 起 macOS 的滚动默认 bounce
+  （NSScrollView 手感）；嵌套滚动不再串联，最内层吃掉整个手势，到末端也不外溢。
+  不接受的容器可以加 `.scroll_bounce(false)`。
+
 ## [0.3.45] — 2026-10-30
 
 ### 修复

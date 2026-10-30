@@ -27,7 +27,7 @@ subtext-theme = { path = "crates/subtext-theme" }
 # `subtext-syntax`), which is what makes the token colours match CotEditor
 # exactly. GPUI Kit supplies the editor widget and the `InputHighlighter`
 # seam we plug into.
-gpui-kit = { version = "0.7.3", default-features = true }
+gpui-kit = { version = "0.8.1", default-features = true }
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -67,6 +67,23 @@ use workspace::Workspace;
 
 pub use workspace::{load_syntaxes, load_themes};
 
+/// The operating system GPUI thinks this build runs on.
+///
+/// `Keystroke::parse_with_os` needs one to resolve `secondary-`, and the two
+/// places that ask — the Snippets pane's shortcut field and the key map's own
+/// tests — have no `App` to read it from. The answer is the same `cfg!` the key
+/// map is generated with, so the two cannot disagree about what `secondary`
+/// means.
+pub(crate) fn host_os() -> gpui_kit::OperatingSystem {
+    if cfg!(target_os = "macos") {
+        gpui_kit::OperatingSystem::Mac
+    } else if cfg!(target_os = "windows") {
+        gpui_kit::OperatingSystem::Windows
+    } else {
+        gpui_kit::OperatingSystem::Linux
+    }
+}
+
 /// Start the application.
 ///
 /// Files named on the command line are opened in the first window, which is

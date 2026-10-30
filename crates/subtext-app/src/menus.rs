@@ -297,11 +297,12 @@ pub fn install(cx: &mut App, state: &MenuState) {
     let added = {
         let keymap = cx.key_bindings();
         let keymap = keymap.borrow();
-        let mut added = snippets::bindings(&keymap, &Sections::of(&state.snippets, scope(state)));
+        let mut added =
+            snippets::bindings(&keymap, &Sections::of(&state.snippets, scope(state)), cx);
         // After the snippets, so that of the two a snippet keeps a key they
         // both want: it is the older of the two features, and its list is the
         // one the user can see and edit.
-        added.extend(scripts::bindings(&keymap, &state.scripts, scope(state)));
+        added.extend(scripts::bindings(&keymap, &state.scripts, scope(state), cx));
         added
     };
 

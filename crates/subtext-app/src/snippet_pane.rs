@@ -215,7 +215,7 @@ pub fn header(labels: impl IntoIterator<Item = (&'static str, f32)>, cx: &App) -
 /// writes its modifiers in the order GPUI documents them and a [`Shortcut`]
 /// writes its own in Cocoa's order, and only the parsed form is order-free.
 fn taken_by(shortcut: Shortcut) -> Option<&'static str> {
-    let typed = Keystroke::parse(&shortcut.keystroke()).ok()?;
+    let typed = Keystroke::parse_with_os(&shortcut.keystroke(), crate::host_os()).ok()?;
     let typed = std::slice::from_ref(&typed);
     keymap::default_bindings()
         .into_iter()
@@ -880,8 +880,8 @@ mod tests {
 
     // ---- shortcuts -------------------------------------------------------
 
-    fn key(text: &str) -> Keystroke {
-        Keystroke::parse(text).expect(text)
+    fn key(text: &'static str) -> Keystroke {
+        Keystroke::parse_with_os(text, crate::host_os()).expect(text)
     }
 
     #[test]
