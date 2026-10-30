@@ -3,10 +3,11 @@
 #
 #   tools/peek-overlay.sh <step> [output.png]
 #
-# `screencapture -l <windowid>` does not capture a dialog: `window.open_dialog`
-# draws it on a layer above the window, and `-l` captures the window's own
-# backing store. So this photographs the screen and crops to the document
-# window.
+# The dialog is drawn inside the document window, and `screencapture -l` does
+# capture it — verified on Custom Surround and Edit Color Code. (An earlier
+# version of this script cropped a full-screen grab instead, because `-l` had
+# appeared to miss the dialog; it does not, and a full-screen grab breaks down
+# as soon as anything floats over the window.)
 #
 # For anything that is a real window — the document, Settings, Console, About —
 # use `tools/peek-panel.sh` instead.
@@ -54,19 +55,13 @@ if [ -z "${line:-}" ]; then
     exit 1
 fi
 
-x=$(echo "$line" | cut -f2 | cut -d, -f1)
-y=$(echo "$line" | cut -f2 | cut -d, -f2)
-w=$(echo "$line" | cut -f3 | cut -d x -f1)
-h=$(echo "$line" | cut -f3 | cut -d x -f2)
-
-raw="$home/screen.png"
-screencapture -x -o "$raw"
+id=$(echo "$line" | cut -f1)
+screencapture -o -x -l "$id" "$out"
 pkill -f "$(basename "$binary")" 2>/dev/null || true
 
-# The PNG is twice the point size on a Retina display; pad by 40 points so the
-# window's shadow is not clipped.
-px=$((x * 2 - 80)); py=$((y * 2 - 80))
-pw=$((w * 2 + 160)); ph=$((h * 2 + 160))
-sips -c "$ph" "$pw" --cropOffset "$py" "$px" "$raw" --out "$out" >/dev/null
+if [ ! -s "$out" ]; then
+    echo "capture produced nothing (window $id)" >&2
+    exit 1
+fi
 
 echo "$out"

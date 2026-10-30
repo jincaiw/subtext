@@ -2982,6 +2982,50 @@ GPUI 的 `ClipboardEntry` 只有三种变体（字符串、图片、文件路径
 `pub`/`fn` 与 `let` 同色、`main` 是函数色、`u32` 是类型色、`1` 是数字色、花括号被转义 —— 与
 编辑器里看到的一致。`pbpaste` 拿回的是纯文本。
 
+### 22.24 两个对话框的按钮：三个错结论一次修完
+
+§22.18 给包围与颜色码对话框加 footer，理由是「没有 footer 对话框会塌到 `min_h`，内容被裁」。这一轮
+重新走查，三处都站不住：
+
+| 当时的结论 | 实测 |
+| --- | --- |
+| `screencapture -l` 截不到对话框 | **截得到**。`Custom Surround`、`Edit Color Code` 各截一张，对话框、字段、按钮全在 |
+| 没有 footer → 高度塌陷、内容被裁 | 去掉 footer 后对话框完整：字段、`Cancel`、`OK` 都在 |
+| `DialogFooter` 只渲染一个 `DialogClose` | 全部子元素都会渲染；问题在 `DialogClose::render` 是 `div().size_full()` —— 它在 footer 里占满整行 |
+
+第三条是真正的原因，也是前两条的源头：`DialogClose` 占满整行 → 旁边的按钮被挤到框外 → 看着像
+「只有一个按钮」，于是我加 footer、加宽、换 `DialogClose`，越修越偏。而最初「按钮看不见」的真实原因
+只是**对话框太窄**（24 rem），右边被裁掉了。
+
+**改法**（与上游一致：按钮画在视图里，不在对话框的 footer 里）。一共动了七处：
+
+| 对话框 | 改动 |
+| --- | --- |
+| Custom Surround | 删掉 footer，`Cancel` / `OK` 由 sheet 自己画 |
+| Edit Color Code | 同上（`Cancel` / `Insert`） |
+| Incompatible characters（有损保存） | footer 里的 `DialogClose` → 普通 `Button` + `close_dialog` |
+| Don’t Save（未保存关闭） | 同上 |
+| Text encoding change | 同上 |
+| Multiple Replace | footer 只有 `DialogClose`，被拉成整条横幅：换成普通 `Button`（`Done`） |
+| Saved Scopes | 同上（`OK`） |
+
+两个删掉 footer 的对话框还有个附带好处：`OK` 的置灰跟着输入**实时**变。footer 里的按钮只在对话框
+重建时读一次 sheet，打字的瞬间它读不到。
+
+**没动**的是设置窗口的编码列表对话框：它用的是 `DialogClose` + `DialogAction` 这一对，两个都是
+`size_full()`，各占一半 —— 那正是组件库设计的用法。
+
+工具那头：`tools/peek-overlay.sh` 改回 `screencapture -l`，不再截全屏再裁。全屏一旦有别的窗口浮在
+上面（这次是系统的屏幕录制授权弹窗，正好盖住按钮行）就整个作废，而 `-l` 只取那个窗口。
+
+**验证**（截图全部来自 `screencapture -l`）：包围对话框 `Surround with:` + `Begin:` / `End:` +
+右对齐的 `Cancel` / `OK`（begin 为空时 `OK` 置灰）；颜色码对话框的色值、`Hexadecimal`、`Cancel` / `Insert`
+都在框内，没有重复的按钮行；Multiple Replace 的 `Done` 从一条横贯对话框的横幅变回正常宽度的按钮
+（这张是修前修后各一张，刚好说明白问题）。
+
+**这是同一类错误的第三次**：前一次是「Quick Actions 结果够不着」，判错的原因都是**先信自己的探针，
+后查框架源码**。`DialogClose` 那行 `div().size_full()` 就在 `dialog/footer.rs` 里，读一遍只要十秒。
+
 ### 22.23 Quick Actions：第一次看清它，顺带记一次误判
 
 上一轮列的「可走查界面」里漏了 Quick Actions（浮动命令面板）。补进 sweep 第 22 步后，它第一次被拍照——
@@ -3129,6 +3173,10 @@ Appearance 没发现缺陷）。
 的图 —— 而**先怀疑「改动没生效」、后怀疑「量具在骗人」，顺序反了**。
 
 ### 22.18 截图走查：两个对话框的按钮一直是不可见的
+
+> **§22.24 更正**：这一节的两个工具结论都是错的 —— `screencapture -l` **能**截到对话框，
+> 而「没有 footer 的对话框会塌陷」也不成立。当时看到的裁切其实是**宽度不够**。下面的文字保留原样，
+> 作为「诊断错在哪」的样本，改法见 §22.24。
 
 `panel_sweep` 证明 21 个界面「打开不崩」，但从来没看过它们「画得对不对」。这一轮加了一个
 `SUBTEXT_PANEL_PEEK=<n>`（打开第 n 个界面并停住），配上截图，走查了包围、颜色码、多重替换和
@@ -3473,6 +3521,5 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 | `subtext-app` 未在 Windows / Linux 上编译验证（主机缺交叉工具链，不是代码问题） | **CI 的跨目标检查现在只覆盖 `subtext-core`**（§20 起 `subtext-syntax` 退出：它要编 21 个 C 解析器，build script 在 `cargo check` 时也跑，跨目标就需要那个目标的 C 编译器；`subtext-theme` 依赖它，一并退出。两个 crate 都没有 `cfg(target_os)` 代码，跨目标检查证明不了什么；`subtext-core` 有平台分支且不含 C，仍照旧检查）；缺的是 GUI crate：`cargo check --workspace --target …` 在**依赖的构建脚本**上就停下，还没轮到本仓的代码：<br>· `x86_64-pc-windows-msvc`：`gpui-pre` 的 build.rs 走 `embed_resource` 编译 `gpui.rc`，要 `llvm-rc`，本机没有（`xcrun -f llvm-rc` 与 `which llvm-rc` 都为空）→ `NotAttempted("llvm-rc")`。补法：`brew install llvm` 后把 `$(brew --prefix llvm)/bin` 放进 `PATH`。<br>· `x86_64-unknown-linux-gnu`：`cc-rs` 找不到 `x86_64-linux-gnu-gcc`。补法：装一套 Linux 交叉工具链（如 `messense/macos-cross-toolchains`）并设 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER`。<br>两者都需要在**用户机器上装东西**，所以没有擅自做；装好后这两条命令就是判据。已装的目标：`aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-pc-windows-msvc` / `x86_64-unknown-linux-gnu` / `wasm32-unknown-unknown`。 |
 | 拖动分栏的**手势**没测过（宽度本身测过） | §8.13 量的是「面板解析后的宽度」，四种显隐组合都对。但「按住分隔线拖」这个动作没有 UI 集成测试可用（见上一条），所以拖拽的手感（命中区域、光标、拖动中的跟手程度）只有靠跑一次真机才知道。上游的 `NSSplitView` 命中区域比可视分隔线宽，`gpui-base` 的 `resize_handle` 也是（`resize_handle.rs` 的 hit area），但两者没有对比过。 |
 | 冒烟测试的非 GUI 环境崩溃 | 10-14 23:34 有一份 `did_finish_launching` 的 SIGABRT 报告，发生在由 agent shell 以后台角色启动时。3 次复现未出现，未定位。 |
-| `DialogFooter` 只渲染一个按钮 | 这一版只在 footer 里渲染 `DialogClose`：放普通 `Button` 完全不显示；放一个 `Button` + 一个 `DialogClose` 只显示后者并被拉伸成整行；放两个 `DialogClose` 只显示第一个。四种写法都在 §22.18 里试过。受影响的是 **Custom Surround** 与 **Edit Color Code**：两者都用 Enter 提交，footer 只有 Cancel。上游有可见的 OK，这里缺一个。 |
 | Mode 设置页的间距与换行 | 标签列与控件之间的空隙比别处大，`Smart copy/paste` 与 `Automatically insert closing brackets and quotes` 在 760 px 窗口下换行。给 `options` 与它所在的行各加 `w_full` 之后截图**逐字节相同**，说明不是这两处 —— 已回退，原因未定位。§22.19 |
 

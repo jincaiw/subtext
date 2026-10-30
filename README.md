@@ -68,7 +68,7 @@ cargo test --workspace # 718 项测试
 cargo run                    # 空文档
 cargo run -- path/to/file    # 打开文件
 
-# 面板冒烟（debug 版）：依次打开 21 个面板/页签后退出，任何一处 panic 都会让退出码非 0
+# 面板冒烟（debug 版）：依次打开 22 个面板/页签后退出，任何一处 panic 都会让退出码非 0
 SUBTEXT_PANEL_SWEEP=1 cargo run -- path/to/file
 ```
 
@@ -76,10 +76,11 @@ SUBTEXT_PANEL_SWEEP=1 cargo run -- path/to/file
 
 ```bash
 tools/peek-panel.sh 14 Settings /tmp/shortcuts.png   # 真窗口
-tools/peek-overlay.sh 0 /tmp/surround.png            # 对话框：在窗口之上的独立层
+tools/peek-overlay.sh 0 /tmp/surround.png            # 对话框：画在文档窗口里
 ```
 
-两条命令不能互相替代 —— `screencapture -l` 截不到对话框。
+两条命令只是「截哪个窗口」不同：对话框画在文档窗口内部，`screencapture -l` 一样能截到
+（§22.24 实测；更早的脚本改截全屏，是因为当时误判 `-l` 截不到，而全屏一旦有别的窗口浮在上面就废了）。
 
 **浮动面板**（Quick Actions，第 21 步）还要多一步：它是 `NSPanel`，**应用不是前台时不上屏**，
 截出来是空白。先用 `open <应用>` 让它到前台，再截图；`winlist` 里看到 `onscreen=false` 就是没上屏。改 UI 前先读

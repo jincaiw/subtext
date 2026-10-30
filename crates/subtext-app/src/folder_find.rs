@@ -46,7 +46,7 @@ use gpui_kit::base::input::InputEvent;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
-    dialog::{DialogClose, DialogFooter},
+    dialog::DialogFooter,
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle},
     h_flex,
     input::{Input, InputState},
@@ -504,8 +504,13 @@ impl FolderFindPane {
                 .w(window.rem_size() * 30.)
                 .child(sheet.clone())
                 .footer(
-                    DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("OK"))),
+                    // See the note on the multiple-replace footer: `DialogClose`
+                    // stretches to the whole row, so a lone one reads as a bar.
+                    DialogFooter::new().child(
+                        Button::new("saved-scopes-ok")
+                            .label("OK")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
                 )
                 .on_ok(|_, _, _| false)
         });

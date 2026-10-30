@@ -6,6 +6,25 @@
 
 ---
 
+## [Unreleased]
+
+### 修复
+
+- **Multiple Replace 的 `Done` 此前是一条横贯整个对话框的横幅**（`Saved Scopes` 的 `OK` 同理）：`DialogClose`
+  渲染成 `div().size_full()`，单独放在 footer 里就占满整行。两处都换成普通按钮。
+- **三个对话框 footer 里的 `DialogClose` 会挤压同一行的其他按钮**（有损保存、未保存关闭、文字编码变更）：
+  取消换成普通 `Button` + `window.close_dialog(cx)`。
+- **包围与颜色码对话框删掉 footer**，`Cancel` / `OK` 回到 sheet 里自己画 —— 与上游一致，而且 `OK` 的置灰
+  现在跟着输入实时变（footer 里的按钮只在对话框重建时读一次 sheet）。
+
+### 文档与工具
+
+- **撤销 §22.18 的三条错误结论**：`screencapture -l` **能**截到对话框；没有 footer 的对话框**不会**塌陷；
+  `DialogFooter` **不是**「只渲染一个 `DialogClose`」。真正的原因是 `DialogClose` 占满整行，加上对话框
+  一开始太窄（24 rem）。缺口表 28 → 27。
+- `tools/peek-overlay.sh` 改回 `screencapture -l`（不再截全屏再裁）：全屏一旦有窗口浮在上面就作废。
+- `docs/UI-CHECKLIST.md` 规则 5 换成正确的 `DialogClose` 说明，自检加一条。
+
 ## [0.3.25] — 2026-10-30
 
 ### 更正

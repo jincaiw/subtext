@@ -168,7 +168,7 @@
 | 向右 / 向左缩进 | `shift_right` / `shift_left` | ✅ |
 | 缩进转空格 / 转制表符 | `convert_indentation_to_*` | ✅ |
 | 用引号 / 双引号 / 括号 / 花括号 / 方括号包围 | `surround` | ✅ 5 种，包的是**选区**（上游 `String.surround(in:begin:end:)`）；空选区会在光标处插一对 |
-| 自定义包围 | `surround_sheet` | ✅ 上游的 sheet：`Begin:` / `End:` 两个框（`End` 的提示跟着 `Begin`）、begin 为空时 OK 置灰、end 为空表示与 begin 相同；用过的一对记在设置里。两个框**上下排**（上游并排，但 GPUI 的对话框是定宽，并排时 `End` 会被裁掉）；**确认用 Enter**，footer 只有 Cancel —— `DialogFooter` 只渲染一个 `DialogClose`，见缺口表（§22.18） |
+| 自定义包围 | `surround_sheet` | ✅ 上游的 sheet：`Begin:` / `End:` 两个框（`End` 的提示跟着 `Begin`）、begin 为空时 OK 置灰、end 为空表示与 begin 相同；用过的一对记在设置里。两个框**上下排**（上游并排，但 GPUI 的对话框是定宽，并排时 `End` 会被裁掉）；`Cancel` / `OK` 由 sheet 自己画（与上游一样在视图里），Enter 也能确认（§22.24） |
 | 修剪行尾空白 | `trim_trailing_whitespace` | ✅ |
 | 上移 / 下移行 | `move_lines` | ✅ |
 | 按行升序排序 | `sort_lines` | ✅ |

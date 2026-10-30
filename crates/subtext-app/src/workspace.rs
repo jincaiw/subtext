@@ -41,7 +41,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
     WindowExt as _,
     button::{Button, ButtonVariants as _},
-    dialog::{DialogClose, DialogFooter},
+    dialog::DialogFooter,
     h_flex, h_resizable,
     input::{Editor, Input, InputState},
     list::ListItem,
@@ -1554,7 +1554,11 @@ impl Workspace {
                 )
                 .footer(
                     DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("dialog-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
                         .child(
                             Button::new("lossy-review")
                                 .label("Review Incompatible Characters")
@@ -1735,7 +1739,11 @@ impl Workspace {
                 )
                 .footer(
                     DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("dialog-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
                         .child(
                             Button::new("close-discard")
                                 .label("Don’t Save")
@@ -1985,7 +1993,6 @@ impl Workspace {
         let sheet = cx.new(|cx| SurroundSheet::new(workspace, &begin, &end, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
-            let confirm = sheet.clone();
             dialog
                 .title("Custom Surround")
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
@@ -1998,19 +2005,6 @@ impl Workspace {
                 // one collapses to `min_h`, and the sheet's own button row was
                 // being cut off. Enter reaches the dialog's own actions, so the
                 // callbacks are installed there as well.
-                .footer(
-                    // Two `DialogClose`s, both with custom triggers: in this
-                    // version a plain `Button` inside a `DialogFooter` is not
-                    // rendered at all, while a `DialogClose` is. The OK trigger
-                    // submits on the way out.
-                    DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
-                        .child(DialogClose::new().trigger(move |button| {
-                            button.label("OK").primary().on_click(move |_, _, cx| {
-                                confirm.update(cx, |sheet, cx| sheet.submit(cx));
-                            })
-                        })),
-                )
                 .on_ok(move |_, _, cx| {
                     submit.update(cx, |sheet, cx| sheet.submit(cx));
                     true
@@ -2078,12 +2072,6 @@ impl Workspace {
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 32.)
                 .child(sheet.clone())
-                // See the note in `surround_sheet`: without a footer the dialog
-                // collapses to its minimum height and cuts the sheet's buttons.
-                .footer(
-                    DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel"))),
-                )
                 // Enter and Escape reach the dialog's own actions, not the
                 // buttons the panel draws. Confirming something that is not a
                 // colour code leaves the panel open with the reason in the
@@ -2156,8 +2144,14 @@ impl Workspace {
                 // close button. A dialog needs the same affordance spelled out,
                 // and `DialogClose` is the component that owns dismissing one.
                 .footer(
-                    DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Done"))),
+                    // A plain `Button`, not `DialogClose`: the latter renders
+                    // `div().size_full()`, so as the only child it becomes a
+                    // full-width bar across the dialog instead of a button.
+                    DialogFooter::new().child(
+                        Button::new("multiple-replace-done")
+                            .label("Done")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
                 )
                 // Enter reaches the dialog's confirm action, and there is
                 // nothing here for it to confirm: *Replace All* is the button
@@ -7215,7 +7209,11 @@ impl Workspace {
                     DialogFooter::new()
                         // Escape and the dialog's close button both cancel, and
                         // a dialog dismisses without a callback of its own.
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            Button::new("dialog-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
                         .child(
                             Button::new("encoding-reinterpret")
                                 .label("Reinterpret")

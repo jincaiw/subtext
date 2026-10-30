@@ -77,12 +77,13 @@ v_flex()
 
 ## 5. 组件库硬编码的地方，不要对着干
 
-这几处改不动，只能在别处绕：
+这几处改不动，只能在别处绕。**先读实现再下结论**：本表里曾有一条「`DialogFooter` 只渲染一个按钮」
+是错的 —— 读一眼 `dialog/footer.rs` 就知道全部子元素都渲染，只是 `DialogClose` 占了整行（§22.24）：
 
 | 组件 | 硬编码 | 绕法 |
 | --- | --- | --- |
 | `Button` | 内部 `justify_center()` | 列表行要左对齐就用 `.child(div().w_full().child(label))` 代替 `.label()`（§22.19） |
-| `DialogFooter` | 只渲染**一个** `DialogClose`，普通 `Button` 完全不渲染 | 确认动作交给 Enter（`on_ok`），footer 只放 Cancel（§22.18） |
+| `DialogClose` | 渲染成 `div().size_full()`，在 footer 里**占满整行** | 同一行还有别的按钮就别用它，用普通 `Button` + `window.close_dialog(cx)`；只有「`DialogClose` + `DialogAction`」这一对（各占一半）才是组件库的用法（§22.24） |
 | `ManagedTooltipExt` | `pub(crate)` | `div` 挂不上 tooltip；需要 tooltip 就换成 `Button`（§22.17） |
 | `Checkbox` | label 宽度跟内容 | 父容器太窄时文字会换行，不是 bug 但要看得见 |
 
@@ -144,4 +145,5 @@ tools/peek-overlay.sh 0 /tmp/surround.png             # 对话框（在窗口之
 4. 新的标签行走了 `field()` 吗？（规则 4）
 5. 功能性按钮是不是误用了 `ghost()`？（规则 6）
 6. 界面上的文案有反引号、Markdown 强调符号吗？（规则 7）
-7. 截一张图看了吗？看的是**该看的那个东西**吗？（验证）
+7. footer / 行里有没有 `DialogClose` 这类「自己会 `size_full()`」的组件和固定宽度控件并排？（规则 5）
+8. 截一张图看了吗？看的是**该看的那个东西**吗？（验证）
