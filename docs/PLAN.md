@@ -3379,8 +3379,9 @@ cp1252:   A??é€??     [U+003F U+003F U+00E9 U+20AC …]
 `encoding_rs` 用 U+FFFD 标位置，那是**解码器**的记号；把它原样显示出来，等于在这一列里放一个
 CotEditor 不会放的字符。
 
-还没做的：把那个探针搬进 `tools/`。现在它只是一次性的 `/tmp/probe.swift`，下次有人怀疑这条规则
-还得重写一遍。
+探针已经搬进 `tools/probe-foundation-lossy.swift`（`swift tools/probe-foundation-lossy.swift`）：
+它是一次性的问句，不是构建步骤，所以放在 `tools/` 里而不是测试里 —— 但它带着这段结论，下次有人
+怀疑这条规则，跑一遍就有答案。
 
 ### 22.48 警告表：压缩列宽，而不是横向滚动
 
