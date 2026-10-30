@@ -276,6 +276,8 @@ pub struct OpenDocument {
     /// ([`Workspace::on_editor_changed`]) and a syntax change
     /// ([`Workspace::set_syntax`]).
     outline: Option<Rc<Vec<OutlineEntry>>>,
+    /// A parse of this document is in flight.
+    outline_pending: bool,
 }
 
 impl OpenDocument {
@@ -763,6 +765,8 @@ pub struct Workspace {
     /// than rebuilding the bar (and re-reading the script folder) on every
     /// keystroke. One value rather than three fields: they describe the same
     /// caret, so they are read, written and compared together.
+    /// Bumped every time the outline's input changes: an edit, a syntax swap.
+    outline_generation: u64,
     menu_gates: menus::MenuGates,
     /// Watches for the find panel closing.
     ///
@@ -913,6 +917,7 @@ impl Workspace {
             find_indicator: 0,
             incremental_auto: None,
             incompatible_cache: std::cell::RefCell::new(None),
+            outline_generation: 0,
             menu_gates: menus::MenuGates {
                 selection_empty: true,
                 ..Default::default()
@@ -1121,6 +1126,7 @@ impl Workspace {
             // Likewise: the outline is extracted on the first repaint that asks
             // for it, not while the window is still being put together.
             outline: None,
+            outline_pending: false,
         });
         self.active = self.documents.len() - 1;
         self.refresh_menus(cx);
@@ -1312,6 +1318,8 @@ impl Workspace {
         // one, or reorder them. Dropped here rather than recomputed here so
         // that a burst of keystrokes costs one extraction, not one per key.
         self.documents[index].outline = None;
+        self.documents[index].outline_pending = false;
+        self.outline_generation += 1;
         // The text moved under the caret, so the pair may have changed even
         // though the selection did not — the de-duplication the flash does for
         // repaints must not skip this one.
@@ -1549,6 +1557,8 @@ impl Workspace {
                     let syntax = self.syntaxes.syntax_for_path(&path).name.clone();
                     self.documents[index].syntax = SharedString::from(syntax);
                     self.documents[index].outline = None;
+                    self.documents[index].outline_pending = false;
+                    self.outline_generation += 1;
                     self.settings.note_recent(&path);
                     let _ = self.settings.save();
                 }
@@ -2545,6 +2555,58 @@ impl Workspace {
         crate::menus::install(cx, &self.menu_state());
     }
 
+    /// The front document's outline, parsed on a background thread when the
+    /// cache is cold.
+    ///
+    /// The cache is dropped by the two things that can make it wrong — an edit
+    /// and a syntax change — and this is the only place a new parse starts: at
+    /// most one in flight per document, and a result whose generation is no
+    /// longer current is dropped on landing. While it is in flight the callers
+    /// read an empty outline, which is one frame of a bar without entries
+    /// rather than a frame that costs 112 ms.
+    fn ensure_outline(&mut self, cx: &mut Context<Self>) -> Rc<Vec<OutlineEntry>> {
+        let index = self.active;
+        let Some(document) = self.documents.get(index) else {
+            return Rc::new(Vec::new());
+        };
+        if let Some(outline) = &document.outline {
+            return outline.clone();
+        }
+        if document.outline_pending {
+            return Rc::new(Vec::new());
+        }
+        let syntax_name = document.syntax.clone();
+        let text = document.editor().read(cx).value().to_string();
+        let Some(syntax) = self.syntaxes.by_name(&syntax_name).cloned() else {
+            return Rc::new(Vec::new());
+        };
+        self.outline_generation += 1;
+        let generation = self.outline_generation;
+        self.documents[index].outline_pending = true;
+
+        cx.spawn(async move |this, cx| {
+            let entries = cx
+                .background_executor()
+                .spawn(async move { crate::outline::entries(&text, &syntax) })
+                .await;
+            this.update(cx, |workspace, cx| {
+                if let Some(document) = workspace.documents.get_mut(index) {
+                    document.outline_pending = false;
+                    // The document moved on while the parse ran: the next cold
+                    // check starts a fresh one rather than showing a stale bar.
+                    if workspace.outline_generation == generation {
+                        document.outline = Some(Rc::new(entries));
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+
+        Rc::new(Vec::new())
+    }
+
     /// Keep the menu bar's editor-dependent items in step with the caret.
     ///
     /// The bar is a tree that is set once, so `Straighten Quotes` and the two
@@ -2560,30 +2622,6 @@ impl Workspace {
         }
         self.menu_gates = gates;
         self.refresh_menus(cx);
-    }
-
-    /// The front document's outline, extracted only when the cache is cold.
-    ///
-    /// The cache is dropped by the two things that can make it wrong — an edit
-    /// and a syntax change — so a burst of keystrokes costs one extraction, not
-    /// one per key, and a caret move costs none.
-    fn ensure_outline(&mut self, cx: &App) -> Rc<Vec<OutlineEntry>> {
-        let index = self.active;
-        let Some(document) = self.documents.get(index) else {
-            return Rc::new(Vec::new());
-        };
-        if let Some(outline) = &document.outline {
-            return outline.clone();
-        }
-        let syntax = document.syntax.clone();
-        let text = document.editor().read(cx).value().to_string();
-        let entries = match self.syntaxes.by_name(&syntax) {
-            Some(syntax) => crate::outline::entries(&text, syntax),
-            None => Vec::new(),
-        };
-        let entries = Rc::new(entries);
-        self.documents[index].outline = Some(entries.clone());
-        entries
     }
 
     /// Rebuild the menu bar and the key bindings unconditionally.
@@ -4385,6 +4423,8 @@ impl Workspace {
         // A different syntax means different outline rules, so the cached
         // extraction belongs to the old one.
         document.outline = None;
+        document.outline_pending = false;
+        self.outline_generation += 1;
         for editor in document.editors() {
             editor.update(cx, |state, cx| state.set_highlighter(name.to_string(), cx));
         }
