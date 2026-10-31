@@ -258,10 +258,224 @@ pub fn entries(text: &str, syntax: &subtext_syntax::Syntax) -> Vec<OutlineEntry>
     if !syntax.outlines.is_empty() {
         return extract(text, &syntax.outlines);
     }
+    // LaTeX's outline is a tree-sitter query too, but the published grammar
+    // this build can link omits its external scanner, so the query has no
+    // tree to run against. `latex_entries` walks the same constructs the
+    // query names; see its note for the one structural difference.
+    if syntax.name == "LaTeX" {
+        return latex_entries(text);
+    }
     let Some(query) = syntax.outline_query() else {
         return Vec::new();
     };
     extract_with_parser(text, &syntax.name, &query)
+}
+
+/// A braced group found by the LaTeX scanner.
+struct LatexGroup {
+    /// The text between the braces.
+    text: String,
+    /// The byte range between the braces, which is what an outline entry
+    /// selects — `LaTeXOutlineFormatter` strips the braces.
+    range: Range<usize>,
+    /// The byte just past the closing brace.
+    end: usize,
+}
+
+/// Outline items for LaTeX, in place of the unlinkable tree-sitter grammar.
+///
+/// This follows `queries/LaTeX/outline.scm` and `LaTeXOutlineFormatter`:
+///
+/// * `\part` … `\subparagraph` are headings at levels 1–7;
+/// * `\title` is a title;
+/// * a `\caption` is a title unless the innermost open environment is
+///   `subfigure`, `subtable`, or either with a star;
+/// * the title is the inside of the braced group, with runs of whitespace
+///   collapsed, and the entry's range is that inside range.
+///
+/// Comments are skipped, including a `%` inside a command's group. The
+/// difference from the query is that this is a linear scan rather than a
+/// parse: a `\section` inside an argument that the grammar would not accept
+/// as a heading can still be found here. For the outline's purpose — a
+/// navigable list of headings — that is the more forgiving failure.
+fn latex_entries(text: &str) -> Vec<OutlineEntry> {
+    let bytes = text.as_bytes();
+    let mut entries = Vec::new();
+    let mut environments: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if !latex_escaped(bytes, i) => {
+                i = text[i..]
+                    .find('\n')
+                    .map_or(bytes.len(), |offset| i + offset);
+            }
+            b'\\' => {
+                let mut end = i + 1;
+                while end < bytes.len() && (bytes[end].is_ascii_alphabetic() || bytes[end] == b'@')
+                {
+                    end += 1;
+                }
+                let name = &text[i + 1..end];
+                let mut after = end;
+                if after < bytes.len() && bytes[after] == b'*' {
+                    after += 1;
+                }
+
+                match name {
+                    "begin" | "end" => {
+                        if let Some(group) = latex_group(text, after) {
+                            let environment = group.text.trim().to_string();
+                            if name == "begin" {
+                                environments.push(environment);
+                            } else if let Some(index) =
+                                environments.iter().rposition(|open| *open == environment)
+                            {
+                                environments.remove(index);
+                            }
+                            after = group.end;
+                        }
+                    }
+                    "title" | "part" | "chapter" | "section" | "subsection" | "subsubsection"
+                    | "paragraph" | "subparagraph" | "caption" => {
+                        after = latex_skip_optional(text, after);
+                        if let Some(group) = latex_group(text, after) {
+                            let level = latex_heading_level(name);
+                            let is_caption = name == "caption";
+                            let caption_allowed = !is_caption
+                                || !environments.last().is_some_and(|open| {
+                                    matches!(
+                                        open.as_str(),
+                                        "subfigure" | "subfigure*" | "subtable" | "subtable*"
+                                    )
+                                });
+                            let title = group.text.split_whitespace().collect::<Vec<_>>().join(" ");
+                            if caption_allowed && !title.is_empty() {
+                                entries.push(OutlineEntry {
+                                    id: String::new(),
+                                    title,
+                                    range: group.range,
+                                    indent: Indent::Level(level.unwrap_or(0)),
+                                    kind: Some(if level.is_some() {
+                                        OutlineKind::Heading
+                                    } else {
+                                        OutlineKind::Title
+                                    }),
+                                });
+                            }
+                            after = group.end;
+                        }
+                    }
+                    _ => {}
+                }
+                i = after.max(i + 1);
+            }
+            _ => i += 1,
+        }
+    }
+
+    normalize_levels(&mut entries);
+    assign_ids(&mut entries);
+    entries
+}
+
+/// The heading level a LaTeX command names, or `None` for a title.
+fn latex_heading_level(command: &str) -> Option<usize> {
+    Some(match command {
+        "part" => 1,
+        "chapter" => 2,
+        "section" => 3,
+        "subsection" => 4,
+        "subsubsection" => 5,
+        "paragraph" => 6,
+        "subparagraph" => 7,
+        _ => return None,
+    })
+}
+
+/// Whether the byte at `index` is escaped by a preceding backslash.
+fn latex_escaped(bytes: &[u8], index: usize) -> bool {
+    let mut backslashes = 0;
+    let mut cursor = index;
+    while cursor > 0 && bytes[cursor - 1] == b'\\' {
+        backslashes += 1;
+        cursor -= 1;
+    }
+    backslashes % 2 == 1
+}
+
+/// Read a `{…}` group starting at or after `start`, skipping whitespace.
+///
+/// Braces inside the group nest; `\{` and `\}` do not count. `None` when the
+/// next non-space byte is not `{`.
+fn latex_group(text: &str, start: usize) -> Option<LatexGroup> {
+    let bytes = text.as_bytes();
+    let mut cursor = start;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor >= bytes.len() || bytes[cursor] != b'{' {
+        return None;
+    }
+
+    let inner_start = cursor + 1;
+    let mut depth = 1;
+    cursor = inner_start;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => cursor += 2,
+            b'{' => {
+                depth += 1;
+                cursor += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(LatexGroup {
+                        text: text[inner_start..cursor].to_string(),
+                        range: inner_start..cursor,
+                        end: cursor + 1,
+                    });
+                }
+                cursor += 1;
+            }
+            _ => cursor += 1,
+        }
+    }
+    None
+}
+
+/// Skip a `[…]` optional argument at `start`, returning the byte after it.
+fn latex_skip_optional(text: &str, start: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut cursor = start;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor >= bytes.len() || bytes[cursor] != b'[' {
+        return start;
+    }
+    cursor += 1;
+    let mut depth = 1;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => cursor += 2,
+            b'[' => {
+                depth += 1;
+                cursor += 1;
+            }
+            b']' => {
+                depth -= 1;
+                cursor += 1;
+                if depth == 0 {
+                    return cursor;
+                }
+            }
+            _ => cursor += 1,
+        }
+    }
+    start
 }
 
 /// The outline a tree-sitter query describes.
@@ -1217,6 +1431,71 @@ mod tests {
     #[test]
     fn no_rules_yields_no_entries() {
         assert!(extract("anything", &[]).is_empty());
+    }
+
+    #[test]
+    fn latex_headings_nest_like_the_query() {
+        let text = "\\documentclass{article}\n\
+                    \\section{Intro}\n\
+                    \\subsection{Details}\n\
+                    \\subsubsection{Deep}\n";
+        let entries = entries(text, &syntax("LaTeX"));
+        assert_eq!(titles(&entries), ["Intro", "Details", "Deep"]);
+        assert_eq!(levels(&entries), [0, 1, 2]);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.kind == Some(OutlineKind::Heading))
+        );
+    }
+
+    #[test]
+    fn latex_title_and_caption_are_titles() {
+        let text = "\\title{My  Paper}\n\
+                    \\begin{figure}\n\
+                    \\caption{A picture}\n\
+                    \\end{figure}\n";
+        let entries = entries(text, &syntax("LaTeX"));
+        assert_eq!(titles(&entries), ["My Paper", "A picture"]);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.kind == Some(OutlineKind::Title))
+        );
+        // The title's range is the inside of the braces, which is what
+        // upstream's formatter selects.
+        assert_eq!(&text[entries[0].range.clone()], "My  Paper");
+    }
+
+    #[test]
+    fn latex_caption_inside_a_subfigure_is_skipped() {
+        let text = "\\begin{subfigure}{0.5\\textwidth}\n\
+                    \\caption{Not an outline item}\n\
+                    \\end{subfigure}\n\
+                    \\begin{table}\n\
+                    \\caption{A table}\n\
+                    \\end{table}\n";
+        let entries = entries(text, &syntax("LaTeX"));
+        assert_eq!(titles(&entries), ["A table"]);
+    }
+
+    #[test]
+    fn latex_comments_are_not_outline_items() {
+        let text = "% \\section{Hidden}\n\
+                    \\section{Shown} % \\subsection{Also hidden}\n\
+                    \\% \\section{Not a comment}\n";
+        let entries = entries(text, &syntax("LaTeX"));
+        // The third line's `\%` is an escaped percent, so the `\section`
+        // after it is real text and is found.
+        assert_eq!(titles(&entries), ["Shown", "Not a comment"]);
+    }
+
+    #[test]
+    fn latex_optional_arguments_are_skipped() {
+        let text = "\\section[Short]{Long title}\n";
+        let entries = entries(text, &syntax("LaTeX"));
+        assert_eq!(titles(&entries), ["Long title"]);
+        assert_eq!(&text[entries[0].range.clone()], "Long title");
     }
 
     #[test]

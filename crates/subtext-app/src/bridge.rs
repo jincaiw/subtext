@@ -15,7 +15,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{
-    Action, AnyWindowHandle, App, BorrowAppContext as _, Context, Global, WeakEntity, Window,
+    Action, AnyWindowHandle, App, BorrowAppContext as _, Context, EntityId, Global, Subscription,
+    WeakEntity, Window,
 };
 
 use subtext_core::{FileEncoding, LineEnding, Normalization};
@@ -54,8 +55,7 @@ macro_rules! bind_runtime_actions {
     };
 }
 
-/// Every workspace this process has opened, newest last, each with the window
-/// it lives in.
+/// Every workspace this process has opened, each with the window it lives in.
 ///
 /// A `Global` rather than a field on some view, because a menu command is
 /// dispatched to the application, not to a window: the handler has to be able
@@ -66,8 +66,17 @@ macro_rules! bind_runtime_actions {
 /// and the key window is not always that one: the settings window and the
 /// Quick Actions panel are both separate windows that take the keyboard, and a
 /// command run from either of them still belongs to the document behind it.
+///
+/// `front` is the workspace whose window most recently came to the front. It
+/// is what `run` prefers and the only workspace allowed to install the
+/// application-wide menu bar.
 #[derive(Default)]
-struct Workspaces(Vec<(WeakEntity<Workspace>, AnyWindowHandle)>);
+struct Workspaces {
+    entries: Vec<(WeakEntity<Workspace>, AnyWindowHandle)>,
+    front: Option<EntityId>,
+    /// Watches windows closing, so `front` never names a dead window.
+    _closed: Option<Subscription>,
+}
 
 impl Global for Workspaces {}
 
@@ -77,12 +86,82 @@ pub fn register(workspace: WeakEntity<Workspace>, window: AnyWindowHandle, cx: &
     if !cx.has_global::<Workspaces>() {
         cx.set_global(Workspaces::default());
     }
+
+    // The first workspace owns the bar until a window is activated. Registering
+    // one observer for the process is enough; it keeps the registry honest when
+    // a document window closes.
+    let needs_closed_observer = cx
+        .try_global::<Workspaces>()
+        .is_some_and(|registry| registry._closed.is_none());
+    if needs_closed_observer {
+        let closed = cx.on_window_closed(|cx, id| {
+            cx.update_global::<Workspaces, _>(|registry, _| {
+                let closed_front = registry.front.is_some_and(|front| {
+                    registry.entries.iter().any(|(workspace, window)| {
+                        workspace.entity_id() == front && window.window_id() == id
+                    })
+                });
+                registry
+                    .entries
+                    .retain(|(_, window)| window.window_id() != id);
+                if closed_front {
+                    registry.front = registry
+                        .entries
+                        .last()
+                        .map(|(workspace, _)| workspace.entity_id());
+                }
+            });
+        });
+        cx.update_global::<Workspaces, _>(|registry, _| registry._closed = Some(closed));
+    }
+
+    let id = workspace.entity_id();
     cx.update_global::<Workspaces, _>(|registry, _| {
         registry
-            .0
-            .retain(|(existing, _)| existing.entity_id() != workspace.entity_id());
-        registry.0.push((workspace, window));
+            .entries
+            .retain(|(existing, _)| existing.entity_id() != id);
+        registry.entries.push((workspace, window));
+        if registry.front.is_none() {
+            registry.front = Some(id);
+        }
     });
+}
+
+/// Record that `workspace`'s window has come to the front.
+pub fn note_front(workspace: EntityId, cx: &mut App) {
+    if !cx.has_global::<Workspaces>() {
+        return;
+    }
+    cx.update_global::<Workspaces, _>(|registry, _| {
+        registry.front = Some(workspace);
+    });
+}
+
+/// Whether `workspace` may install the application menu bar.
+///
+/// With one document window this is always true. With several, only the front
+/// one may, or the bar would show whichever workspace happened to refresh last
+/// rather than the one the user is looking at. An unset `front` — the tests
+/// that build a workspace without a real window activation — leaves the gate
+/// open.
+pub fn may_build_menus(workspace: EntityId, cx: &App) -> bool {
+    cx.try_global::<Workspaces>()
+        .is_none_or(|registry| registry.front.is_none_or(|front| front == workspace))
+}
+
+/// Whether a document window other than `workspace` is open.
+///
+/// Used when the last document in a window closes: CotEditor closes that
+/// document's window, and with another window to go back to SubText can do the
+/// same. The last window keeps a blank document instead, so the application
+/// never sits with nothing to show.
+pub fn has_other_window(workspace: EntityId, cx: &App) -> bool {
+    cx.try_global::<Workspaces>().is_some_and(|registry| {
+        registry
+            .entries
+            .iter()
+            .any(|(other, _)| other.entity_id() != workspace)
+    })
 }
 
 /// Run `name` in the active window's workspace.
@@ -186,12 +265,13 @@ fn tell(cx: &mut App, command: impl Fn(&mut Workspace, &mut Window, &mut Context
     });
 }
 
-/// Hand `command` to the first workspace that recognises it.
+/// Hand `command` to the front workspace that recognises it.
 ///
-/// The windows are tried in the order they were opened, newest last, so the
-/// oldest one that can handle the command wins — which for every command here
-/// means the only window there is. A workspace that returns `false` says the
-/// command is not its business, and the search goes on.
+/// The front workspace — the one whose window came to the front last — is
+/// tried first. If the application has no front record (or the active window
+/// is one of the auxiliary panels, which is why the key window is only a
+/// fallback), the search starts at the window the platform says is active and
+/// then walks the rest, oldest first.
 ///
 /// Each command runs against its own workspace's window, never the key window:
 /// see [`Workspaces`].
@@ -199,10 +279,27 @@ fn run(
     cx: &mut App,
     command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) -> bool,
 ) {
-    let workspaces: Vec<(WeakEntity<Workspace>, AnyWindowHandle)> = cx
+    let (mut workspaces, front) = cx
         .try_global::<Workspaces>()
-        .map(|registry| registry.0.clone())
+        .map(|registry| (registry.entries.clone(), registry.front))
         .unwrap_or_default();
+
+    // Put the workspace the command belongs to at the head of the list. The
+    // front record wins; the platform's active window is a fallback for the
+    // frame before activation has been delivered.
+    let preferred = front
+        .and_then(|front| {
+            workspaces
+                .iter()
+                .position(|(workspace, _)| workspace.entity_id() == front)
+        })
+        .or_else(|| {
+            cx.active_window()
+                .and_then(|active| workspaces.iter().position(|(_, window)| *window == active))
+        });
+    if let Some(index) = preferred {
+        workspaces.rotate_left(index);
+    }
 
     for (workspace, window) in workspaces {
         let handled = window.update(cx, |_, window, cx| {

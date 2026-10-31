@@ -618,6 +618,15 @@ pub struct Settings {
     pub sidebar_pane: SidebarPane,
     pub inspector_pane: InspectorPane,
 
+    /// The document toolbar's items, in the order they are drawn.
+    ///
+    /// CotEditor's `NSToolbar` autosaves its configuration under the toolbar's
+    /// identifier; this is that configuration as data, spelled with upstream's
+    /// item identifiers. The default is its text-document toolbar — syntax, a
+    /// flexible space, the inspector toggle — not the old row of file commands,
+    /// which upstream does not put there.
+    pub toolbar_items: Vec<crate::toolbar::ToolbarItemId>,
+
     /// The theme applied to the editor. `None` means "follow the system".
     pub theme: Option<String>,
     pub font_family: Option<String>,
@@ -815,6 +824,7 @@ impl Default for Settings {
             window: WindowOptions::coteditor_defaults(),
             sidebar_pane: SidebarPane::default(),
             inspector_pane: InspectorPane::default(),
+            toolbar_items: crate::toolbar::ToolbarItemId::DEFAULT.to_vec(),
             theme: None,
             font_family: None,
             font_size: edit.tab_width as f32 + 9.0,
@@ -1093,6 +1103,11 @@ mod tests {
         assert_eq!(
             settings.encoding_list.identifiers(),
             EncodingList::from_identifiers(&[Some("utf-8")]).identifiers()
+        );
+        assert_eq!(
+            settings.toolbar_items,
+            crate::toolbar::ToolbarItemId::DEFAULT,
+            "a file written before the toolbar setting existed must get the shipped toolbar"
         );
     }
 

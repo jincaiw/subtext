@@ -3360,7 +3360,172 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 **这一轮的收获是一条排除**：不是 hover、不是偏移量、不是事件顺序。剩下的只有「手柄不可寻址」。
 缺口表里的理由已经按这个改写。
 
-### 22.49 警告表的 Converted 列：Foundation 写的是 `?`，不是 `�`
+### 22.54 收尾：多光标列选择、LaTeX 大纲、捐赠面板，以及三条平台受限
+
+这一轮把缺口表里剩下的五条逐条处理：两条能做的做了，三条确认是 GPUI 没有接口。
+
+**列选择是真多光标，不是画一个矩形。** 上游 `selectColumnUp:` / `selectColumnDown:` 调
+`addSelectedColumn(affinity:)`，在第一个 / 最后一个插入点上方 / 下方加一个插入点。此前矩阵
+写的是「`EditorState` 只有一个选区」——这句话查错了：`EditorState::add_selection(range, cx)`
+是公开的，`Split Selection by Lines` 一直在用。缺的只是「读出全部选区」的接口，所以
+`select_column` 自己记一次连续操作的行程：
+
+* `ColumnWalk { document, column, top, bottom, top_offset, bottom_offset }` 记下列号、
+  已经到达的首尾行和两个端点的字节偏移；
+* 下一次按下时，若光标仍停在两个端点上就继续向同方向长一行；否则视为新的一轮，从当前光标
+  重新取列；
+* 文档一有编辑就清空（所有光标会随编辑移动，旧偏移不再描述任何东西）。
+
+**取列按逻辑行，不按视觉行。** 上游问 `NSLayoutManager` 要同一 wrapped row 上的 glyph 列；
+GPUI 只公开 `visible_row_range`，没有「某偏移在第几个显示行」的查询，display map 是私有的。
+于是 `column_target` 用逻辑行的字符列，短行夹到行尾。未折行时两者完全一致；开了自动折行的长
+行上，上游会沿同一显示行继续，SubText 会走到上一 / 下一**逻辑行**的同列。这条差异写进矩阵，
+不假装没有。四条第单元测试覆盖下移、上移、短行夹取、按字符而非字节取列；UI 测试
+`select_column_down_adds_a_caret_on_each_line` 连按两次再键入 `X`，断言三行都在同一列插入了
+字符 —— 多光标真的生效，而不只是选区数量变了。
+
+**LaTeX 大纲换了一条路。** 上游的 LaTeX 大纲来自 `1024jp/tree-sitter-latex` 的 `swiftPackage`
+分支；crates.io 的 `tree-sitter-latex` 0.1.0 在打包时漏了 `src/scanner.c`，parser 引用的 12 个
+外部符号没有定义，链接失败。试过往上游取 scanner：crates.io 的 parser 与 latex-lsp 各 tag 的
+parser 都不同（`STATE_COUNT` 4018 vs 3237、外部符号 12 vs 6），版本对不上；1024jp 的 fork 在
+`e27d10e` 的 parser.c 有 44 MB，塞进仓库不现实。
+
+于是按查询的语义写了一个线性扫描（`outline.rs::latex_entries`）：`\part`…`\subparagraph`
+是 1–7 级标题，`\title` 与不在 `subfigure` / `subtable`（含星号）里的 `\caption` 是 title，
+标题文本取花括号**内部**、空白折叠（`LaTeXOutlineFormatter` 的做法），条目 range 也取内部
+range；注释、`\%`、可选参数 `[short]`、嵌套花括号都处理了。和解析器的差别是：这不是语法树，
+所以语法上不成立的参数里出现的 `\section` 也会被收进来 —— 对一个「可导航的标题列表」而言，
+这是更宽容的失败方式。五条单元测试覆盖层级、title/caption、subfigure 排除、注释与可选参数。
+
+**捐赠面板是一个真窗口。** 上游非 App Store 构建（`#if SPARKLE`）的 `DonationView` 是一块
+560 点的 `NSPanel`：咖啡图标、一句「全部功能免费」、一句「内购只在 App Store 版可用」，以及
+*Open in App Store* / *Open GitHub Sponsors* 两个链接。SubText 两者都没有，所以面板照原样
+搭起来，文案如实说明没有自己的捐赠渠道，两个按钮指向上游 CotEditor 项目。窗口标题 *Donation*、
+不可缩放、居中。它进了面板冒烟（第 23 步），实机截图确认排版。
+
+**剩下三条是平台受限，不是「没做」。**
+
+* **打印 / 页面设置**：上游用 `NSPrintOperation` + `PrintTextView` 分页、画行号与页眉页脚。
+  GPUI 没有打印面板 API，也没有页面布局模型，没有可交给系统的对象。状态栏现在直接说这一句，
+  不再说「还没实现」。
+* **书写方向 LTR / RTL**：上游设 `NSTextView.baseWritingDirection`。GPUI 的 shaping 支持
+  字符级 bidi（阿拉伯文、希伯来文会正确成形），但没有段落基准方向 —— 双向文本的段落对齐与
+  中性字符的方向无从设置。
+* **布局方向 水平 / 垂直**：上游设 `NSLayoutManager.TextLayoutOrientation.vertical`；GPUI
+  只做横向排版。
+
+三条都保留菜单项，触发时说明缺的是哪个框架能力。矩阵状态从 ⏳ 改为 ⚠️，统计相应调整。
+
+**验证**：工作区 **759** 条测试全绿、UI 测试 **26** 条全绿、24 步面板冒烟通过、clippy 零自有
+警告、`cargo fmt --check` 干净；`tools/peek-panel.sh 23 Donation` 的截图在
+`/tmp/subtext-donation.png`。
+
+### 22.53 新建窗口：把「一个文档一个窗口」补回来
+
+缺口表里「新建窗口」长期是 `⏳`，理由写的是设计决定：SubText 把文档都放在一个窗口的标签里。
+核对上游后这个理由站不住。CotEditor 是 `NSDocument` 应用，`DocumentController.newDocumentAsWindow(_:)`
+与 `newDocumentAsWindow(_:)` 都走 `newDocument(_:)`，区别只有前者把
+`DocumentWindow.tabbingPreference` 暂时设成 `.manual`：
+
+```swift
+@IBAction func newDocumentAsWindow(_ sender: Any?) {
+    DocumentWindow.tabbingPreference = .manual
+    self.newDocument(sender)
+    DocumentWindow.tabbingPreference = nil
+}
+```
+
+也就是说 **⌘N 与 ⇧⌘N 都产生一个窗口**，⌘T 才是「在现有窗口里开标签」。矩阵里三行原来有
+两行语义是错的：新建 = `new_tab`，新建窗口 = 提示。
+
+**这一轮做了三件事。**
+
+* `Workspace::open_new_window`：用同一份 `SyntaxManager` / `ThemeManager` 和当前 `Settings`
+  克隆开第二个窗口，创建后 `activate_window`。`bridge::register` 已经支持多个 workspace，
+  所以命令能直接找到它。
+* 命令分发按前台窗口走。`bridge::Workspaces` 增加 `front: Option<EntityId>`：窗口激活观察器
+  写入，`bridge::run` 先试前台 workspace，再退到平台 `active_window()`，最后才按注册顺序。
+  这样从设置窗口、Quick Actions 面板触发命令时仍然落到背后的文档窗口。
+* 菜单栏归前台文档窗口。菜单是 `App::set_menus` 上的应用级状态，多个 workspace 各自
+  `refresh_menus` 会互相覆盖。现在只有 `front` 的 workspace 能安装菜单；后台窗口把签名算好
+  但不碰菜单栏，等它被激活时清掉 `menus_built_for` 再重装自己的状态。窗口关闭时观察器会
+  把 `front` 让给剩下的最后一个文档窗口。
+
+**顺带修掉启动时多一个标签。** `lib.rs` 的注释一直说「替换空白的起始文档，而不是追加」，
+实际 `Workspace::new` 无条件 `new_document`，命令行文件再由 `open_path` 追加，`subtext a.md`
+于是并排出现「Untitled」和「a.md」。上游对应的是 `transientDocument`：只有一个空白的临时文档
+时才允许被打开的文件替换。这里把构造拆成 `new`（写一个空文档）和 `new_with_paths`（命令行
+给了文件就直接 `open_paths`，不建临时文档），`lib.rs` 改用后者。截图确认标签栏只有 `a.md`。
+读不出来的路径（不存在、无权限）会让 `open_path` 只写状态栏，于是构造后再检查一次文档数，
+为零就退回一个未命名文档 —— 否则会出现一个没有任何文档、编辑器与菜单状态都不知该画什么的窗口。
+
+**测试**：`new_window_opens_a_second_document_window` 断言窗口数 +1 且新窗口能画帧；
+`command_line_paths_do_not_leave_a_starter_tab` 断言 `document_count() == 1`，并顺带覆盖
+读不出的路径退回一个未命名文档。UI 测试 23 → 25。工作区测试仍是 750 条，UI 测试单列。
+多窗口的键盘路由没有自动化测试 —— 测试环境的窗口激活事件不像真实 `NSWindow`
+那样到达 —— 这部分靠代码路径与实机启动验证。
+
+**已知限制**：每个窗口的 `Workspace` 持有自己的一份 `Settings` 克隆。上游的设置是
+`UserDefaults` 的单一模型，一边改主题、另一边立刻看到；SubText 现在要把焦点切过去（重建菜单时
+读到的是自己那份）才会更新，两个窗口先后保存设置时也是后写者覆盖。共享设置模型是下一步，
+不在这一条里。「关闭最后一个标签」已按上游处理：还有别的文档窗口时关掉本窗口
+（`bridge::has_other_window`），只有最后一个窗口时保留一个空白文档，免得应用无处可显示。
+
+### 22.52 工具栏：先对上默认项，再把调色板做出来
+
+这一条从两个问题开始，第二个才是缺口表里那条 `⏳`。
+
+**第一个问题是默认项就不对。** 矩阵只写了「工具栏 ✅（`update_window_options`）」，核对上游才发现
+SubText 画的是 **新建 / 打开 / 存储 / 标题 / 侧栏 / 检查器**，而 CotEditor 的
+`toolbarDefaultItemIdentifiers(_:)` 对文本文档给的是：
+
+```
+.syntax, .inspectorTrackingSeparator, .flexibleSpace, .toggleInspector
+```
+
+也就是**左边一个 Syntax 弹出按钮、中间弹性空隙、右边检查器开关** —— 没有新建/打开/存储，也没有
+标题（标题在窗口标题栏里，SubText 一直在设）。这不是「少做了一点」，是**第一屏就不一样**。
+旧行删掉，默认项按上游重排。
+
+**第二个问题是调色板。** 上游的 `NSToolbarDelegate` 还有
+`toolbarAllowedItemIdentifiers(_:)`：Syntax、Inspector、Text Size、Writing Direction、
+Text Orientation、Indent、Comment、Tab Style、Wrap Lines、Invisibles、Indent Guides、
+Keep on Top、Editable、Spell Check、Emoji & Symbols、Fonts、Find、Print、Share、Space，
+以及 AppKit 的 `flexibleSpace`；*View ▸ Customize Toolbar…* 调
+`runCustomizationPalette(_:)`，用户把项拖进/拖出并排序，配置随 `NSToolbar` autosave。
+SubText 原来只回一句「工具栏还不能自定义」。
+
+**做法**：新模块 [`toolbar.rs`](../crates/subtext-app/src/toolbar.rs)，把三样东西做成数据：
+
+* `ToolbarItemId` —— 上游的标识符字符串（`syntaxStyle`、`textSize`、`flexibleSpace`…），
+  serde 直接照抄。设置里因此是一份能和 CotEditor 逐项对照的清单，而不是一组下标。
+  `#[serde(other)] Unknown` 让新版本写的、或手改错的标识符变成可丢弃的值 —— 否则整个
+  `Settings` 反序列化失败，会静默回退到默认值（`Settings::load` 的既有规则）。
+* `ALLOWED` / `DEFAULT` / `IMMOVABLE` —— 上游的允许项顺序、文本窗口的默认三项，以及
+  AppKit 不许移除的 `flexibleSpace` + `toggleInspector`。`sanitize()` 去重、丢掉未知项、
+  把两个不可移除项补回来（`flexibleSpace` 补在检查器开关之前）。
+* 每一项的 label / 符号 / 动作。状态项在按下时显示选中态，对应上游的 `StatableToolbarItem`。
+
+`ToolbarSheet` 是调色板：左列是当前项，可以拖动改序（复用 §22.47 的 `ListItem` +
+`on_drag` / `on_drop` / `DragPreview`），用 − 移除；右列是还没用到的允许项，点击加入；
+底部 *Default Set* 恢复默认，*Done* 关闭。每次编辑立即写回 `settings.toolbar_items`
+并保存，和 `NSToolbar` 拖动结束就写 `UserDefaults` 一致。
+
+**手势与上游不同**：AppKit 的调色板是**跨列表**拖拽（从调色板拖进工具栏、从工具栏拖出去）。
+GPUI 的拖放落点属于一个元素，对话框重建后也留不住跨列表的拖动状态，所以加入/移除走点击与按钮，
+拖动只用于改序。能力在四个方向上都有 —— 任何允许项能加、任何可移动项能移除、顺序随用户、
+默认能恢复 —— 只是手势不同，写进矩阵。
+
+**没做的**：`Writing Direction`、`Text Orientation`、Spell Check、Emoji & Symbols、Print、
+Share 这些项照列、照能加，按下时仍走原有的状态栏说明 —— 和菜单栏保留它们是同一条规则。
+`ToggleSidebar` 是允许项里唯一的增项：上游只在目录文稿里提供它，SubText 的侧栏属于每个文稿。
+
+**验证**：`toolbar` 单元测试 11 条（默认项、允许项唯一性、sanitize 的去重/补项、拖动落点、
+调色板的加/删/恢复、序列化名字与未知标识符）；UI 测试
+`dragging_a_row_reorders_the_toolbar` 用指针拖第一行到 Find 行，按行自己的 bounds 判位置；
+面板冒烟增至 23 步（第 22 步开调色板）。截图走查用 `tools/peek-overlay.sh 22`：画面里默认工具栏
+是 **Markdown · 弹性空隙 · 检查器开关**，调色板两列都完整落在对话框内，不可移除项的 − 已淡出。
+
 
 缺口表原来写的是「Foundation 写 `?` / `＼`，`encoding_rs` 写 `&#65533;`」。这一轮没有再猜，
 写了个 Swift 探针问 Foundation 本人：
@@ -4237,7 +4402,10 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 
 | 缺口 | 说明 |
 | --- | --- |
-| LaTeX 没有大纲 | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号（链接时报 `_tree_sitter_latex_external_scanner_create` 未定义），装不上。LaTeX 大纲仍为空。 |
+| LaTeX 大纲由线性扫描提供，不是 tree-sitter | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号，装不上，而 1024jp fork 的 parser.c 有 44 MB。`outline.rs::latex_entries` 按 `outline.scm` 的语义扫描标题、`\title` 与 `\caption`，测试覆盖层级 / 排除 / 注释 / 可选参数。差异：语法上不成立的参数里的 `\section` 也会被收进来（§22.54）。 |
+| 打印 / 页面设置没有实现 | 上游用 AppKit 的 `NSPrintOperation` 与 `PrintTextView`；GPUI 不暴露打印面板或页面布局模型，没有可交给系统的对象。菜单保留，触发时说明原因（§22.54）。 |
+| 书写方向与竖排布局不可设置 | 上游分别设 `NSTextView.baseWritingDirection` 与 `NSLayoutManager.TextLayoutOrientation.vertical`。GPUI 的 bidi shaping 只按字符排列，没有段落基准方向；排版只有横向。菜单与工具栏项保留，触发时说明原因（§22.54）。 |
+| 列选择按逻辑行而不是视觉行 | 上游 `addSelectedColumn` 用 `NSLayoutManager` 的 wrapped row 与 glyph 列；GPUI 只公开 `visible_row_range`，没有「偏移 → 显示行」的查询。`select_column` 按逻辑行 + 字符列，短行夹到行尾；未折行时与上游一致（§22.54）。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |

@@ -76,7 +76,7 @@ use crate::color_sheet::ColorSheet;
 use crate::command_bar::{self, CommandBar};
 use crate::console;
 use crate::count_panel::{CountOptionsView, CountSheet};
-use crate::dialogs::AboutView;
+use crate::dialogs::{AboutView, DonationView};
 use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
@@ -88,11 +88,12 @@ use crate::scripts;
 use crate::settings::{
     DEFAULT_FIND_RESULT_FONT_SIZE, DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH,
     INSPECTOR_MIN_WIDTH, InspectorPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, Settings,
-    SettingsPane, SidebarPane,
+    SettingsPane, SidebarPane, WritingDirection,
 };
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
+use crate::toolbar::{ToolbarItemId, ToolbarSheet};
 
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
@@ -583,6 +584,8 @@ pub struct Workspace {
     /// talk to, and the two are cleared together.
     settings_view: Option<WeakEntity<SettingsWindow>>,
     about_window: Option<AnyWindowHandle>,
+    /// The Donation panel, while it is up.
+    donation_window: Option<AnyWindowHandle>,
     /// The console, while it is up. Its log outlives the window — the window is
     /// only the view — so closing it and running `Show Console` again brings the
     /// same entries back.
@@ -775,9 +778,76 @@ pub struct Workspace {
     /// them in `unhighlight(nil)`, which the panel's close triggers. Watching
     /// window closes is the equivalent seam here.
     _find_panel_closed: Option<Subscription>,
+    /// Watches for this window coming to the front.
+    ///
+    /// The menu bar is application-wide, so whichever document window is in
+    /// front is the one whose menu state the bar has to show.
+    _window_activation: Option<Subscription>,
+    /// The column a run of *Select Column Up/Down* is growing.
+    ///
+    /// `EditorState` exposes only the active selection, not the whole set, so
+    /// the run has to remember which lines it has already reached. Cleared by
+    /// an edit and ignored once the caret no longer sits on one of its ends.
+    column_walk: Option<ColumnWalk>,
+}
+
+/// One run of *Select Column Up* / *Select Column Down*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColumnWalk {
+    /// The document the run belongs to.
+    document: DocumentId,
+    /// Character column, counted from the start of the line.
+    column: usize,
+    /// 1-based line numbers of the topmost and bottommost carets.
+    top: usize,
+    bottom: usize,
+    /// Byte offsets of those two carets, used to notice a caret the user moved.
+    top_offset: usize,
+    bottom_offset: usize,
+}
+
+/// The caret one step of *Select Column Up/Down* adds.
+///
+/// CotEditor asks the layout manager for the same glyph column on the visual
+/// row above or below. SubText has no public visual-row API, so this walks
+/// logical lines and counts characters; on unwrapped text the two agree, and
+/// on a wrapped line this lands at the same character column of the previous
+/// logical line instead of the same wrapped row. See §22.54.
+fn column_target(text: &str, walk: ColumnWalk, up: bool) -> Option<(usize, ColumnWalk)> {
+    let line_count = text.matches('\n').count() + 1;
+    let target = if up {
+        walk.top.checked_sub(1)?
+    } else {
+        walk.bottom + 1
+    };
+    if target < 1 || target > line_count {
+        return None;
+    }
+
+    let start = textops::offset_of_line(text, target);
+    let end = text[start..]
+        .find('\n')
+        .map_or(text.len(), |index| start + index);
+    // A shorter line takes the caret at its end, which is what upstream's
+    // line-fragment placement does.
+    let offset = text[start..end]
+        .char_indices()
+        .nth(walk.column)
+        .map_or(end, |(index, _)| start + index);
+
+    let mut walk = walk;
+    if up {
+        walk.top = target;
+        walk.top_offset = offset;
+    } else {
+        walk.bottom = target;
+        walk.bottom_offset = offset;
+    }
+    Some((offset, walk))
 }
 
 impl Workspace {
+    /// A workspace holding one empty, untitled document.
     pub fn new(
         syntaxes: SyntaxManager,
         themes: ThemeManager,
@@ -785,6 +855,54 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut this = Self::build(syntaxes, themes, settings, window, cx);
+        this.new_document(window, cx);
+        this
+    }
+
+    /// A workspace for the files named on the command line.
+    ///
+    /// Opening them without first creating the starter document is what keeps
+    /// `subtext notes.txt` to one tab. CotEditor reaches the same end through
+    /// `transientDocument`, which it drops as soon as a real file is opened;
+    /// here the starter is simply never made.
+    pub fn new_with_paths(
+        syntaxes: SyntaxManager,
+        themes: ThemeManager,
+        settings: Settings,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::build(syntaxes, themes, settings, window, cx);
+        if paths.is_empty() {
+            this.new_document(window, cx);
+        } else {
+            this.open_paths(paths, window, cx);
+            // A path that cannot be read is reported in the status bar and
+            // leaves no document behind. Without this the launch would produce
+            // an empty window, which neither the menu state nor the editor
+            // pane is built to show; CotEditor falls back to an untitled
+            // document in the same situation.
+            if this.documents.is_empty() {
+                this.new_document(window, cx);
+            }
+        }
+        this
+    }
+
+    fn build(
+        syntaxes: SyntaxManager,
+        themes: ThemeManager,
+        mut settings: Settings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // A settings file can name a toolbar item this build does not have, or
+        // omit one AppKit treats as immovable. Normalizing once here means
+        // every frame can trust the list rather than re-checking it.
+        settings.toolbar_items = ToolbarItemId::sanitize(&settings.toolbar_items);
+
         let theme = settings
             .theme
             .as_deref()
@@ -880,6 +998,7 @@ impl Workspace {
             settings_window: None,
             settings_view: None,
             about_window: None,
+            donation_window: None,
             console_window: None,
             matching_bracket: None,
             matching_bracket_selection: None,
@@ -925,6 +1044,8 @@ impl Workspace {
             count_capsule_offset: (0., 0.),
             count_capsule_drag: None,
             _find_panel_closed: None,
+            _window_activation: None,
+            column_walk: None,
         };
         // The incremental search's grey marks belong to the panel's lifetime,
         // not to the document's.
@@ -956,7 +1077,23 @@ impl Workspace {
         })
         .detach();
 
-        this.new_document(window, cx);
+        // The menu bar belongs to the application, not to a window, so a
+        // window that comes to the front has to install its own version of it:
+        // the documents, the caret state and the theme the bar reports are the
+        // front window's. Clear the cached signature first — another window
+        // may have built the bar since this one did.
+        let workspace = cx.entity().downgrade();
+        this._window_activation = Some(cx.observe_window_activation(
+            window,
+            move |this, window, cx| {
+                if window.is_window_active() {
+                    crate::bridge::note_front(workspace.entity_id(), cx);
+                    this.menus_built_for = None;
+                    this.refresh_menus(cx);
+                }
+            },
+        ));
+
         this
     }
 
@@ -979,6 +1116,41 @@ impl Workspace {
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.new_document(window, cx);
         self.set_status("New document", cx);
+    }
+
+    /// Open an empty document in a window of its own.
+    ///
+    /// CotEditor's `newDocument:` and `newDocumentAsWindow:` both hand the new
+    /// document a window controller of its own; the second only forces the
+    /// tabbing preference to manual first. SubText has no system tab bar to
+    /// force, so the two commands land here, and *File ▸ New Tab* is the one
+    /// that adds to the current window.
+    pub fn open_new_window(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // The new window needs the same syntax list and themes as this one,
+        // and the settings as they stand rather than as they were at launch.
+        let syntaxes = self.syntaxes.clone();
+        let themes = self.themes.clone();
+        let settings = self.settings.clone();
+
+        let opened = gpui_kit::open_window(
+            WindowOptions {
+                window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                let workspace = cx.new(|cx| Workspace::new(syntaxes, themes, settings, window, cx));
+                crate::bridge::register(workspace.downgrade(), window.window_handle(), cx);
+                workspace
+            },
+        );
+
+        match opened {
+            Ok((handle, _)) => {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
+            Err(error) => self.notice(format!("Could not open a window: {error}"), cx),
+        }
     }
 
     /// Open a new document already holding `text`, in `syntax_name`.
@@ -1286,6 +1458,9 @@ impl Workspace {
         if self.documents[index].document.text() == text {
             return;
         }
+        // Every caret in a column run moves with the edit, so the recorded
+        // lines and offsets no longer describe anything.
+        self.column_walk = None;
 
         let current_line_ending = self.documents[index].document.line_ending();
         // Upstream opens the automatic list from `insertText`, so only a
@@ -1380,6 +1555,17 @@ impl Workspace {
     pub fn active_text(&self, cx: &App) -> Option<String> {
         let document = self.documents.get(self.active)?;
         Some(document.editor().read(cx).value().to_string())
+    }
+
+    /// The editor of the active document's focused pane.
+    ///
+    /// The commands that act on the selection go through the workspace, but a
+    /// caller that needs to read or place the caret itself — the UI tests, and
+    /// anything that builds on the editor's own API — needs the entity.
+    pub fn active_editor(&self) -> Option<&Entity<gpui_kit::base::input::EditorState>> {
+        self.documents
+            .get(self.active)
+            .map(|document| document.editor())
     }
 
     /// The active document's selection, in byte offsets.
@@ -1729,8 +1915,14 @@ impl Workspace {
             return;
         }
         if self.documents.len() <= 1 {
-            // CotEditor closes the window with the last document; SubText keeps
-            // one document open so the application stays usable.
+            // CotEditor closes the window with its last document. SubText does
+            // the same when another document window is open — there is
+            // somewhere to go. As the last window it keeps one blank document,
+            // so the application never sits with nothing to show.
+            if crate::bridge::has_other_window(cx.entity().entity_id(), cx) {
+                window.remove_window();
+                return;
+            }
             self.new_document(window, cx);
             return;
         }
@@ -2344,6 +2536,55 @@ impl Workspace {
         self.set_selection(start..end, cx);
     }
 
+    /// Add a caret one line above or below the current one, at the same column.
+    ///
+    /// CotEditor's `selectColumnUp:` / `selectColumnDown:`, which call
+    /// `addSelectedColumn(affinity:)`: the first adds an insertion point just
+    /// above the topmost caret, the second just below the bottommost. The
+    /// editor keeps multiple cursors (`add_selection` is the same call
+    /// *Split Selection by Lines* already uses), so the run is real
+    /// multi-cursor editing, not a rectangular selection drawn over the text.
+    pub fn select_column(&mut self, up: bool, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
+        let Some(document) = self.documents.get(self.active) else {
+            return;
+        };
+        let document_id = document.id;
+        let editor = document.editor().clone();
+        let cursor = editor.read(cx).cursor().min(text.len());
+
+        let walk = match self.column_walk {
+            Some(walk)
+                if walk.document == document_id
+                    && (cursor == walk.top_offset || cursor == walk.bottom_offset) =>
+            {
+                walk
+            }
+            // A fresh run: the active caret is both ends, and its column is
+            // the one the new carets will line up with.
+            _ => {
+                let line_start = text[..cursor].rfind('\n').map_or(0, |index| index + 1);
+                ColumnWalk {
+                    document: document_id,
+                    column: text[line_start..cursor].chars().count(),
+                    top: text[..cursor].matches('\n').count() + 1,
+                    bottom: text[..cursor].matches('\n').count() + 1,
+                    top_offset: cursor,
+                    bottom_offset: cursor,
+                }
+            }
+        };
+
+        let Some((offset, walk)) = column_target(&text, walk, up) else {
+            return;
+        };
+        editor.update(cx, |state, cx| state.add_selection(offset..offset, cx));
+        self.column_walk = Some(walk);
+        cx.notify();
+    }
+
     /// Select the nearest enclosing bracketed region, delimiters included.
     ///
     /// Like the two commands above, this stays quiet when there is nothing to
@@ -2552,6 +2793,13 @@ impl Workspace {
         }
         self.scripts = scripts;
         self.menus_built_for = Some(signature);
+        // A window in the background keeps its signature up to date but does
+        // not touch the bar: the bar shows the front window's document, and
+        // whichever window comes forward next clears its own cache and
+        // installs its own state then.
+        if !crate::bridge::may_build_menus(cx.entity().entity_id(), cx) {
+            return;
+        }
         crate::menus::install(cx, &self.menu_state());
     }
 
@@ -2632,6 +2880,9 @@ impl Workspace {
         self.scripts = scripts::scan();
         let state = self.menu_state();
         self.menus_built_for = Some(state.signature());
+        if !crate::bridge::may_build_menus(cx.entity().entity_id(), cx) {
+            return;
+        }
         crate::menus::install(cx, &state);
     }
 
@@ -3984,6 +4235,53 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The toolbar's items, in the order they are drawn.
+    pub fn toolbar_items(&self) -> Vec<ToolbarItemId> {
+        self.settings.toolbar_items.clone()
+    }
+
+    /// Replace the toolbar's items, sanitizing and saving them.
+    ///
+    /// Called by the customization palette on every edit. Upstream's toolbar
+    /// writes to `UserDefaults` as the drag ends, so this saves here too rather
+    /// than waiting for the window to close.
+    pub fn set_toolbar_items(&mut self, items: Vec<ToolbarItemId>, cx: &mut Context<Self>) {
+        self.settings.toolbar_items = ToolbarItemId::sanitize(&items);
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    /// *View ▸ Customize Toolbar…*
+    ///
+    /// Upstream runs `NSToolbar.runCustomizationPalette(_:)`, which shows the
+    /// toolbar if it was hidden and opens a sheet over the window. This does the
+    /// same as a modal dialog: the toolbar behind is updated on every edit, so
+    /// the user sees the result while the palette is open, and *Done* closes it.
+    /// There is no Cancel — AppKit's palette has none either.
+    pub fn customize_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.settings.window.show_toolbar {
+            self.settings.window.show_toolbar = true;
+            let _ = self.settings.save();
+            cx.notify();
+        }
+
+        let items = self.toolbar_items();
+        let workspace = cx.entity().downgrade();
+        let sheet = cx.new(|_| ToolbarSheet::new(workspace, items));
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .title("Customize Toolbar")
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand. Two 18 rem lists plus the gap and
+                // the dialog's padding.
+                .w(window.rem_size() * 42.)
+                .child(sheet.clone())
+                // Enter confirms the palette the way Done does. Escape is
+                // handled by the sheet's `dismiss_on_escape`.
+                .on_ok(|_, _, _| true)
+        });
+    }
+
     pub fn show_sidebar(&mut self, pane: SidebarPane, cx: &mut Context<Self>) {
         self.settings.window.show_sidebar = true;
         self.settings.sidebar_pane = pane;
@@ -4489,6 +4787,15 @@ impl Workspace {
             4 => 8,
             _ => 2,
         };
+        self.set_tab_width(width, cx);
+    }
+
+    /// Set the tab width, keeping the current tab/space choice.
+    ///
+    /// The toolbar's Tab Style menu names the three widths upstream's menu
+    /// offers (2, 4, 8); *Custom…* still cycles, which is what the Format menu
+    /// does until there is a custom-width sheet.
+    pub fn set_tab_width(&mut self, width: usize, cx: &mut Context<Self>) {
         let uses_spaces = self.settings.uses_spaces_for_indentation;
         self.settings.set_indentation(uses_spaces, width);
         let _ = self.settings.save();
@@ -5619,6 +5926,39 @@ impl Workspace {
         }
     }
 
+    /// Show the Donation panel — CotEditor's *CotEditor ▸ Donate…*.
+    ///
+    /// Upstream's panel is a fixed 560-point `NSPanel` that stays visible when
+    /// the app deactivates. The content differs only where it has to: SubText
+    /// has no App Store build and no donation account, so the panel says that
+    /// and points at the project it reimplements.
+    pub fn show_donation(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.donation_window {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
+                return;
+            }
+            self.donation_window = None;
+        }
+        let options = WindowOptions {
+            // Upstream's 560-point content width, with room for the icon,
+            // the two paragraphs and the links.
+            window_bounds: Some(WindowBounds::centered(
+                gpui_kit::size(px(560.), px(380.)),
+                cx,
+            )),
+            window_min_size: Some(gpui_kit::size(px(560.), px(380.))),
+            is_resizable: false,
+            ..Default::default()
+        };
+        match gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| DonationView::new())) {
+            Ok((handle, _donation)) => self.donation_window = Some(handle),
+            Err(error) => self.set_status(error.to_string(), cx),
+        }
+    }
+
     /// Show the console, or bring it forward — CotEditor's `Script ▸ Show
     /// Console`.
     ///
@@ -5743,84 +6083,499 @@ impl Workspace {
     // ---- rendering -------------------------------------------------------
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let document = self.active_document();
-        let title = document.map_or_else(|| "SubText".to_string(), OpenDocument::title);
+        let syntax = self
+            .active_document()
+            .map(|document| document.syntax.to_string())
+            .unwrap_or_default();
+        let has_document = self.active_document().is_some();
 
-        // Every button here is icon-only, so each one carries both an
-        // accessible name (for the accessibility tree) and a tooltip (for the
-        // pointer). A glyph on its own is not a label.
-        h_flex()
+        // The items and their order are the user's, from the customization
+        // palette. The default is upstream's text-document toolbar — syntax, a
+        // flexible space, the inspector toggle — not the row of file commands
+        // that used to be here.
+        let mut bar = h_flex()
             .w_full()
             .px_3()
             .py_1p5()
             .gap_1()
+            .items_center()
             .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("new")
+            .border_color(cx.theme().border);
+        for item in self.settings.toolbar_items.iter().copied() {
+            bar = bar.child(self.render_toolbar_item(item, &syntax, has_document, cx));
+        }
+        bar
+    }
+
+    /// One toolbar item, drawn the way its `NSToolbarItem` is.
+    ///
+    /// Groups are two buttons rather than one segmented control: the component
+    /// library has no `NSToolbarItemGroup`, and two adjacent buttons with the
+    /// same glyphs read the same. Every item that changes a setting shows it
+    /// pressed, which is upstream's `StatableToolbarItem`.
+    fn render_toolbar_item(
+        &self,
+        item: ToolbarItemId,
+        syntax: &str,
+        has_document: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match item {
+            ToolbarItemId::Syntax => {
+                let names = self.syntax_names();
+                let current = syntax.to_string();
+                let label = if has_document && !current.is_empty() {
+                    current.clone()
+                } else {
+                    "Syntax".to_string()
+                };
+                let workspace = cx.entity().downgrade();
+                Button::new("toolbar-syntax")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::assets::IconName::Plus)
-                    .accessibility_label("New document")
-                    .tooltip("New document")
-                    .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
-            )
-            .child(
-                Button::new("open")
+                    .icon(IconName::Languages)
+                    .label(label)
+                    .disabled(!has_document)
+                    .accessibility_label("Syntax")
+                    .tooltip("Change syntax")
+                    .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                        let mut menu = menu;
+                        let none = workspace.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new("None")
+                                .checked(current == "None")
+                                .on_click(move |_, window, cx| {
+                                    none.update(cx, |this, cx| this.set_syntax("None", window, cx))
+                                        .ok();
+                                }),
+                        );
+                        menu = menu.separator();
+                        for name in names.iter() {
+                            let workspace = workspace.clone();
+                            let chosen = name.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(name.clone())
+                                    .checked(name == &current)
+                                    .on_click(move |_, window, cx| {
+                                        let name = chosen.clone();
+                                        workspace
+                                            .update(cx, |this, cx| {
+                                                this.set_syntax(&name, window, cx)
+                                            })
+                                            .ok();
+                                    }),
+                            );
+                        }
+                        menu
+                    })
+                    .into_any_element()
+            }
+            ToolbarItemId::TextSize => h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(
+                    Button::new("toolbar-smaller")
+                        .ghost()
+                        .small()
+                        .icon(IconName::AArrowDown)
+                        .accessibility_label("Smaller")
+                        .tooltip("Decrease text size")
+                        .on_click(cx.listener(|this, _, _, cx| this.bump_font(-1.0, cx))),
+                )
+                .child(
+                    Button::new("toolbar-bigger")
+                        .ghost()
+                        .small()
+                        .icon(IconName::AArrowUp)
+                        .accessibility_label("Bigger")
+                        .tooltip("Increase text size")
+                        .on_click(cx.listener(|this, _, _, cx| this.bump_font(1.0, cx))),
+                )
+                .into_any_element(),
+            ToolbarItemId::WritingDirection => {
+                let rtl = self.settings.window.writing_direction == WritingDirection::RightToLeft;
+                h_flex()
+                    .gap_0p5()
+                    .items_center()
+                    .child(
+                        Button::new("toolbar-ltr")
+                            .ghost()
+                            .small()
+                            .icon(IconName::TextAlignStart)
+                            .selected(!rtl)
+                            .accessibility_label("Left to Right")
+                            .tooltip("Left to right")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dispatch("MakeWritingDirectionLeftToRight", window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("toolbar-rtl")
+                            .ghost()
+                            .small()
+                            .icon(IconName::TextAlignEnd)
+                            .selected(rtl)
+                            .accessibility_label("Right to Left")
+                            .tooltip("Right to left")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dispatch("MakeWritingDirectionRightToLeft", window, cx);
+                            })),
+                    )
+                    .into_any_element()
+            }
+            ToolbarItemId::TextOrientation => h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(
+                    Button::new("toolbar-horizontal")
+                        .ghost()
+                        .small()
+                        .icon(IconName::RectangleHorizontal)
+                        .accessibility_label("Horizontal")
+                        .tooltip("Horizontal")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.dispatch("MakeLayoutOrientationHorizontal", window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("toolbar-vertical")
+                        .ghost()
+                        .small()
+                        .icon(IconName::RectangleVertical)
+                        .accessibility_label("Vertical")
+                        .tooltip("Vertical")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.dispatch("MakeLayoutOrientationVertical", window, cx);
+                        })),
+                )
+                .into_any_element(),
+            ToolbarItemId::Indent => h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(
+                    Button::new("toolbar-shift-left")
+                        .ghost()
+                        .small()
+                        .icon(IconName::ListIndentDecrease)
+                        .accessibility_label("Shift Left")
+                        .tooltip("Shift lines to the left")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.dispatch("ShiftLeft", window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("toolbar-shift-right")
+                        .ghost()
+                        .small()
+                        .icon(IconName::ListIndentIncrease)
+                        .accessibility_label("Shift Right")
+                        .tooltip("Shift lines to the right")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.dispatch("ShiftRight", window, cx);
+                        })),
+                )
+                .into_any_element(),
+            ToolbarItemId::Comment => Button::new("toolbar-comment")
+                .ghost()
+                .small()
+                .icon(IconName::MessageSquare)
+                .accessibility_label("Comment")
+                .tooltip("Comment-out or uncomment selection")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ToggleComment", window, cx);
+                }))
+                .into_any_element(),
+            ToolbarItemId::TabStyle => {
+                let uses_spaces = self.settings.uses_spaces_for_indentation;
+                let tab_width = self.settings.tab_width;
+                let workspace = cx.entity().downgrade();
+                h_flex()
+                    .gap_0p5()
+                    .items_center()
+                    .child(
+                        Button::new("toolbar-tab-style")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Braces)
+                            .selected(uses_spaces)
+                            .accessibility_label("Tab Style")
+                            .tooltip(if uses_spaces {
+                                "Use tab characters for indentation"
+                            } else {
+                                "Use spaces for indentation"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_auto_expand_tabs(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("toolbar-tab-style-menu")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ChevronDown)
+                            .accessibility_label("Tab Width")
+                            .tooltip("Tab width")
+                            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                                let toggle = workspace.clone();
+                                let mut menu = menu.item(
+                                    PopupMenuItem::new("Use Spaces for Indentation")
+                                        .checked(uses_spaces)
+                                        .on_click(move |_, _, cx| {
+                                            toggle
+                                                .update(cx, |this, cx| {
+                                                    this.toggle_auto_expand_tabs(cx)
+                                                })
+                                                .ok();
+                                        }),
+                                );
+                                menu = menu.separator().label("Tab Width");
+                                for width in [2usize, 4, 8] {
+                                    let workspace = workspace.clone();
+                                    menu = menu.item(
+                                        PopupMenuItem::new(width.to_string())
+                                            .checked(tab_width == width)
+                                            .on_click(move |_, _, cx| {
+                                                workspace
+                                                    .update(cx, |this, cx| {
+                                                        this.set_tab_width(width, cx)
+                                                    })
+                                                    .ok();
+                                            }),
+                                    );
+                                }
+                                let custom = workspace.clone();
+                                menu.item(PopupMenuItem::new("Custom…").on_click(
+                                    move |_, _, cx| {
+                                        custom.update(cx, |this, cx| this.cycle_tab_width(cx)).ok();
+                                    },
+                                ))
+                            }),
+                    )
+                    .into_any_element()
+            }
+            ToolbarItemId::WrapLines => {
+                let on = self.settings.editor.wrap_lines;
+                Button::new("toolbar-wrap-lines")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::assets::IconName::FolderOpen)
-                    .accessibility_label("Open document")
-                    .tooltip("Open document")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_dialog(window, cx))),
-            )
-            .child(
-                Button::new("save")
+                    .icon(IconName::TextWrap)
+                    .selected(on)
+                    .accessibility_label("Line Wrapping")
+                    .tooltip(if on { "Unwrap lines" } else { "Wrap lines" })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ToggleLineWrap", window, cx);
+                    }))
+                    .into_any_element()
+            }
+            ToolbarItemId::Invisibles => {
+                let on = self.settings.editor.show_invisibles;
+                Button::new("toolbar-invisibles")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::assets::IconName::HardDrive)
-                    .accessibility_label("Save document")
-                    .tooltip("Save document")
-                    .on_click(cx.listener(|this, _, window, cx| this.save(false, window, cx))),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_center()
-                    .text_sm()
-                    .truncate()
-                    .child(title),
-            )
-            .child(
-                // The sidebar and inspector toggles show their state the way a
-                // toolbar toggle should: pressed when the region is visible.
-                Button::new("sidebar")
+                    .icon(IconName::Pilcrow)
+                    .selected(on)
+                    .accessibility_label("Invisibles")
+                    .tooltip(if on {
+                        "Hide invisible characters"
+                    } else {
+                        "Show invisible characters"
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ToggleInvisibleChars", window, cx);
+                    }))
+                    .into_any_element()
+            }
+            ToolbarItemId::IndentGuides => {
+                let on = self.settings.editor.show_indent_guides;
+                Button::new("toolbar-indent-guides")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::assets::IconName::PanelLeft)
-                    .selected(self.settings.window.show_sidebar)
-                    .accessibility_label("Show sidebar")
-                    .tooltip("Show sidebar")
+                    .icon(IconName::ListTree)
+                    .selected(on)
+                    .accessibility_label("Indent Guides")
+                    .tooltip(if on {
+                        "Hide indent guide lines"
+                    } else {
+                        "Show indent guide lines"
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ToggleIndentGuides", window, cx);
+                    }))
+                    .into_any_element()
+            }
+            ToolbarItemId::KeepOnTop => {
+                let on = self.settings.window.keep_on_top;
+                Button::new("toolbar-keep-on-top")
+                    .ghost()
+                    .small()
+                    .icon(if on { IconName::PinOff } else { IconName::Pin })
+                    .selected(on)
+                    .accessibility_label("Keep on Top")
+                    .tooltip(if on {
+                        "Stop keeping the window on top"
+                    } else {
+                        "Keep the window always on top"
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.update_window_options(cx, |window| {
-                            window.show_sidebar = !window.show_sidebar
+                            window.keep_on_top = !window.keep_on_top
                         })
-                    })),
-            )
-            .child(
-                Button::new("inspector")
+                    }))
+                    .into_any_element()
+            }
+            ToolbarItemId::Editable => {
+                let on = self.settings.editor.editable;
+                Button::new("toolbar-editable")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::assets::IconName::PanelRight)
-                    .selected(self.settings.window.show_inspector)
-                    .accessibility_label("Show inspector")
-                    .tooltip("Show inspector")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.update_window_options(cx, |window| {
-                            window.show_inspector = !window.show_inspector
-                        })
-                    })),
-            )
+                    .icon(if on {
+                        IconName::Pencil
+                    } else {
+                        IconName::PencilOff
+                    })
+                    .selected(on)
+                    .accessibility_label("Edit")
+                    .tooltip(if on {
+                        "Prevent the document from being edited"
+                    } else {
+                        "Allow the document to be edited"
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ToggleEditable", window, cx);
+                    }))
+                    .into_any_element()
+            }
+            ToolbarItemId::SpellCheck => Button::new("toolbar-spell-check")
+                .ghost()
+                .small()
+                .icon(IconName::SpellCheck)
+                .accessibility_label("Spell Check")
+                .tooltip("Show spelling and grammar")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ShowGuessPanel", window, cx);
+                }))
+                .into_any_element(),
+            ToolbarItemId::EmojiAndSymbols => Button::new("toolbar-emoji")
+                .ghost()
+                .small()
+                .icon(IconName::FaceSlightlySmiling)
+                .accessibility_label("Emoji & Symbols")
+                .tooltip("Show Emoji & Symbols")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ShowUnicodeInputPanel", window, cx);
+                }))
+                .into_any_element(),
+            ToolbarItemId::Fonts => {
+                let workspace = cx.entity().downgrade();
+                Button::new("toolbar-fonts")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Type)
+                    .accessibility_label("Fonts")
+                    .tooltip("Change Font")
+                    .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                        let standard = workspace.clone();
+                        let monospaced = workspace.clone();
+                        let panel = workspace.clone();
+                        menu.item(
+                            PopupMenuItem::new("Standard").on_click(move |_, window, cx| {
+                                standard
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("MakeFontStandard", window, cx);
+                                    })
+                                    .ok();
+                            }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Monospaced").on_click(move |_, window, cx| {
+                                monospaced
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("MakeFontMonospaced", window, cx);
+                                    })
+                                    .ok();
+                            }),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Show Fonts").on_click(move |_, window, cx| {
+                                panel
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("OrderFrontFontPanel", window, cx);
+                                    })
+                                    .ok();
+                            }),
+                        )
+                    })
+                    .into_any_element()
+            }
+            ToolbarItemId::Find => Button::new("toolbar-find")
+                .ghost()
+                .small()
+                .icon(IconName::Search)
+                .accessibility_label("Find")
+                .tooltip("Show Find & Replace")
+                .on_click(cx.listener(|this, _, window, cx| this.show_find(false, window, cx)))
+                .into_any_element(),
+            ToolbarItemId::Print => Button::new("toolbar-print")
+                .ghost()
+                .small()
+                .icon(IconName::Printer)
+                .accessibility_label("Print")
+                .tooltip("Print the document")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("PrintDocument", window, cx);
+                }))
+                .into_any_element(),
+            ToolbarItemId::Share => Button::new("toolbar-share")
+                .ghost()
+                .small()
+                .icon(IconName::Share2)
+                .accessibility_label("Share")
+                .tooltip("Share document file")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ShareDocument", window, cx);
+                }))
+                .into_any_element(),
+            ToolbarItemId::ToggleSidebar => Button::new("toolbar-sidebar")
+                .ghost()
+                .small()
+                .icon(IconName::PanelLeft)
+                .selected(self.settings.window.show_sidebar)
+                .accessibility_label("Sidebar")
+                .tooltip(if self.settings.window.show_sidebar {
+                    "Hide sidebar"
+                } else {
+                    "Show sidebar"
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.update_window_options(cx, |window| {
+                        window.show_sidebar = !window.show_sidebar
+                    })
+                }))
+                .into_any_element(),
+            ToolbarItemId::ToggleInspector => Button::new("toolbar-inspector")
+                .ghost()
+                .small()
+                .icon(IconName::PanelRight)
+                .selected(self.settings.window.show_inspector)
+                .accessibility_label("Inspector")
+                .tooltip(if self.settings.window.show_inspector {
+                    "Hide inspector"
+                } else {
+                    "Show inspector"
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.update_window_options(cx, |window| {
+                        window.show_inspector = !window.show_inspector
+                    })
+                }))
+                .into_any_element(),
+            ToolbarItemId::Space => crate::toolbar::fixed_space(),
+            ToolbarItemId::FlexibleSpace => crate::toolbar::flexible_space(),
+            // `sanitize` drops these before they reach the setting, so this arm
+            // is only the type system's price for a tolerant deserializer.
+            ToolbarItemId::Unknown => div().into_any_element(),
+        }
     }
 
     /// The open-document tab strip.
@@ -8645,7 +9400,7 @@ impl Workspace {
     #[cfg(debug_assertions)]
     pub fn panel_sweep(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            for step in 0..22u32 {
+            for step in 0..24u32 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(250))
                     .await;
@@ -8660,7 +9415,7 @@ impl Workspace {
                     return;
                 }
             }
-            eprintln!("panel sweep: 22 of 22 opened");
+            eprintln!("panel sweep: 24 of 24 opened");
             let _ = this.update_in(cx, |_, _, cx| cx.quit());
         })
         .detach();
@@ -8737,6 +9492,11 @@ impl Workspace {
             // panicking. Photographing it needs the app in front — see
             // `docs/PLAN.md` §22.23.
             21 => self.show_quick_actions(window, cx),
+            // The toolbar customization palette: a dialog over this window,
+            // like the other sheets.
+            22 => self.customize_toolbar(window, cx),
+            // The Donation panel, which is a window of its own.
+            23 => self.show_donation(cx),
             _ => {}
         }
     }
@@ -8745,6 +9505,62 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The walk a fresh Select Column run starts with at `cursor`.
+    fn walk_at(text: &str, cursor: usize) -> ColumnWalk {
+        let line_start = text[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line = text[..cursor].matches('\n').count() + 1;
+        ColumnWalk {
+            document: DocumentId(1),
+            column: text[line_start..cursor].chars().count(),
+            top: line,
+            bottom: line,
+            top_offset: cursor,
+            bottom_offset: cursor,
+        }
+    }
+
+    #[test]
+    fn column_selection_steps_down_at_the_same_column() {
+        let text = "alpha\nbeta\ngamma";
+        // Caret after "al".
+        let (offset, walk) = column_target(text, walk_at(text, 2), false).expect("one line down");
+        assert_eq!(offset, 8, "line two, column two: 6 + 2");
+        assert_eq!((walk.top, walk.bottom), (1, 2));
+
+        // A second press grows from the new bottom, not from the caret it
+        // started with.
+        let (offset, walk) = column_target(text, walk, false).expect("another line down");
+        assert_eq!(offset, 13, "line three, column two: 11 + 2");
+        assert_eq!((walk.top, walk.bottom), (1, 3));
+
+        assert_eq!(column_target(text, walk, false), None, "no fourth line");
+    }
+
+    #[test]
+    fn column_selection_steps_up_and_stops_at_the_top() {
+        let text = "alpha\nbeta\ngamma";
+        let (offset, walk) = column_target(text, walk_at(text, 8), true).expect("one line up");
+        assert_eq!(offset, 2, "line one, column two");
+        assert_eq!((walk.top, walk.bottom), (1, 2));
+
+        assert_eq!(column_target(text, walk, true), None, "no line above");
+    }
+
+    #[test]
+    fn column_selection_clamps_to_a_shorter_line() {
+        let text = "abcdef\nxy\n";
+        let (offset, walk) = column_target(text, walk_at(text, 4), false).expect("one line down");
+        assert_eq!(offset, 9, "the end of \"xy\", not past the newline");
+        assert_eq!(walk.bottom, 2);
+    }
+
+    #[test]
+    fn column_selection_counts_characters_not_bytes() {
+        let text = "🐱🐱x\nabcd\n";
+        let (offset, _) = column_target(text, walk_at(text, 8), false).expect("one line down");
+        assert_eq!(offset, 12, "two characters into \"abcd\": 10 + 2");
+    }
 
     #[test]
     fn dragging_the_capsule_moves_it_with_the_pointer() {

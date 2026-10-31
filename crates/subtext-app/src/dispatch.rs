@@ -57,18 +57,19 @@ impl Workspace {
             // version; the release notes for that same version are the same
             // text, so the page it links to is the honest equivalent.
             "ShowWhatsNew" => cx.open_url(RELEASES_URL),
-            "ShowDonationWindow" => self.notice(
-                "SubText has no donation channel — the upstream CotEditor project is where to give",
-                cx,
-            ),
+            "ShowDonationWindow" => self.show_donation(cx),
             "Hide" => self.notice("Hide is handled by the window system", cx),
             "HideOtherApplications" | "UnhideAllApplications" => {
                 self.notice("Application hiding is handled by the window system", cx)
             }
 
             // ---- files ------------------------------------------------
-            "NewDocument" | "NewDocumentAsTab" => self.new_tab(window, cx),
-            "NewDocumentAsWindow" => self.notice("SubText opens documents as tabs", cx),
+            // CotEditor's File ▸ New opens a document window of its own, and
+            // New Window does the same after forcing manual tabbing. With no
+            // system tab bar to force, both commands are the same here; *New
+            // Tab* is the one that stays in this window.
+            "NewDocument" | "NewDocumentAsWindow" => self.open_new_window(window, cx),
+            "NewDocumentAsTab" => self.new_tab(window, cx),
             "OpenDocument" => self.open_dialog(window, cx),
             "ClearRecentDocuments" => self.clear_recent(cx),
             "PerformClose" => self.close_active(window, cx),
@@ -78,8 +79,12 @@ impl Workspace {
             "ShowInFinder" => self.show_in_finder(cx),
             "CopyPath" => self.copy_path(cx),
             "ShareDocument" => self.notice("Share is not implemented yet", cx),
+            // CotEditor prints through AppKit's `NSPrintOperation` and lays the
+            // pages out in a `PrintTextView`. GPUI exposes neither a print
+            // panel nor a page-layout model, so there is nothing to hand the
+            // document to.
             "RunPageLayout" | "PrintDocument" => {
-                self.notice("Printing is not implemented yet", cx)
+                self.notice("Printing needs AppKit's print panel, which GPUI does not expose", cx)
             }
 
             // ---- editing ----------------------------------------------
@@ -108,25 +113,30 @@ impl Workspace {
             "SplitSelectionByLines" => self.split_selection_by_lines(cx),
             "InputBackSlash" => self.insert_text("\\", window, cx),
             "InputYenMark" => self.insert_text("¥", window, cx),
-            // Column selection is defined in terms of the layout manager's
-            // wrapped rows: CotEditor's version asks TextKit which visual line
-            // a cursor is on and places the new one at the same glyph column.
-            // SubText's editor has no such model to ask.
-            "SelectColumnUp" | "SelectColumnDown" => self.notice(
-                "Column selection needs the text layout engine's visual rows, which SubText's editor does not expose",
-                cx,
-            ),
+            // CotEditor's version asks TextKit for the visual row above or
+            // below and adds an insertion point at the same glyph column.
+            // SubText has no public visual-row API, so the walk is over
+            // logical lines and character columns (§22.54).
+            "SelectColumnUp" => self.select_column(true, cx),
+            "SelectColumnDown" => self.select_column(false, cx),
             "Complete" => self.complete(window, cx),
             "ShowUnicodeInputPanel" => {
                 self.notice("That selection command is not implemented yet", cx)
             }
 
             // ---- spelling and substitutions ---------------------------
-            "ShowGuessPanel" | "CheckSpelling" | "ToggleContinuousSpellChecking"
-            | "ToggleGrammarChecking" | "ToggleAutomaticSpellingCorrection"
-            | "ToggleAutomaticQuoteSubstitution" | "ToggleAutomaticDashSubstitution"
-            | "ToggleAutomaticTextReplacement" | "ToggleSmartInsertDelete"
-            | "OrderFrontSubstitutionsPanel" | "StartSpeaking" | "StopSpeaking" => {
+            "ShowGuessPanel"
+            | "CheckSpelling"
+            | "ToggleContinuousSpellChecking"
+            | "ToggleGrammarChecking"
+            | "ToggleAutomaticSpellingCorrection"
+            | "ToggleAutomaticQuoteSubstitution"
+            | "ToggleAutomaticDashSubstitution"
+            | "ToggleAutomaticTextReplacement"
+            | "ToggleSmartInsertDelete"
+            | "OrderFrontSubstitutionsPanel"
+            | "StartSpeaking"
+            | "StopSpeaking" => {
                 self.notice("System spelling and speech services are macOS-only", cx)
             }
             "StraightenQuotesInSelection" => self.straighten_quotes(window, cx),
@@ -134,8 +144,7 @@ impl Workspace {
             // public headers — a probe finds an instance answering to them while
             // the class does not — which makes them the Substitutions panel's
             // system service rather than a transform anything can reimplement.
-            "ReplaceQuotesInSelection" | "ReplaceDashesInSelection"
-            | "ReplaceTextInSelection" => {
+            "ReplaceQuotesInSelection" | "ReplaceDashesInSelection" | "ReplaceTextInSelection" => {
                 self.notice("System text substitution services are macOS-only", cx)
             }
 
@@ -185,12 +194,18 @@ impl Workspace {
             "ToggleLineWrap" => self.update_editor_options(window, cx, |options| {
                 options.wrap_lines = !options.wrap_lines
             }),
-            "ToggleEditable" => self.update_editor_options(window, cx, |options| {
-                options.editable = !options.editable
-            }),
-            "MakeWritingDirectionLeftToRight" | "MakeWritingDirectionRightToLeft"
-            | "MakeLayoutOrientationHorizontal" | "MakeLayoutOrientationVertical" => {
-                self.notice("Writing direction is not implemented yet", cx)
+            "ToggleEditable" => self
+                .update_editor_options(window, cx, |options| options.editable = !options.editable),
+            // NSTextView's `baseWritingDirection` and the layout manager's
+            // vertical orientation are the two text-engine settings GPUI does
+            // not expose: its shaping is per-character bidi with no paragraph
+            // base direction, and it lays text out horizontally only.
+            "MakeWritingDirectionLeftToRight" | "MakeWritingDirectionRightToLeft" => self.notice(
+                "GPUI's text engine has no paragraph writing direction; CotEditor gets it from NSTextView",
+                cx,
+            ),
+            "MakeLayoutOrientationHorizontal" | "MakeLayoutOrientationVertical" => {
+                self.notice("GPUI's text engine cannot lay out vertical text", cx)
             }
 
             // ---- view --------------------------------------------------
@@ -200,18 +215,15 @@ impl Workspace {
             "ToggleToolbarShown" => {
                 self.update_window_options(cx, |window| window.show_toolbar = !window.show_toolbar)
             }
-            "RunToolbarCustomizationPalette" => {
-                self.notice("The toolbar is not user-customisable yet", cx)
-            }
+            "RunToolbarCustomizationPalette" => self.customize_toolbar(window, cx),
             "ShowQuickActions" => self.show_quick_actions(window, cx),
             "ShowFileBrowser" => self.show_sidebar(SidebarPane::FileBrowser, cx),
             "ShowFolderFinder" => self.show_sidebar(SidebarPane::FolderFind, cx),
             "ToggleSidebar" => {
                 self.update_window_options(cx, |window| window.show_sidebar = !window.show_sidebar)
             }
-            "ToggleInspector" => self.update_window_options(cx, |window| {
-                window.show_inspector = !window.show_inspector
-            }),
+            "ToggleInspector" => self
+                .update_window_options(cx, |window| window.show_inspector = !window.show_inspector),
             "ShowDocumentInspector" => self.show_inspector(InspectorPane::Document, cx),
             "ShowOutlineInspector" => self.show_inspector(InspectorPane::Outline, cx),
             "ShowWarningsInspector" => self.show_inspector(InspectorPane::Warnings, cx),
@@ -221,9 +233,9 @@ impl Workspace {
             "ToggleLineNumber" => self.update_editor_options(window, cx, |options| {
                 options.show_line_numbers = !options.show_line_numbers
             }),
-            "ToggleStatusBar" => {
-                self.update_window_options(cx, |window| window.show_status_bar = !window.show_status_bar)
-            }
+            "ToggleStatusBar" => self.update_window_options(cx, |window| {
+                window.show_status_bar = !window.show_status_bar
+            }),
             "FocusNextEditor" => self.focus_next_editor(true, window, cx),
             "FocusPreviousEditor" => self.focus_next_editor(false, window, cx),
             "OpenSplitTextView" => self.open_split_editor(window, cx),
@@ -239,13 +251,17 @@ impl Workspace {
                 textops::toggle_comment(text, selection, delimiters)
             }),
             "InlineCommentOut" => self.text_op(window, cx, |text, selection, delimiters| {
-                let inline =
-                    textops::CommentDelimiters { inline: delimiters.inline.clone(), block: None };
+                let inline = textops::CommentDelimiters {
+                    inline: delimiters.inline.clone(),
+                    block: None,
+                };
                 textops::toggle_comment(text, selection, &inline)
             }),
             "BlockCommentOut" => self.text_op(window, cx, |text, selection, delimiters| {
-                let block =
-                    textops::CommentDelimiters { inline: None, block: delimiters.block.clone() };
+                let block = textops::CommentDelimiters {
+                    inline: None,
+                    block: delimiters.block.clone(),
+                };
                 textops::toggle_comment(text, selection, &block)
             }),
             "Uncomment" => self.text_op(window, cx, |text, selection, delimiters| {

@@ -43,6 +43,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 | 侧栏 | 文件浏览器 / 文件夹查找 |
 | 面板 | 分屏编辑器、多重替换、按模式排序、编辑颜色代码、快速操作（⌘K）、代码片段、Inspect Character（锚定选区的 popover）、高级计数（选项 sheet + 正文上的胶囊）、查找与替换（独立的浮动窗口） |
 | 窗口框架 | 侧栏 / 内容 / 检查器三栏（分隔线可拖动、宽度记住），状态栏属于内容列，每个分屏带一条导航栏 |
+| 工具栏 | 默认项与上游文本窗口一致（Syntax · 弹性空隙 · Inspector）；*Customize Toolbar…* 可增删与排序，配置按上游的 `NSToolbarItem.Identifier` 保存 |
 
 未实现的功能**不会从菜单里消失** —— 它们保留在菜单栏中，触发时在状态栏说明原因。
 一个吞掉按键的编辑器，比一个承认自己缺什么的编辑器更糟。
@@ -57,7 +58,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 739 项测试
+cargo test --workspace # 759 项测试
 ```
 
 要求 Rust 1.99.1（edition 2024；`rust-toolchain.toml` 已钉住，`rustup` 会自己装）。
@@ -69,7 +70,7 @@ cargo test --workspace # 739 项测试
 cargo run                    # 空文档
 cargo run -- path/to/file    # 打开文件
 
-# 面板冒烟（debug 版）：依次打开 22 个面板/页签后退出，任何一处 panic 都会让退出码非 0
+# 面板冒烟（debug 版）：依次打开 24 个面板/页签后退出，任何一处 panic 都会让退出码非 0
 SUBTEXT_PANEL_SWEEP=1 cargo run -- path/to/file
 ```
 

@@ -6,6 +6,92 @@
 
 ---
 
+## [0.3.59] — 2026-10-31
+
+### 新增
+
+- **新建窗口（⇧⌘N）真的开一个窗口了**。上游每个文档一个 `NSWindow`，`newDocument:` 与
+  `newDocumentAsWindow:` 都会新建窗口（后者只是先把 `tabbingPreference` 设成 manual）；
+  SubText 之前只回一句「文档以标签页打开」。现在 *File ▸ New* 与 *File ▸ New Window* 都打开
+  一个独立窗口，`open_new_window` 把语法表、主题和当前设置一并带过去；*File ▸ New Tab*（⌘T）
+  仍然只在当前窗口加标签。
+- **多窗口时命令和菜单跟随前台窗口**。`bridge` 记下最近被激活的文档窗口：全局命令优先在该
+  窗口的 workspace 里执行（设置 / Quick Actions 等浮动窗口拿走键盘时也不会投错文档），
+  应用程序菜单栏只由前台文档窗口安装，切回另一个窗口时它会清掉缓存并重装自己的菜单状态。
+  关掉窗口里的最后一个标签时，若还有别的文档窗口就关掉这个窗口（上游的行为）；作为最后一个
+  窗口则保留一个空白文档。
+- **列选择是真多光标**（⌃⇧↑ / ⌃⇧↓）。`select_column` 用 `EditorState::add_selection` 在上一行 /
+  下一行的同一列加插入点，连按会继续向外长；键入落在每一行。上游按软换行后的视觉行取列，
+  GPUI 没有公开的视觉行接口，这里按逻辑行 + 字符列（未折行时一致）。
+- **LaTeX 有大纲了**。上游的 tree-sitter 语法在 crates.io 上缺外部扫描器，链接失败；按
+  `outline.scm` 的语义实现了线性扫描：`\part`…`\subparagraph` 七级标题、`\title` 与
+  `\caption`（排除 `subfigure` / `subtable`），标题取花括号内部并折叠空白，注释与可选参数
+  都处理。
+- **捐赠窗口**（*SubText ▸ Donate…*）是一个 560×380 的独立面板：咖啡图标、说明文字，以及
+  *Open CotEditor in App Store* / *Open GitHub Sponsors* 两个链接。SubText 没有自己的捐赠
+  账户，文案与链接都如实指向上游项目。
+
+### 修复
+
+- **`subtext file.txt` 只剩一个标签页**。此前 `Workspace::new` 先建一个空文档，命令行文件
+  再追加，于是「Untitled」和文件并排；上游用 `transientDocument` 在打开真实文件时丢掉那个
+  空文档。现在 `Workspace::new_with_paths` 在启动时直接打开文件，根本不建临时文档；
+  路径读不出来时（文件不存在 / 无权限）退回一个未命名文档，而不是留一个空窗口。
+
+### 平台受限（菜单保留 + 说明）
+
+- **打印 / 页面设置**：上游用 AppKit 的 `NSPrintOperation`；GPUI 不暴露打印面板与页面布局。
+- **书写方向 LTR / RTL**：GPUI 没有段落基准方向（只有字符级 bidi shaping）。
+- **布局方向 水平 / 垂直**：GPUI 只做横向排版。
+
+### 工程
+
+- 新增 UI 测试 `new_window_opens_a_second_document_window`（窗口数 +1，新窗口能画帧）、
+  `command_line_paths_do_not_leave_a_starter_tab`（`document_count() == 1`，含坏路径回退）与
+  `select_column_down_adds_a_caret_on_each_line`（一次键入落在三行）。UI 测试 23 → 26。
+- 新增 4 条列选择单元测试与 5 条 LaTeX 大纲单元测试。
+- 窗口关闭观察器随 `Workspaces` 注册一次，前台记录不会指向已关闭的窗口。
+- 面板冒烟 23 → 24 步（第 23 步打开捐赠窗口）。
+- **759** 项测试全绿、26 项 UI 测试全绿、clippy 零自有警告、`cargo fmt --check` 零差异。
+- 实机截图确认 `subtext a.md` 的标签栏只有一项，标题为 `a.md`；捐赠面板排版见
+  `/tmp/subtext-donation.png`。
+
+## [0.3.58] — 2026-10-31
+
+### 修复
+
+- **工具栏的默认项终于和 CotEditor 一样了**。此前画的是 新建 / 打开 / 存储 / 标题 / 侧栏 /
+  检查器，而上游 `toolbarDefaultItemIdentifiers(_:)` 对文本文档给的是
+  **Syntax 弹出按钮 · 弹性空隙 · Inspector 开关** —— 没有文件命令，也没有标题（标题在窗口标题栏）。
+  默认项按上游重排，旧的一行删掉。
+
+### 新增
+
+- **工具栏可自定义**（*View ▸ Customize Toolbar…*）。调色板左边是当前项，可拖动改序、− 移除；
+  右边是可用项，点击加入；底部 *Default Set* 恢复默认，*Done* 关闭。允许项与上游
+  `toolbarAllowedItemIdentifiers(_:)` 同序（Syntax、Text Size、Writing Direction、Indent、
+  Comment、Tab Style、Wrap Lines、Invisibles、Indent Guides、Keep on Top、Editable、
+  Spell Check、Emoji & Symbols、Fonts、Find、Print、Share、Space、Flexible Space），
+  `flexibleSpace` 与 `toggleInspector` 和 AppKit 一样不可移除。每次编辑立即写回设置。
+- 工具栏配置存成上游的标识符字符串（`syntaxStyle` / `textSize` / `flexibleSpace` …），
+  因此可以和 CotEditor 的项逐条对照；未知标识符被容忍并丢弃，不会让整份设置回退到默认值。
+- 状态项按下时显示选中态；书写方向、布局方向、系统面板等尚不可用的项照列，按下时仍在状态栏说明。
+
+### 工程
+
+- 新增 `crates/subtext-app/src/toolbar.rs`：允许项 / 默认项 / 不可移除项、序列化、调色板，
+  以及 11 条单元测试。
+- 新增 UI 测试 `dragging_a_row_reorders_the_toolbar`：用真实指针把第一行拖到第三行，
+  按行自身的 bounds 断言顺序变化。UI 测试 22 → 23。
+- 面板冒烟 22 → 23 步（第 22 步打开自定义工具栏对话框）；`tools/peek-panel.sh` 的步骤表补上
+  Quick Actions 与 Customize Toolbar。
+- **750** 项测试全绿、23 项 UI 测试全绿、clippy 零自有警告、`cargo fmt --check` 零差异。
+
+### 已知限制
+
+- 调色板的**加入 / 移除手势**与上游不同：AppKit 是跨列表拖拽，GPUI 没有跨列表落点，改为
+  「点击加入 / − 移除」，拖动只负责改序。见 `docs/PLAN.md` §22.52。
+
 ## [0.3.57] — 2026-10-31
 
 ### 工程

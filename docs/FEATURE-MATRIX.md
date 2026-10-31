@@ -31,16 +31,16 @@
 | 服务 | `NSMenu` Services | `MenuItem::os_submenu(_, SystemMenuType::Services)` | ✅ 交系统填 |
 | 隐藏 / 隐藏其他 / 全部显示 | `NSApplication` | 交窗口系统处理 | 🔁 |
 | 退出 | `terminate:` | `cx.quit()` | ✅ |
-| 捐赠窗口 | 独立窗口 | 状态栏提示：SubText 没有捐赠渠道 | ⏳ 不是做不了，是没有账户可指向 |
+| 捐赠窗口 | 独立窗口 | `DonationView`（560×380 面板，标题 *Donation*） | 🔁 上游非 App Store 版同一块面板：咖啡图标 + 说明 + *App Store* / *GitHub Sponsors* 两个链接。SubText 没有自己的账户，链接指向上游 CotEditor 项目（§22.54） |
 | 更新日志 | 独立窗口 | 打开本项目的 release 页面 | 🔁 上游的 What's New 面板就是新版本功能说明，离它最近的是 release notes |
 
 ## 2. 文件菜单
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 新建 | `new_tab` | ✅ |
-| 新建标签页 | `new_tab` | ✅ |
-| 新建窗口 | — | ⏳ 设计决定而非能力缺失：上游同时有窗口与标签页，SubText 只做标签页（§22.13） |
+| 新建 | `open_new_window` | ✅ 与上游 `newDocument:` 一致：新文档开新窗口 |
+| 新建标签页 | `new_tab` | ✅ 上游 `newDocumentAsTab:`：留在当前窗口加标签 |
+| 新建窗口 | `open_new_window` | ✅ 上游 `newDocumentAsWindow:`（先把 tabbing 偏好设成 manual；SubText 没有系统标签栏可设，直接开新窗口，§22.53） |
 | 打开… | `open_dialog` | ✅ |
 | 打开最近使用 | 菜单运行时列出最近 10 条（标题用文件名）+ 侧栏 `FileBrowser` | ✅ |
 | 清除最近使用 | `clear_recent` | ✅ |
@@ -51,7 +51,7 @@
 | 在文件管理器中显示 | `show_in_finder` | ✅ |
 | 拷贝路径 | `copy_path` | ✅ |
 | 共享 | — | ⚠️ 上游是 `NSSharingServicePicker`，一个 AppKit 弹出层；GPUI 不暴露 |
-| 页面设置 / 打印 | — | ⏳ |
+| 页面设置 / 打印 | — | ⚠️ 上游用 AppKit 的 `NSPrintOperation` 与 `PrintTextView` 排版页面；GPUI 不暴露打印面板，也没有页面布局模型，没有可交给系统的对象（§22.54） |
 
 **文件 I/O 细节**：编码（含 6 种 BOM）、换行符、文件修改标记、未保存确认，
 全部由 `subtext-core::document` + `subtext-core::encoding` 处理。
@@ -69,7 +69,7 @@
 | 选择单词 | `select_word` | ✅ |
 | 选择段落 | `select_line` | ✅ |
 | 选择包围符号 | `select_enclosing_symbols` | ✅ |
-| 向上/下扩展列选择 | — | ⏳ **不是视觉行模型，是多光标**：上游的 `selectColumnUp/Down` 调 `addSelectedColumn(affinity:)`，在第一个选区**上方加一个插入点**（多光标），而 `EditorState` 只有一个选区（§22.13） |
+| 向上/下扩展列选择 | `select_column(true/false)` | ✅ 真多光标：`EditorState::add_selection` 在上一行 / 下一行的同一列加一个插入点，键入落在每一行。上游按**视觉行**（软换行后的行片段）取列，GPUI 没有公开的视觉行接口，这里按**逻辑行 + 字符列**走；未折行时两者一致，见 §22.54 |
 | 按行拆分选区 | `split_selection_by_lines` | ✅ |
 | 菜单校验 | `menu_contract` | ✅ 命令覆盖由 `cargo test` 常设把关（生成表 → bridge 绑定 → dispatch 分支）。**按状态置灰**：三项跟着光标走 —— *Straighten Quotes*（空选区）、*Select Previous/Next Outline Item*（前后有没有条目）。生成器把条件烘进条目，工作区用 `cx.observe(editor)` 跟踪并在翻转时重建菜单栏；大纲那两项读的是文档缓存的抽取结果（§22.46） |
 | 括号配对 | `flash_matching_bracket` | ✅ 光标紧跟括号时闪出配对那一个（`matching_symbol_pair` 按对计数嵌套，`()` `{}` `[]`），**每次光标移动都判**，与上游一致：`cx.observe(editor)` 的回调里做，先比选区（一次 range 比较，光标闪烁时不扫配对）再比配对（同一不影响重闪）。见 §22.15 |
@@ -129,16 +129,16 @@
 | 页面参考线 | `update_editor_options` | ✅ |
 | 自动折行 | `update_editor_options` | ✅ |
 | 可编辑 | `update_editor_options` | ✅ |
-| 书写方向 LTR / RTL | — | ⏳ |
-| 布局方向 水平 / 垂直 | — | ⏳ |
+| 书写方向 LTR / RTL | — | ⚠️ 上游设 `NSTextView.baseWritingDirection`；GPUI 的 bidi shaping 只按字符做双向排列，没有段落基准方向接口（§22.54） |
+| 布局方向 水平 / 垂直 | — | ⚠️ 上游设 `NSLayoutManager.TextLayoutOrientation.vertical`；GPUI 只做横向排版（§22.54） |
 
 ## 6. 显示菜单
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
 | 标签栏 | `update_window_options` | ✅ |
-| 工具栏 | `update_window_options` | ✅ |
-| 工具栏自定义 | — | ⏳ |
+| 工具栏 | `render_toolbar` + `settings.toolbar_items` | ✅ 默认项与上游文本窗口一致：**Syntax 弹出按钮 · 弹性空隙 · Inspector 开关**（旧版的 新建 / 打开 / 存储 / 标题 一行已删掉——上游工具栏里没有它们）。每一项按上游的 `NSToolbarItem.Identifier` 存进设置（`syntaxStyle` / `flexibleSpace` / `toggleInspector` …）；状态项（换行、不可见字符、缩进参考线、Tab 风格、可编辑、置顶、侧栏、检查器）按下时显示选中态 |
+| 工具栏自定义 | `customize_toolbar` + `toolbar::ToolbarSheet` | ✅ *View ▸ Customize Toolbar…* 打开调色板：左边是当前项（可拖动改序、− 移除），右边是可用项（点击加入），底部 *Default Set* / *Done*。允许项与上游 `toolbarAllowedItemIdentifiers(_:)` 同序；`flexibleSpace` 与 `toggleInspector` 与上游一样不可移除。每次编辑立即写回设置（上游 `NSToolbar` 也是即时 autosave）。手势与上游不同：上游从调色板把项**拖进/拖出**工具栏，GPUI 没有跨列表的落点，改为「点击加入 / − 移除」；拖动只用于改序，见 PLAN §22.52 |
 | 快速操作 | `show_quick_actions` | ✅ 浮动面板 + 子序列匹配菜单路径；空查询不列结果 |
 | 快速操作的命令来源 | `NSApp.actionCommands`（遍历实时主菜单） | `menus::commands`（重建菜单栏再摊平） | ✅ 含运行时条目；排除打开面板自身那条 |
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
@@ -285,7 +285,7 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 快捷键 | 命令 |
 | --- | --- |
-| ⌘N / ⇧⌘N | 新建 / 新建标签页 |
+| ⌘N / ⇧⌘N / ⌘T | 新建窗口 / 新建窗口 / 新建标签页 |
 | ⌘O / ⌘S / ⇧⌘S | 打开 / 存储 / 存储为 |
 | ⌘F / ⌥⌘F | 查找 / 替换 |
 | ⌘G / ⇧⌘G | 查找下一个 / 上一个 |
@@ -308,11 +308,14 @@ Windows / Linux 为 `config_directory()/Scripts`。
 
 | 状态 | 数量 | 占比 |
 | --- | --- | --- |
-| ✅ 完整实现 | 约 133 | 66% |
-| 🔁 等价实现（委托或改写） | 约 24 | 12% |
-| ⚠️ 平台受限（菜单保留） | 约 20 | 10% |
-| ⏳ 未实现（菜单保留 + 提示） | 约 26 | 13% |
-| **合计** | **203** | **100%** |
+| ✅ 完整实现 | 138 | 80% |
+| 🔁 等价实现（委托或改写） | 16 | 9% |
+| ⚠️ 平台受限（菜单保留） | 19 | 11% |
+| ⏳ 未实现（菜单保留 + 提示） | 0 | 0% |
+| **合计** | **173** | **100%** |
+
+数量按本表的行数计。⏳ 归零：每个缺口要么已经实现，要么确认是 GPUI 不提供的能力并改记为
+⚠️；两种情况下菜单项都保留。
 
 **关键点**：**菜单栏 258 项一个不少**。
 未实现的功能不是「从菜单里删掉」，而是「保留 + 说明」——

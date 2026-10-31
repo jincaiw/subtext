@@ -56,6 +56,7 @@ pub mod snippet_pane;
 pub mod snippets;
 pub mod sort_sheet;
 pub mod surround_sheet;
+pub mod toolbar;
 pub mod workspace;
 
 use std::path::PathBuf;
@@ -194,7 +195,11 @@ fn open_main_window(
     };
 
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-        let workspace = cx.new(|cx| Workspace::new(syntaxes, themes, settings, window, cx));
+        // Files named on the command line are opened by the constructor, not
+        // after it: a starter document created here would sit beside them as a
+        // second, unwanted tab.
+        let workspace =
+            cx.new(|cx| Workspace::new_with_paths(syntaxes, themes, settings, paths, window, cx));
         bridge::register(workspace.downgrade(), window.window_handle(), cx);
         workspace
     });
@@ -208,36 +213,26 @@ fn open_main_window(
         }
     };
 
-    if paths.is_empty() {
-        return;
+    // A manual smoke for the panels no test can reach; see
+    // `Workspace::panel_sweep`. `SUBTEXT_PANEL_PEEK=<n>` opens panel n and
+    // stays there, so a screenshot can be taken; `SUBTEXT_PANEL_SWEEP=1` opens
+    // all of them and quits. Both are debug-only.
+    #[cfg(debug_assertions)]
+    {
+        let peek = std::env::var("SUBTEXT_PANEL_PEEK")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok());
+        let sweep = std::env::var_os("SUBTEXT_PANEL_SWEEP").is_some();
+        if peek.is_some() || sweep {
+            let _ = handle.update(cx, move |_, _window, cx| {
+                workspace.update(cx, |workspace, cx| match peek {
+                    Some(step) => workspace.panel_peek(step, cx),
+                    None => workspace.panel_sweep(cx),
+                });
+            });
+        }
     }
 
-    // Replace the empty starter document rather than adding to it, so opening
-    // one file on the command line leaves one tab, not two.
-    handle
-        .update(cx, move |_, window, cx| {
-            workspace.update(cx, |workspace, cx| {
-                for path in paths {
-                    workspace.open_path(path, window, cx);
-                }
-                // A manual smoke for the panels no test can reach; see
-                // `Workspace::panel_sweep`.
-                // `SUBTEXT_PANEL_PEEK=<n>` opens panel n and stays there, so a
-                // screenshot can be taken; `SUBTEXT_PANEL_SWEEP=1` opens all of
-                // them and quits. Both are debug-only.
-                #[cfg(debug_assertions)]
-                match std::env::var("SUBTEXT_PANEL_PEEK")
-                    .ok()
-                    .and_then(|value| value.parse::<u32>().ok())
-                {
-                    Some(step) => workspace.panel_peek(step, cx),
-                    None => {
-                        if std::env::var_os("SUBTEXT_PANEL_SWEEP").is_some() {
-                            workspace.panel_sweep(cx);
-                        }
-                    }
-                }
-            });
-        })
-        .ok();
+    #[cfg(not(debug_assertions))]
+    let _ = (handle, workspace);
 }

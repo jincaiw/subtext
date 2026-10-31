@@ -159,6 +159,48 @@ fn open_workspace_with_document(
     (window, workspace)
 }
 
+/// Open a workspace the way `lib.rs` does at launch: the paths, if any, are
+/// handed to the constructor, which creates no starter document of its own.
+fn open_workspace_at_launch(
+    cx: &mut TestAppContext,
+    paths: Vec<std::path::PathBuf>,
+) -> (
+    gpui_kit::AnyWindowHandle,
+    gpui_kit::Entity<subtext_app::workspace::Workspace>,
+) {
+    use subtext_app::settings::Settings;
+    use subtext_app::workspace::Workspace;
+    use subtext_app::{load_syntaxes, load_themes};
+
+    cx.update(gpui_kit::init);
+    subtext_app::resources::use_config_root(
+        std::env::temp_dir().join(format!("subtext-ui-tests-config-{}", std::process::id())),
+    );
+
+    cx.update(move |cx| {
+        let resources = subtext_app::resources::Resources::discover();
+        let syntaxes = load_syntaxes(resources.as_ref());
+        let themes = load_themes(resources.as_ref());
+        let settings = Settings::load();
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(900.), px(600.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                cx.new(|cx| {
+                    Workspace::new_with_paths(syntaxes, themes, settings, paths, window, cx)
+                })
+            },
+        )
+        .expect("open the test window")
+    })
+}
+
 /// A dialog's button is a button, not a bar across the dialog.
 ///
 /// This is the regression §22.24 fixed: `DialogClose` renders `div().size_full()`,
@@ -726,6 +768,120 @@ fn switching_documents_moves_the_caret_with_the_document(cx: &mut TestAppContext
     .expect("switch");
 }
 
+/// New Window opens a document window of its own.
+///
+/// CotEditor's ⌘N and ⇧⌘N both produce a window, because every document has
+/// one; SubText keeps several documents in one window, so this is the command
+/// that has to make a window rather than a tab. The new window is blank and
+/// the original document is left alone.
+#[gpui_kit::test]
+fn new_window_opens_a_second_document_window(cx: &mut TestAppContext) {
+    let (document, workspace) = open_workspace_with_document(cx, "new-window", "first");
+    let before: Vec<_> = cx.update(|cx| cx.windows());
+
+    cx.update_window(document, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.open_new_window(window, cx));
+        window.render_frame(cx);
+    })
+    .expect("open a new window");
+    cx.run_until_parked();
+
+    let after: Vec<_> = cx.update(|cx| cx.windows());
+    assert_eq!(
+        after.len(),
+        before.len() + 1,
+        "New Window should add one window, not a tab"
+    );
+
+    let opened = after
+        .into_iter()
+        .find(|handle| !before.contains(handle))
+        .expect("the new window should be among the open ones");
+
+    // Rendering the new window proves it was built: a workspace that failed to
+    // initialise would not draw a frame.
+    cx.update_window(opened, |_, window, cx| {
+        window.render_frame(cx);
+    })
+    .expect("render the new window");
+
+    assert_eq!(
+        workspace.read_with(cx, |workspace, _| workspace.document_count()),
+        2,
+        "the original window keeps its starter document and its file"
+    );
+}
+
+/// Files on the command line are the only tabs that open.
+///
+/// The launch path used to create an untitled document and then open the file
+/// beside it, leaving `subtext notes.txt` with two tabs. CotEditor's transient
+/// untitled document is dropped on open for the same reason.
+#[gpui_kit::test]
+fn command_line_paths_do_not_leave_a_starter_tab(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join("subtext-ui-tests-launch-path");
+    std::fs::create_dir_all(&dir).expect("create the test folder");
+    let path = dir.join("notes.txt");
+    std::fs::write(&path, "notes").expect("write the test document");
+
+    let (_, workspace) = open_workspace_at_launch(cx, vec![path]);
+    cx.run_until_parked();
+
+    assert_eq!(
+        workspace.read_with(cx, |workspace, _| workspace.document_count()),
+        1,
+        "the file named on the command line should be the only tab"
+    );
+
+    // A path that cannot be read leaves no document behind, so the fallback
+    // must supply the untitled one; an empty window has nothing to draw.
+    let missing = dir.join("does-not-exist.txt");
+    let (_, fallback) = open_workspace_at_launch(cx, vec![missing]);
+    cx.run_until_parked();
+
+    assert_eq!(
+        fallback.read_with(cx, |workspace, _| workspace.document_count()),
+        1,
+        "an unreadable launch path should fall back to one untitled document"
+    );
+}
+
+/// Select Column Down grows a real multi-cursor run.
+///
+/// CotEditor adds an insertion point below the last caret at the same column;
+/// typing then lands on every line. This is the part a single-selection editor
+/// could not do, so the assertion is the text after typing, not a selection
+/// count.
+#[gpui_kit::test]
+fn select_column_down_adds_a_caret_on_each_line(cx: &mut TestAppContext) {
+    let (window, workspace) =
+        open_workspace_with_document(cx, "column-select", "alpha\nbeta\ngamma");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let editor = workspace
+            .read_with(cx, |workspace, _| workspace.active_editor().cloned())
+            .expect("the opening document should have an editor");
+        // The caret after "al", which is the column every new caret takes.
+        editor.update(cx, |state, cx| state.set_selected_range(2..2, cx));
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.select_column(false, cx);
+            workspace.select_column(false, cx);
+        });
+        window.render_frame(cx);
+        window.input("X", cx);
+        window.render_frame(cx);
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("alXpha\nbeXta\ngaXmma".to_owned()),
+            "one keystroke should land at the column on all three lines"
+        );
+    })
+    .expect("select a column");
+}
+
 /// Typing then saving writes the new text to the file.
 ///
 /// The other half of §22.36: that test proved a keystroke reaches the buffer,
@@ -1075,6 +1231,78 @@ fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppCon
 /// the way a hand does (press, move past the threshold, release) and reads the
 /// answer off the rows' own bounds: the row that was first has to end up lower
 /// than it started.
+/// Dragging a row of the toolbar palette reorders it.
+///
+/// The palette's model tests call `move_row` directly, so they cannot say
+/// whether the drag gesture is wired to it. This drives the pointer path the way
+/// a hand does and reads the answer off the rows' own bounds: the syntax row,
+/// dragged onto the Find row, has to end up lower than it started.
+#[gpui_kit::test]
+fn dragging_a_row_reorders_the_toolbar(cx: &mut TestAppContext) {
+    use subtext_app::toolbar::{ToolbarItemId, ToolbarSheet};
+
+    cx.update(gpui_kit::init);
+
+    let sheet = cx.update(|cx| {
+        cx.new(|_| {
+            ToolbarSheet::new(
+                gpui_kit::WeakEntity::new_invalid(),
+                vec![
+                    ToolbarItemId::Syntax,
+                    ToolbarItemId::Comment,
+                    ToolbarItemId::Find,
+                    ToolbarItemId::FlexibleSpace,
+                    ToolbarItemId::ToggleInspector,
+                ],
+            )
+        })
+    });
+
+    let window = cx.update(|cx| {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(760.), px(520.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            |_window, _cx| sheet.clone(),
+        )
+        .expect("open the test window")
+        .0
+    });
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let syntax = window.find(("toolbar-row", ToolbarItemId::Syntax as usize));
+        let find = window.find(("toolbar-row", ToolbarItemId::Find as usize));
+        let syntax_before = syntax.bounds();
+        let middle = |bounds: Bounds<gpui_kit::Pixels>| {
+            gpui_kit::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            )
+        };
+
+        window.drag(middle(syntax_before), middle(find.bounds()), cx);
+        window.render_frame(cx);
+
+        let syntax_after = window
+            .find(("toolbar-row", ToolbarItemId::Syntax as usize))
+            .bounds();
+        assert!(
+            syntax_after.origin.y > syntax_before.origin.y,
+            "the syntax row should have been dragged below the Find row \
+             ({} → {})",
+            f32::from(syntax_before.origin.y),
+            f32::from(syntax_after.origin.y)
+        );
+    })
+    .expect("drag the row");
+}
+
 #[gpui_kit::test]
 fn dragging_a_row_reorders_the_encoding_list(cx: &mut TestAppContext) {
     use subtext_app::encoding_list_sheet::EncodingListSheet;
