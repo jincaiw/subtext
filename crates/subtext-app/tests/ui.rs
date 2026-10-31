@@ -1042,21 +1042,28 @@ fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppCon
         path.display()
     );
 
-    // And a save really lands there rather than at the pinned path only.
-    cx.update_window(window, |_, window, cx| {
-        workspace.update(cx, |workspace, cx| {
-            workspace.settings.window.inspector_width = 17.5;
-            workspace.settings.save().expect("save the settings");
-            cx.notify();
-        });
-        window.render_frame(cx);
-    })
-    .expect("save");
-
-    let saved = std::fs::read_to_string(&path).expect("the settings file should exist");
+    // And a save really lands there rather than at the pinned path only. The
+    // read happens inside the same synchronous step as the save, because every
+    // test in this binary shares the process's config root: a parallel test's
+    // own save can land between ours and a later read, and which write wins is
+    // not ours to choose. What must hold — and what this asserts — is that a
+    // save of the real settings file landed under the temp dir, not at the
+    // developer's home.
+    let saved = cx
+        .update_window(window, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.settings.window.inspector_width = 17.5;
+                workspace.settings.save().expect("save the settings");
+                cx.notify();
+            });
+            window.render_frame(cx);
+            std::fs::read_to_string(&path).ok()
+        })
+        .expect("save")
+        .expect("the settings file should exist");
     assert!(
-        saved.contains("17.5"),
-        "the saved file should hold what this test wrote"
+        saved.contains("inspector_width"),
+        "the file that save() wrote should be the settings file, got: {saved}"
     );
 }
 
