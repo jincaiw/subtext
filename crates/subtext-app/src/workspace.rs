@@ -39,7 +39,7 @@ use gpui_kit::base::{AccordionPanel, AccordionTrigger, MotionReveal, spring};
 use gpui_kit::base::{Placement, Positioner};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
-    WindowExt as _,
+    TitleBar, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::DialogFooter,
     h_flex, h_resizable,
@@ -80,6 +80,7 @@ use crate::dialogs::{AboutView, DonationView};
 use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::folder_find::FolderFindPane;
 use crate::highlighter;
+use crate::localization;
 use crate::menus;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
 use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
@@ -910,7 +911,8 @@ impl Workspace {
             .cloned()
             .unwrap_or_else(|| themes.default_theme().clone());
 
-        let find_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+        let find_query =
+            cx.new(|cx| InputState::new(window, cx).placeholder(localization::t("Find")));
         // Typing in the find field searches as it goes — upstream's
         // `findSearchesIncrementally`, default on. The search leaves the
         // *Find All* table alone; it only updates the match state.
@@ -923,7 +925,8 @@ impl Workspace {
         // Upstream's second placeholder is *Replace with*, not *Replace* — it is
         // a prepositional phrase there, and the panel's window title already
         // says which command this is.
-        let find_replacement = cx.new(|cx| InputState::new(window, cx).placeholder("Replace with"));
+        let find_replacement =
+            cx.new(|cx| InputState::new(window, cx).placeholder(localization::t("Replace with")));
 
         // The pane reads its switches out of the settings at construction and
         // writes them back as they change, so it is built from the same
@@ -936,7 +939,8 @@ impl Workspace {
         // The Outline inspector's tree and its filter field. Both need wiring
         // before they are stored, so they are created here rather than inline.
         let outline_tree = cx.new(|cx| TreeState::new(cx).items(Vec::<TreeItem>::new()));
-        let outline_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+        let outline_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder(localization::t("Filter")));
 
         // Opening and closing a row is the tree's own business — it keeps the
         // state on the item it was handed — but a refresh hands it fresh items,
@@ -1115,7 +1119,7 @@ impl Workspace {
     /// Open a fresh, empty document beside the current one.
     pub fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.new_document(window, cx);
-        self.set_status("New document", cx);
+        self.set_status(localization::t("New document"), cx);
     }
 
     /// Open an empty document in a window of its own.
@@ -1149,7 +1153,10 @@ impl Workspace {
             Ok((handle, _)) => {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
             }
-            Err(error) => self.notice(format!("Could not open a window: {error}"), cx),
+            Err(error) => self.notice(
+                localization::tf("Could not open a window: {}", &[&error]),
+                cx,
+            ),
         }
     }
 
@@ -1190,7 +1197,7 @@ impl Workspace {
         if selection.is_empty() {
             // Upstream beeps here; a status line says the same thing and is
             // still there a second later.
-            self.set_status("Select something to copy", cx);
+            self.set_status(localization::t("Select something to copy"), cx);
             return;
         }
         let Some(document) = self.documents.get(self.active) else {
@@ -1249,9 +1256,15 @@ impl Workspace {
 
         let plain = text[selection].to_string();
         match put_rich_text_on_the_pasteboard(&rtf, &plain, cx) {
-            Ok(true) => self.set_status("Copied with syntax colours", cx),
-            Ok(false) => self.set_status("Copied as plain text — no RTF pasteboard here", cx),
-            Err(error) => self.set_status(format!("The clipboard refused the text: {error}"), cx),
+            Ok(true) => self.set_status(localization::t("Copied with syntax colours"), cx),
+            Ok(false) => self.set_status(
+                localization::t("Copied as plain text — no RTF pasteboard here"),
+                cx,
+            ),
+            Err(error) => self.set_status(
+                localization::tf("The clipboard refused the text: {}", &[&error]),
+                cx,
+            ),
         }
     }
 
@@ -1267,7 +1280,10 @@ impl Workspace {
         let environment = subtext_core::issuereport::Environment::detect();
         let template = subtext_core::issuereport::IssueReport::template(&environment);
         self.new_document_with(&template, "Markdown", window, cx);
-        self.set_status("Bug report template created — fill it in and post it", cx);
+        self.set_status(
+            localization::t("Bug report template created — fill it in and post it"),
+            cx,
+        );
     }
 
     fn push_document(
@@ -1605,7 +1621,7 @@ impl Workspace {
                 self.settings.note_recent(&path);
                 let _ = self.settings.save();
                 self.push_document(document, syntax_name, window, cx);
-                self.set_status(format!("Opened {}", path.display()), cx);
+                self.set_status(localization::tf("Opened {}", &[&path.display()]), cx);
             }
             Err(error) => self.set_status(error.to_string(), cx),
         }
@@ -1644,7 +1660,7 @@ impl Workspace {
             Ok(Err(error)) => {
                 let _ = handle.update(cx, move |_, _, cx| {
                     this.update(cx, |workspace, cx| {
-                        workspace.notice(format!("Open failed: {error}"), cx);
+                        workspace.notice(localization::tf("Open failed: {}", &[&error]), cx);
                     })
                     .ok();
                 });
@@ -1750,7 +1766,7 @@ impl Workspace {
                 }
                 self.documents[index].modified_on_disk = false;
                 let name = self.documents[index].document.display_name();
-                self.set_status(format!("Saved {name}"), cx);
+                self.set_status(localization::tf("Saved {}", &[&name]), cx);
                 true
             }
             Err(subtext_core::DocumentError::LossyEncoding(name)) => {
@@ -1816,12 +1832,12 @@ impl Workspace {
                     DialogFooter::new()
                         .child(
                             Button::new("dialog-cancel")
-                                .label("Cancel")
+                                .label(localization::t("Cancel"))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("lossy-review")
-                                .label("Review Incompatible Characters")
+                                .label(localization::t("Review Incompatible Characters"))
                                 .on_click(move |_, window, cx| {
                                     review
                                         .update(cx, |workspace, cx| {
@@ -1833,7 +1849,7 @@ impl Workspace {
                         )
                         .child(
                             Button::new("lossy-save")
-                                .label("Save Available Text")
+                                .label(localization::t("Save Available Text"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     save.update(cx, |workspace, cx| {
@@ -1868,7 +1884,7 @@ impl Workspace {
             return;
         };
         if document.document.is_untitled() {
-            self.set_status("This document has never been saved", cx);
+            self.set_status(localization::t("This document has never been saved"), cx);
             return;
         }
         match document.document.revert(&options) {
@@ -1880,7 +1896,7 @@ impl Workspace {
                 }
                 self.loading = false;
                 document.modified_on_disk = false;
-                self.set_status("Reverted to the saved version", cx);
+                self.set_status(localization::t("Reverted to the saved version"), cx);
             }
             Err(error) => self.set_status(error.to_string(), cx),
         }
@@ -2007,12 +2023,12 @@ impl Workspace {
                     DialogFooter::new()
                         .child(
                             Button::new("dialog-cancel")
-                                .label("Cancel")
+                                .label(localization::t("Cancel"))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("close-discard")
-                                .label("Don’t Save")
+                                .label(localization::t("Don’t Save"))
                                 .danger()
                                 .on_click(move |_, window, cx| {
                                     discard
@@ -2075,7 +2091,7 @@ impl Workspace {
         // hear about it. `refresh_menus` compares the signature and rebuilds, so
         // this is one rebuild rather than one per row.
         self.refresh_menus(cx);
-        self.set_status("Cleared the recent documents", cx);
+        self.set_status(localization::t("Cleared the recent documents"), cx);
     }
 
     /// Reveal the active document in the platform's file manager.
@@ -2086,7 +2102,7 @@ impl Workspace {
             .and_then(|document| document.document.path())
             .map(|path| path.to_path_buf())
         else {
-            self.set_status("This document has never been saved", cx);
+            self.set_status(localization::t("This document has never been saved"), cx);
             return;
         };
         cx.reveal_path(&path);
@@ -2099,11 +2115,11 @@ impl Workspace {
             .and_then(|document| document.document.path())
             .map(|path| path.display().to_string())
         else {
-            self.set_status("This document has never been saved", cx);
+            self.set_status(localization::t("This document has never been saved"), cx);
             return;
         };
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(path.clone()));
-        self.set_status(format!("Copied {path}"), cx);
+        self.set_status(localization::tf("Copied {}", &[&path]), cx);
     }
 
     // ---- text operations -------------------------------------------------
@@ -2171,7 +2187,7 @@ impl Workspace {
     /// is not touched either way.
     pub fn straighten_quotes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_selection(cx).is_empty() {
-            self.set_status("Select something first", cx);
+            self.set_status(localization::t("Select something first"), cx);
             return;
         }
         self.text_op(window, cx, |text, selection, _| {
@@ -2260,7 +2276,7 @@ impl Workspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
             dialog
-                .title("Custom Surround")
+                .title(localization::t("Custom Surround"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 // 30 rem holds both field pairs side by side: 4 rem of label
@@ -2286,7 +2302,7 @@ impl Workspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
             dialog
-                .title("Sort Lines by Pattern")
+                .title(localization::t("Sort Lines by Pattern"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 32.)
@@ -2333,7 +2349,7 @@ impl Workspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
             dialog
-                .title("Edit Color Code")
+                .title(localization::t("Edit Color Code"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 32.)
@@ -2386,7 +2402,7 @@ impl Workspace {
                 });
             }
         });
-        self.set_status(format!("Inserted {code}"), cx);
+        self.set_status(localization::tf("Inserted {}", &[&code]), cx);
     }
 
     // ---- multiple replace -------------------------------------------------
@@ -2401,7 +2417,7 @@ impl Workspace {
         let sheet = cx.new(|cx| MultipleReplaceSheet::new(workspace, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("Multiple Replace")
+                .title(localization::t("Multiple Replace"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 34.)
@@ -2415,7 +2431,7 @@ impl Workspace {
                     // full-width bar across the dialog instead of a button.
                     DialogFooter::new().child(
                         Button::new("multiple-replace-done")
-                            .label("Done")
+                            .label(localization::t("Done"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -2450,7 +2466,7 @@ impl Workspace {
             count,
         } = definition.replace(&text, selection, in_selection, line_ending);
         if count == 0 {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return Some(0);
         }
 
@@ -2469,7 +2485,7 @@ impl Workspace {
                 }
             });
         });
-        self.set_status(format!("Replaced {count} occurrence(s)"), cx);
+        self.set_status(localization::tf("Replaced {} occurrence(s)", &[&count]), cx);
         Some(count)
     }
 
@@ -3085,7 +3101,8 @@ impl Workspace {
 
     /// The Go to Line panel, in CotEditor's ⇧⌘L slot.
     pub fn goto_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Line number"));
+        let input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(localization::t("Line number")));
         let weak = cx.entity().downgrade();
         let focus_input = input.clone();
         window.open_dialog(cx, move |dialog, window, cx| {
@@ -3106,21 +3123,24 @@ impl Workspace {
                 .justify_end()
                 .child(
                     Button::new("goto-cancel")
-                        .label("Cancel")
+                        .label(localization::t("Cancel"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 )
-                .child(Button::new("goto-apply").primary().label("Go").on_click(
-                    move |_, window, cx| {
-                        let raw = go_value.read(cx).value().to_string();
-                        let line = raw.trim().parse::<usize>().unwrap_or(1);
-                        footer_weak
-                            .update(cx, |workspace, cx| workspace.goto_line(line, cx))
-                            .ok();
-                        window.close_dialog(cx);
-                    },
-                ));
+                .child(
+                    Button::new("goto-apply")
+                        .primary()
+                        .label(localization::t("Go"))
+                        .on_click(move |_, window, cx| {
+                            let raw = go_value.read(cx).value().to_string();
+                            let line = raw.trim().parse::<usize>().unwrap_or(1);
+                            footer_weak
+                                .update(cx, |workspace, cx| workspace.goto_line(line, cx))
+                                .ok();
+                            window.close_dialog(cx);
+                        }),
+                );
             dialog
-                .title("Go to Line")
+                .title(localization::t("Go to Line"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 20.)
@@ -3630,7 +3650,7 @@ impl Workspace {
             self.refresh_matches(cx);
         }
         if self.find.matches.is_empty() {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return;
         }
         let count = self.find.matches.len();
@@ -3656,7 +3676,7 @@ impl Workspace {
         self.run_search(cx);
         let matches = self.find.matches.clone();
         if matches.is_empty() {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return;
         }
         let count = matches.len();
@@ -3673,7 +3693,7 @@ impl Workspace {
             }
         });
         self.note_find_history(cx);
-        self.set_status(format!("{count} match(es) selected"), cx);
+        self.set_status(localization::tf("{} match(es) selected", &[&count]), cx);
     }
 
     /// Select every match, which is what "Find All" does in CotEditor.
@@ -3686,7 +3706,7 @@ impl Workspace {
         self.refresh_matches(cx);
         let count = self.find.matches.len();
         if count == 0 {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return;
         }
         if let Some(text) = self.active_text(cx) {
@@ -3699,7 +3719,7 @@ impl Workspace {
             self.resize_find_panel(cx);
         }
         self.note_find_history(cx);
-        self.set_status(format!("{count} match(es)"), cx);
+        self.set_status(localization::tf("{} match(es)", &[&count]), cx);
     }
 
     /// Collapse the result section — the panel's `⌃` button.
@@ -4030,7 +4050,7 @@ impl Workspace {
             self.find.results_open = false;
             self.resize_find_panel(cx);
         }
-        self.set_status("Highlights removed", cx);
+        self.set_status(localization::t("Highlights removed"), cx);
     }
 
     /// Take the selection as the search term.
@@ -4040,7 +4060,7 @@ impl Workspace {
         };
         let selection = self.active_selection(cx);
         if selection.is_empty() || selection.end > text.len() {
-            self.set_status("Select something first", cx);
+            self.set_status(localization::t("Select something first"), cx);
             return;
         }
         let query = text[selection].to_string();
@@ -4050,7 +4070,7 @@ impl Workspace {
         // ⌘E puts the selection in the query *and* brings the panel up, which
         // is what upstream's `useSelectionForFind` does.
         self.show_find(false, window, cx);
-        self.set_status(format!("Find: {query}"), cx);
+        self.set_status(localization::tf("Find: {}", &[&query]), cx);
     }
 
     pub fn use_selection_for_replace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4059,7 +4079,7 @@ impl Workspace {
         };
         let selection = self.active_selection(cx);
         if selection.is_empty() || selection.end > text.len() {
-            self.set_status("Select something first", cx);
+            self.set_status(localization::t("Select something first"), cx);
             return;
         }
         let replacement = text[selection].to_string();
@@ -4067,7 +4087,7 @@ impl Workspace {
             state.set_value(replacement.clone(), window, cx);
         });
         self.show_find(true, window, cx);
-        self.set_status(format!("Replace: {replacement}"), cx);
+        self.set_status(localization::tf("Replace: {}", &[&replacement]), cx);
     }
 
     /// Replace the current match and move to the next one.
@@ -4080,7 +4100,7 @@ impl Workspace {
         } else {
             Some(0)
         }) else {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return;
         };
         let Some(range) = self.find.matches.get(index).cloned() else {
@@ -4174,7 +4194,7 @@ impl Workspace {
         self.note_replace_history(cx);
         self.find.replace_result = Some((count, typed_replacement.clone()));
         if count == 0 {
-            self.set_status("No matches", cx);
+            self.set_status(localization::t("No matches"), cx);
             return;
         }
 
@@ -4186,7 +4206,7 @@ impl Workspace {
             editor.update(cx, |state, cx| state.replace_all(replaced, window, cx));
         });
 
-        self.set_status(format!("Replaced {count} occurrence(s)"), cx);
+        self.set_status(localization::tf("Replaced {} occurrence(s)", &[&count]), cx);
     }
 
     // ---- view toggles ----------------------------------------------------
@@ -4270,7 +4290,7 @@ impl Workspace {
         let sheet = cx.new(|_| ToolbarSheet::new(workspace, items));
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("Customize Toolbar")
+                .title(localization::t("Customize Toolbar"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand. Two 18 rem lists plus the gap and
                 // the dialog's padding.
@@ -4341,7 +4361,10 @@ impl Workspace {
             return;
         };
         if document.pane_count() >= MAXIMUM_SPLIT_EDITORS {
-            self.set_status("An editor can be split into four at most", cx);
+            self.set_status(
+                localization::t("An editor can be split into four at most"),
+                cx,
+            );
             return;
         }
 
@@ -4464,7 +4487,10 @@ impl Workspace {
         self.loading = false;
         // The Format ▸ Line Endings submenu checks the one in use.
         self.refresh_menus(cx);
-        self.set_status(format!("Line endings: {}", ending.abbreviation()), cx);
+        self.set_status(
+            localization::tf("Line endings: {}", &[&ending.abbreviation()]),
+            cx,
+        );
     }
 
     /// Convert the document to `encoding`.
@@ -4496,7 +4522,7 @@ impl Workspace {
         // moves the document's own to the top of the list when the list does
         // not already hold it.
         self.refresh_menus(cx);
-        self.set_status(format!("Encoding: {}", encoding.name()), cx);
+        self.set_status(localization::tf("Encoding: {}", &[&encoding.name()]), cx);
     }
 
     /// Reinterpret the bytes on disk with another encoding, without converting.
@@ -4518,7 +4544,10 @@ impl Workspace {
                 }
                 self.loading = false;
                 self.refresh_menus(cx);
-                self.set_status(format!("Reinterpreted as {}", encoding.name), cx);
+                self.set_status(
+                    localization::tf("Reinterpreted as {}", &[&encoding.name]),
+                    cx,
+                );
             }
             Err(error) => self.set_status(error.to_string(), cx),
         }
@@ -4544,7 +4573,10 @@ impl Workspace {
             .find_map(|item| item.find(path))
             .cloned()
         else {
-            self.notice(format!("There is no script at {}", path.display()), cx);
+            self.notice(
+                localization::tf("There is no script at {}", &[&path.display()]),
+                cx,
+            );
             return;
         };
 
@@ -4605,7 +4637,10 @@ impl Workspace {
             // first was being dropped.
             self.log_to_console(Some(name.to_string()), failure, cx);
             self.show_console(cx);
-            self.set_status(format!("The script “{name}” failed — see the console"), cx);
+            self.set_status(
+                localization::tf("The script “{}” failed — see the console", &[&name]),
+                cx,
+            );
             return;
         }
         match output {
@@ -4613,7 +4648,7 @@ impl Workspace {
             // Upstream says nothing at all when a script declares no output,
             // which leaves one that did its work indistinguishable from one
             // that did nothing.
-            None => self.set_status(format!("Ran {name}"), cx),
+            None => self.set_status(localization::tf("Ran {}", &[&name]), cx),
         }
     }
 
@@ -4628,14 +4663,14 @@ impl Workspace {
         match kind {
             OutputType::Pasteboard => {
                 cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(output));
-                self.set_status("Script output copied to the clipboard", cx);
+                self.set_status(localization::t("Script output copied to the clipboard"), cx);
             }
             OutputType::NewDocument => {
                 // Upstream makes the document only when there is something to
                 // put in it, so a script that produced nothing does not leave an
                 // empty tab behind.
                 if output.is_empty() {
-                    self.set_status("The script produced no output", cx);
+                    self.set_status(localization::t("The script produced no output"), cx);
                     return;
                 }
                 let mut document = Document::untitled(
@@ -4649,11 +4684,17 @@ impl Workspace {
                     .clone()
                     .unwrap_or_else(|| self.syntaxes.plain_text().name.clone());
                 self.push_document(document, syntax, window, cx);
-                self.set_status("Script output opened in a new document", cx);
+                self.set_status(
+                    localization::t("Script output opened in a new document"),
+                    cx,
+                );
             }
             _ => {
                 let Some(document) = self.documents.get(self.active) else {
-                    self.notice("There is no document to put the script's output into", cx);
+                    self.notice(
+                        localization::t("There is no document to put the script's output into"),
+                        cx,
+                    );
                     return;
                 };
                 let editor = document.editor().clone();
@@ -4729,7 +4770,7 @@ impl Workspace {
         // A snippet may be limited to one syntax, so the submenu's contents
         // follow the document's — and the submenu checks the syntax in use.
         self.refresh_menus(cx);
-        self.set_status(format!("Syntax: {name}"), cx);
+        self.set_status(localization::tf("Syntax: {}", &[&name]), cx);
     }
 
     /// Force the highlighter to run again, which is what "Reset Syntax
@@ -4762,14 +4803,23 @@ impl Workspace {
     pub fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
         self.settings.font_size = size.clamp(6.0, 96.0);
         let _ = self.settings.save();
-        self.set_status(format!("Font size: {:.0} pt", self.settings.font_size), cx);
+        self.set_status(
+            localization::tf(
+                "Font size: {} pt",
+                &[&format!("{:.0}", self.settings.font_size)],
+            ),
+            cx,
+        );
     }
 
     pub fn toggle_antialias(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.update_editor_options(window, cx, |options| options.antialias = !options.antialias);
         let on = self.settings.editor.antialias;
         self.set_status(
-            format!("Antialiasing {}", if on { "on" } else { "off" }),
+            localization::tf(
+                "Antialiasing {}",
+                &[&localization::t(if on { "on" } else { "off" })],
+            ),
             cx,
         );
     }
@@ -4777,7 +4827,13 @@ impl Workspace {
     pub fn toggle_ligatures(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.update_editor_options(window, cx, |options| options.ligatures = !options.ligatures);
         let on = self.settings.editor.ligatures;
-        self.set_status(format!("Ligatures {}", if on { "on" } else { "off" }), cx);
+        self.set_status(
+            localization::tf(
+                "Ligatures {}",
+                &[&localization::t(if on { "on" } else { "off" })],
+            ),
+            cx,
+        );
     }
 
     /// Step through the tab widths CotEditor offers: 2, 4, 8.
@@ -4799,7 +4855,10 @@ impl Workspace {
         let uses_spaces = self.settings.uses_spaces_for_indentation;
         self.settings.set_indentation(uses_spaces, width);
         let _ = self.settings.save();
-        self.set_status(format!("Tab width: {}", self.settings.tab_width), cx);
+        self.set_status(
+            localization::tf("Tab width: {}", &[&self.settings.tab_width]),
+            cx,
+        );
     }
 
     pub fn toggle_auto_expand_tabs(&mut self, cx: &mut Context<Self>) {
@@ -4842,7 +4901,7 @@ impl Workspace {
         let _ = self.settings.save();
         // The Format ▸ Theme submenu checks the theme in force.
         self.refresh_menus(cx);
-        self.set_status(format!("Theme: {}", theme.name), cx);
+        self.set_status(localization::tf("Theme: {}", &[&theme.name]), cx);
         cx.refresh_windows();
     }
 
@@ -4899,7 +4958,7 @@ impl Workspace {
             charinfo::CharacterReport::of(selected)
         });
         if report.is_empty() {
-            self.set_status("Select a single character to inspect", cx);
+            self.set_status(localization::t("Select a single character to inspect"), cx);
             return;
         }
 
@@ -5009,7 +5068,7 @@ impl Workspace {
                 detail = detail.child(
                     div()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Unknown"),
+                        .child(localization::t("Unknown")),
                 );
             }
         }
@@ -5157,7 +5216,7 @@ impl Workspace {
                                 .border_color(cx.theme().border)
                                 .text_color(cx.theme().muted_foreground)
                                 .text_xs()
-                                .child("deprecated"),
+                                .child(localization::t("deprecated")),
                         )
                     })
                     .into_any_element(),
@@ -5182,7 +5241,7 @@ impl Workspace {
             .ghost()
             .xsmall()
             .label(block)
-            .tooltip("Show the Unicode block name");
+            .tooltip(localization::t("Show the Unicode block name"));
         if scalar.block.is_none() {
             block_value = block_value.disabled(true);
         }
@@ -5242,7 +5301,7 @@ impl Workspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let submit = sheet.clone();
             dialog
-                .title("Advanced Character Count")
+                .title(localization::t("Advanced Character Count"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 .w(window.rem_size() * 32.)
@@ -5330,7 +5389,7 @@ impl Workspace {
         // Upstream's `completions(forPartialWordRange:)` returns nil or an
         // empty list and AppKit then shows nothing at all. SubText says why,
         // which is the same rule the rest of the unimplemented commands follow.
-        self.set_status("No completions for this word", cx);
+        self.set_status(localization::t("No completions for this word"), cx);
     }
 
     /// Open the list for the word at the caret.
@@ -5627,7 +5686,10 @@ impl Workspace {
             text.get(selection)
                 .and_then(|selected| options.count(selected))
         };
+        // `count_parts` returns the English words, which are what the tests
+        // pin down; the capsule draws their translation.
         let (number, suffix) = crate::count_panel::count_parts(count, options.unit);
+        let suffix = localization::t(&suffix).to_string();
 
         let mut row = h_flex().items_center().gap_2();
         if count.is_none() {
@@ -5672,8 +5734,8 @@ impl Workspace {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Settings)
-                            .accessibility_label("Show options")
-                            .tooltip("Show options"),
+                            .accessibility_label(localization::t("Show options"))
+                            .tooltip(localization::t("Show options")),
                     )
                     .content(move |_, _, _| {
                         div().p_3().child(options_view.clone()).into_any_element()
@@ -5735,7 +5797,7 @@ impl Workspace {
                 move |menu, _, _| {
                     let menu = match &count {
                         Some(number) => menu
-                            .item(PopupMenuItem::new("Copy").on_click({
+                            .item(PopupMenuItem::new(localization::t("Copy")).on_click({
                                 let number = number.clone();
                                 move |_, window, cx| {
                                     cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
@@ -5747,7 +5809,7 @@ impl Workspace {
                             .separator(),
                         None => menu,
                     };
-                    menu.item(PopupMenuItem::new("Stop Count").on_click({
+                    menu.item(PopupMenuItem::new(localization::t("Stop Count")).on_click({
                         let workspace = stop.clone();
                         move |_, _, cx| {
                             workspace
@@ -5977,7 +6039,7 @@ impl Workspace {
         }
 
         let Some(console) = console::ConsoleHandle::get(cx) else {
-            self.set_status("The console is not available", cx);
+            self.set_status(localization::t("The console is not available"), cx);
             return;
         };
         let log = console.entity().clone();
@@ -6093,14 +6155,26 @@ impl Workspace {
         // palette. The default is upstream's text-document toolbar — syntax, a
         // flexible space, the inspector toggle — not the row of file commands
         // that used to be here.
+        //
+        // The bar has no width, background or border of its own: it is drawn
+        // inside the title bar (see `render`), which supplies all three, and
+        // which is also why it needs no left padding — the title bar reserves
+        // the traffic lights' corner before its children begin.
+        //
+        // It takes the room the title leaves and aligns its items to the right
+        // edge, which is where upstream's toolbar sits: the flexible space is
+        // what pushes the trailing items there, and with no flexible space the
+        // whole set stays together at the right. The mouse handler is the other
+        // half of that: the title bar drags the window from its background, and
+        // a drag that starts on a toolbar item has to stay a drag of that item.
         let mut bar = h_flex()
-            .w_full()
-            .px_3()
-            .py_1p5()
+            .flex_1()
+            .min_w_0()
+            .justify_end()
+            .pr_3()
             .gap_1()
             .items_center()
-            .border_b_1()
-            .border_color(cx.theme().border);
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         for item in self.settings.toolbar_items.iter().copied() {
             bar = bar.child(self.render_toolbar_item(item, &syntax, has_document, cx));
         }
@@ -6127,22 +6201,26 @@ impl Workspace {
                 let label = if has_document && !current.is_empty() {
                     current.clone()
                 } else {
-                    "Syntax".to_string()
+                    localization::t("Syntax").to_string()
                 };
                 let workspace = cx.entity().downgrade();
+                // Upstream's `.syntax` item is an `NSPopUpButton` with
+                // `bezelStyle = .toolbar`: a bordered capsule holding just the
+                // syntax name and a ⇕ indicator, no icon. A ghost button with
+                // a language glyph is a different control in the same place.
                 Button::new("toolbar-syntax")
-                    .ghost()
+                    .outline()
                     .small()
-                    .icon(IconName::Languages)
                     .label(label)
+                    .dropdown_caret(true)
                     .disabled(!has_document)
-                    .accessibility_label("Syntax")
-                    .tooltip("Change syntax")
+                    .accessibility_label(localization::t("Syntax"))
+                    .tooltip(localization::t("Change syntax"))
                     .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
                         let mut menu = menu;
                         let none = workspace.clone();
                         menu = menu.item(
-                            PopupMenuItem::new("None")
+                            PopupMenuItem::new(localization::t("None"))
                                 .checked(current == "None")
                                 .on_click(move |_, window, cx| {
                                     none.update(cx, |this, cx| this.set_syntax("None", window, cx))
@@ -6178,8 +6256,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::AArrowDown)
-                        .accessibility_label("Smaller")
-                        .tooltip("Decrease text size")
+                        .accessibility_label(localization::t("Smaller"))
+                        .tooltip(localization::t("Decrease text size"))
                         .on_click(cx.listener(|this, _, _, cx| this.bump_font(-1.0, cx))),
                 )
                 .child(
@@ -6187,8 +6265,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::AArrowUp)
-                        .accessibility_label("Bigger")
-                        .tooltip("Increase text size")
+                        .accessibility_label(localization::t("Bigger"))
+                        .tooltip(localization::t("Increase text size"))
                         .on_click(cx.listener(|this, _, _, cx| this.bump_font(1.0, cx))),
                 )
                 .into_any_element(),
@@ -6203,8 +6281,8 @@ impl Workspace {
                             .small()
                             .icon(IconName::TextAlignStart)
                             .selected(!rtl)
-                            .accessibility_label("Left to Right")
-                            .tooltip("Left to right")
+                            .accessibility_label(localization::t("Left to Right"))
+                            .tooltip(localization::t("Left to right"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.dispatch("MakeWritingDirectionLeftToRight", window, cx);
                             })),
@@ -6215,8 +6293,8 @@ impl Workspace {
                             .small()
                             .icon(IconName::TextAlignEnd)
                             .selected(rtl)
-                            .accessibility_label("Right to Left")
-                            .tooltip("Right to left")
+                            .accessibility_label(localization::t("Right to Left"))
+                            .tooltip(localization::t("Right to left"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.dispatch("MakeWritingDirectionRightToLeft", window, cx);
                             })),
@@ -6231,8 +6309,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::RectangleHorizontal)
-                        .accessibility_label("Horizontal")
-                        .tooltip("Horizontal")
+                        .accessibility_label(localization::t("Horizontal"))
+                        .tooltip(localization::t("Horizontal"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dispatch("MakeLayoutOrientationHorizontal", window, cx);
                         })),
@@ -6242,8 +6320,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::RectangleVertical)
-                        .accessibility_label("Vertical")
-                        .tooltip("Vertical")
+                        .accessibility_label(localization::t("Vertical"))
+                        .tooltip(localization::t("Vertical"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dispatch("MakeLayoutOrientationVertical", window, cx);
                         })),
@@ -6257,8 +6335,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::ListIndentDecrease)
-                        .accessibility_label("Shift Left")
-                        .tooltip("Shift lines to the left")
+                        .accessibility_label(localization::t("Shift Left"))
+                        .tooltip(localization::t("Shift lines to the left"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dispatch("ShiftLeft", window, cx);
                         })),
@@ -6268,8 +6346,8 @@ impl Workspace {
                         .ghost()
                         .small()
                         .icon(IconName::ListIndentIncrease)
-                        .accessibility_label("Shift Right")
-                        .tooltip("Shift lines to the right")
+                        .accessibility_label(localization::t("Shift Right"))
+                        .tooltip(localization::t("Shift lines to the right"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dispatch("ShiftRight", window, cx);
                         })),
@@ -6279,8 +6357,8 @@ impl Workspace {
                 .ghost()
                 .small()
                 .icon(IconName::MessageSquare)
-                .accessibility_label("Comment")
-                .tooltip("Comment-out or uncomment selection")
+                .accessibility_label(localization::t("Comment"))
+                .tooltip(localization::t("Comment-out or uncomment selection"))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.dispatch("ToggleComment", window, cx);
                 }))
@@ -6298,11 +6376,11 @@ impl Workspace {
                             .small()
                             .icon(IconName::Braces)
                             .selected(uses_spaces)
-                            .accessibility_label("Tab Style")
+                            .accessibility_label(localization::t("Tab Style"))
                             .tooltip(if uses_spaces {
-                                "Use tab characters for indentation"
+                                localization::t("Use tabs for indentation")
                             } else {
-                                "Use spaces for indentation"
+                                localization::t("Use spaces for indentation")
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_auto_expand_tabs(cx);
@@ -6313,22 +6391,14 @@ impl Workspace {
                             .ghost()
                             .xsmall()
                             .icon(IconName::ChevronDown)
-                            .accessibility_label("Tab Width")
-                            .tooltip("Tab width")
+                            .accessibility_label(localization::t("Tab Width"))
+                            .tooltip(localization::t("Tab width"))
                             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
-                                let toggle = workspace.clone();
-                                let mut menu = menu.item(
-                                    PopupMenuItem::new("Use Spaces for Indentation")
-                                        .checked(uses_spaces)
-                                        .on_click(move |_, _, cx| {
-                                            toggle
-                                                .update(cx, |this, cx| {
-                                                    this.toggle_auto_expand_tabs(cx)
-                                                })
-                                                .ok();
-                                        }),
-                                );
-                                menu = menu.separator().label("Tab Width");
+                                // Upstream's menu is one section header, the
+                                // three widths, Custom…, a separator, and the
+                                // spaces/tabs toggle — in that order
+                                // (`DocumentWindowController.swift:895-915`).
+                                let mut menu = menu.separator().label(localization::t("Tab Width"));
                                 for width in [2usize, 4, 8] {
                                     let workspace = workspace.clone();
                                     menu = menu.item(
@@ -6344,11 +6414,31 @@ impl Workspace {
                                     );
                                 }
                                 let custom = workspace.clone();
-                                menu.item(PopupMenuItem::new("Custom…").on_click(
-                                    move |_, _, cx| {
-                                        custom.update(cx, |this, cx| this.cycle_tab_width(cx)).ok();
-                                    },
-                                ))
+                                menu = menu.item(
+                                    PopupMenuItem::new(localization::t("Custom…")).on_click(
+                                        move |_, _, cx| {
+                                            custom
+                                                .update(cx, |this, cx| this.cycle_tab_width(cx))
+                                                .ok();
+                                        },
+                                    ),
+                                );
+                                let toggle = workspace.clone();
+                                menu.separator().item(
+                                    PopupMenuItem::new(localization::t(
+                                        "Use Spaces for Indentation",
+                                    ))
+                                    .checked(uses_spaces)
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            toggle
+                                                .update(cx, |this, cx| {
+                                                    this.toggle_auto_expand_tabs(cx)
+                                                })
+                                                .ok();
+                                        },
+                                    ),
+                                )
                             }),
                     )
                     .into_any_element()
@@ -6360,8 +6450,12 @@ impl Workspace {
                     .small()
                     .icon(IconName::TextWrap)
                     .selected(on)
-                    .accessibility_label("Line Wrapping")
-                    .tooltip(if on { "Unwrap lines" } else { "Wrap lines" })
+                    .accessibility_label(localization::t("Line Wrapping"))
+                    .tooltip(if on {
+                        localization::t("Unwrap lines")
+                    } else {
+                        localization::t("Wrap lines")
+                    })
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.dispatch("ToggleLineWrap", window, cx);
                     }))
@@ -6374,11 +6468,11 @@ impl Workspace {
                     .small()
                     .icon(IconName::Pilcrow)
                     .selected(on)
-                    .accessibility_label("Invisibles")
+                    .accessibility_label(localization::t("Invisibles"))
                     .tooltip(if on {
-                        "Hide invisible characters"
+                        localization::t("Hide invisible characters")
                     } else {
-                        "Show invisible characters"
+                        localization::t("Show invisible characters")
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.dispatch("ToggleInvisibleChars", window, cx);
@@ -6392,11 +6486,11 @@ impl Workspace {
                     .small()
                     .icon(IconName::ListTree)
                     .selected(on)
-                    .accessibility_label("Indent Guides")
+                    .accessibility_label(localization::t("Indent Guides"))
                     .tooltip(if on {
-                        "Hide indent guide lines"
+                        localization::t("Hide indent guide lines")
                     } else {
-                        "Show indent guide lines"
+                        localization::t("Show indent guide lines")
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.dispatch("ToggleIndentGuides", window, cx);
@@ -6410,12 +6504,10 @@ impl Workspace {
                     .small()
                     .icon(if on { IconName::PinOff } else { IconName::Pin })
                     .selected(on)
-                    .accessibility_label("Keep on Top")
-                    .tooltip(if on {
-                        "Stop keeping the window on top"
-                    } else {
-                        "Keep the window always on top"
-                    })
+                    .accessibility_label(localization::t("Keep on Top"))
+                    // One tooltip either way: upstream defines only
+                    // `Toolbar.keepOnTop.tooltip`, with no state variants.
+                    .tooltip(localization::t("Keep the window always on top"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.update_window_options(cx, |window| {
                             window.keep_on_top = !window.keep_on_top
@@ -6434,11 +6526,11 @@ impl Workspace {
                         IconName::PencilOff
                     })
                     .selected(on)
-                    .accessibility_label("Edit")
+                    .accessibility_label(localization::t("Edit"))
                     .tooltip(if on {
-                        "Prevent the document from being edited"
+                        localization::t("Prevent the document from being edited")
                     } else {
-                        "Allow the document to be edited"
+                        localization::t("Allow editing the document")
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.dispatch("ToggleEditable", window, cx);
@@ -6449,8 +6541,8 @@ impl Workspace {
                 .ghost()
                 .small()
                 .icon(IconName::SpellCheck)
-                .accessibility_label("Spell Check")
-                .tooltip("Show spelling and grammar")
+                .accessibility_label(localization::t("Spell Check"))
+                .tooltip(localization::t("Show spelling and grammar"))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.dispatch("ShowGuessPanel", window, cx);
                 }))
@@ -6459,8 +6551,8 @@ impl Workspace {
                 .ghost()
                 .small()
                 .icon(IconName::FaceSlightlySmiling)
-                .accessibility_label("Emoji & Symbols")
-                .tooltip("Show Emoji & Symbols")
+                .accessibility_label(localization::t("Emoji & Symbols"))
+                .tooltip(localization::t("Show Emoji & Symbols"))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.dispatch("ShowUnicodeInputPanel", window, cx);
                 }))
@@ -6471,40 +6563,44 @@ impl Workspace {
                     .ghost()
                     .small()
                     .icon(IconName::Type)
-                    .accessibility_label("Fonts")
-                    .tooltip("Change Font")
+                    .accessibility_label(localization::t("Fonts"))
+                    .tooltip(localization::t("Change Font"))
                     .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
                         let standard = workspace.clone();
                         let monospaced = workspace.clone();
                         let panel = workspace.clone();
-                        menu.item(
-                            PopupMenuItem::new("Standard").on_click(move |_, window, cx| {
-                                standard
-                                    .update(cx, |this, cx| {
-                                        this.dispatch("MakeFontStandard", window, cx);
-                                    })
-                                    .ok();
-                            }),
-                        )
-                        .item(
-                            PopupMenuItem::new("Monospaced").on_click(move |_, window, cx| {
-                                monospaced
-                                    .update(cx, |this, cx| {
-                                        this.dispatch("MakeFontMonospaced", window, cx);
-                                    })
-                                    .ok();
-                            }),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Show Fonts").on_click(move |_, window, cx| {
-                                panel
-                                    .update(cx, |this, cx| {
-                                        this.dispatch("OrderFrontFontPanel", window, cx);
-                                    })
-                                    .ok();
-                            }),
-                        )
+                        // Upstream leads with a "Font Type" section header
+                        // (`DocumentWindowController.swift:1002-1014`).
+                        menu.separator()
+                            .label(localization::t("Font Type"))
+                            .item(PopupMenuItem::new(localization::t("Standard")).on_click(
+                                move |_, window, cx| {
+                                    standard
+                                        .update(cx, |this, cx| {
+                                            this.dispatch("MakeFontStandard", window, cx);
+                                        })
+                                        .ok();
+                                },
+                            ))
+                            .item(PopupMenuItem::new(localization::t("Monospaced")).on_click(
+                                move |_, window, cx| {
+                                    monospaced
+                                        .update(cx, |this, cx| {
+                                            this.dispatch("MakeFontMonospaced", window, cx);
+                                        })
+                                        .ok();
+                                },
+                            ))
+                            .separator()
+                            .item(PopupMenuItem::new(localization::t("Show Fonts")).on_click(
+                                move |_, window, cx| {
+                                    panel
+                                        .update(cx, |this, cx| {
+                                            this.dispatch("OrderFrontFontPanel", window, cx);
+                                        })
+                                        .ok();
+                                },
+                            ))
                     })
                     .into_any_element()
             }
@@ -6512,16 +6608,16 @@ impl Workspace {
                 .ghost()
                 .small()
                 .icon(IconName::Search)
-                .accessibility_label("Find")
-                .tooltip("Show Find & Replace")
+                .accessibility_label(localization::t("Find"))
+                .tooltip(localization::t("Show Find & Replace"))
                 .on_click(cx.listener(|this, _, window, cx| this.show_find(false, window, cx)))
                 .into_any_element(),
             ToolbarItemId::Print => Button::new("toolbar-print")
                 .ghost()
                 .small()
                 .icon(IconName::Printer)
-                .accessibility_label("Print")
-                .tooltip("Print the document")
+                .accessibility_label(localization::t("Print"))
+                .tooltip(localization::t("Print the document"))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.dispatch("PrintDocument", window, cx);
                 }))
@@ -6530,8 +6626,8 @@ impl Workspace {
                 .ghost()
                 .small()
                 .icon(IconName::Share2)
-                .accessibility_label("Share")
-                .tooltip("Share document file")
+                .accessibility_label(localization::t("Share"))
+                .tooltip(localization::t("Share document file"))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.dispatch("ShareDocument", window, cx);
                 }))
@@ -6541,7 +6637,7 @@ impl Workspace {
                 .small()
                 .icon(IconName::PanelLeft)
                 .selected(self.settings.window.show_sidebar)
-                .accessibility_label("Sidebar")
+                .accessibility_label(localization::t("Sidebar"))
                 .tooltip(if self.settings.window.show_sidebar {
                     "Hide sidebar"
                 } else {
@@ -6558,7 +6654,7 @@ impl Workspace {
                 .small()
                 .icon(IconName::PanelRight)
                 .selected(self.settings.window.show_inspector)
-                .accessibility_label("Inspector")
+                .accessibility_label(localization::t("Inspector"))
                 .tooltip(if self.settings.window.show_inspector {
                     "Hide inspector"
                 } else {
@@ -6602,7 +6698,7 @@ impl Workspace {
                     .xsmall()
                     .icon(gpui_kit::assets::IconName::Close)
                     .accessibility_label(format!("Close {label}"))
-                    .tooltip("Close tab")
+                    .tooltip(localization::t("Close tab"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.close_document(id, window, cx);
                     }));
@@ -6709,7 +6805,7 @@ impl Workspace {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No recent files"),
+                    .child(localization::t("No recent files")),
             );
         }
         for path in self.settings.recent_documents.iter().take(30) {
@@ -6752,8 +6848,12 @@ impl Workspace {
     }
 
     fn render_inspector(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The names are upstream's `InspectorPane.*.label` keys, which is also
+        // what its tooltips say; the English side is the key and the table
+        // holds the Chinese. The panes are matched on the enum, not the label,
+        // so the spelling is free to change with the language.
         let panes = [
-            (InspectorPane::Document, "Document"),
+            (InspectorPane::Document, "Document Inspector"),
             (InspectorPane::Outline, "Outline"),
             (InspectorPane::Warnings, "Warnings"),
         ];
@@ -6763,7 +6863,7 @@ impl Workspace {
             .unwrap_or(0);
         let tabs = panes
             .iter()
-            .map(|(_, label)| Tab::new().label(*label))
+            .map(|&(_, label)| Tab::new().label(localization::t(label)))
             .collect::<Vec<_>>();
 
         let is_outline = self.settings.inspector_pane == InspectorPane::Outline;
@@ -6847,7 +6947,7 @@ impl Workspace {
                 .ghost()
                 .xsmall()
                 .icon(IconName::CircleArrowRight)
-                .tooltip("Show in Finder")
+                .tooltip(localization::t("Show in Finder"))
                 .on_click(cx.listener(move |_this, _, _, _| reveal_in_file_manager(&path)))
         });
 
@@ -6861,7 +6961,7 @@ impl Workspace {
                     .flex_shrink_0()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Full Path"),
+                    .child(localization::t("Full Path")),
             )
             .child(
                 h_flex()
@@ -6926,9 +7026,21 @@ impl Workspace {
             v_flex()
                 .w_full()
                 .gap_1()
-                .child(inspector_row("Created", created.unwrap_or_default(), cx))
-                .child(inspector_row("Modified", modified.unwrap_or_default(), cx))
-                .child(inspector_row("Size", size.unwrap_or_default(), cx))
+                .child(inspector_row(
+                    localization::t("Created"),
+                    created.unwrap_or_default(),
+                    cx,
+                ))
+                .child(inspector_row(
+                    localization::t("Modified"),
+                    modified.unwrap_or_default(),
+                    cx,
+                ))
+                .child(inspector_row(
+                    localization::t("Size"),
+                    size.unwrap_or_default(),
+                    cx,
+                ))
                 .child(inspector_tags_row(
                     attributes
                         .as_ref()
@@ -6936,11 +7048,15 @@ impl Workspace {
                     cx,
                 ))
                 .child(inspector_row(
-                    "Permissions",
+                    localization::t("Permissions"),
                     permissions.unwrap_or_default(),
                     cx,
                 ))
-                .child(inspector_row("Owner", owner.unwrap_or_default(), cx))
+                .child(inspector_row(
+                    localization::t("Owner"),
+                    owner.unwrap_or_default(),
+                    cx,
+                ))
                 .child(self.inspector_full_path(model.path(), cx))
         };
 
@@ -6948,16 +7064,24 @@ impl Workspace {
         let text_settings_rows = v_flex()
             .w_full()
             .gap_1()
-            .child(inspector_row("Encoding", encoding.name(), cx))
             .child(inspector_row(
-                "Line Endings",
+                localization::t("Encoding"),
+                encoding.name(),
+                cx,
+            ))
+            .child(inspector_row(
+                localization::t("Line Endings"),
                 model.line_ending().to_string(),
                 cx,
             ))
             // Upstream's `Mode` is the syntax in force — its `Syntax.Kind` label
             // for a built-in kind, the syntax's own name otherwise. SubText's
             // syntaxes are the same bundles, so the name is the same name.
-            .child(inspector_row("Mode", document.syntax.to_string(), cx));
+            .child(inspector_row(
+                localization::t("Mode"),
+                document.syntax.to_string(),
+                cx,
+            ));
 
         // ---- Count --------------------------------------------------------
         // The count is a cache: it is only recomputed when the text changes, so
@@ -6974,15 +7098,27 @@ impl Workspace {
         let count_rows = {
             let mut rows = v_flex().w_full().gap_1();
             for (label, count) in COUNT_LABELS.iter().zip(counts) {
-                rows = rows.child(inspector_row(*label, count.formatted(), cx));
+                rows = rows.child(inspector_row(localization::t(label), count.formatted(), cx));
             }
             // Upstream's counts sit in one `Form.Section` and the positions in
             // a second, so the two groups are separated by the form's own
             // spacing rather than by a rule.
             rows = rows
-                .child(inspector_row(POSITION_LABELS[0], location.to_string(), cx))
-                .child(inspector_row(POSITION_LABELS[1], line.to_string(), cx))
-                .child(inspector_row(POSITION_LABELS[2], column.to_string(), cx));
+                .child(inspector_row(
+                    localization::t(POSITION_LABELS[0]),
+                    location.to_string(),
+                    cx,
+                ))
+                .child(inspector_row(
+                    localization::t(POSITION_LABELS[1]),
+                    line.to_string(),
+                    cx,
+                ))
+                .child(inspector_row(
+                    localization::t(POSITION_LABELS[2]),
+                    column.to_string(),
+                    cx,
+                ));
             rows
         };
 
@@ -6995,16 +7131,16 @@ impl Workspace {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Not selected"),
+                        .child(localization::t("Not selected")),
                 );
             } else {
                 // One code point is labelled in the singular, several in the
                 // plural — upstream asks `scalars.count == 1` for the same two
                 // strings.
                 let label = if character.is_single_scalar() {
-                    "Code Point"
+                    localization::t("Code Point")
                 } else {
-                    "Code Points"
+                    localization::t("Code Points")
                 };
                 // Upstream draws each code point in a rounded box: monospaced
                 // digits, two points of horizontal padding, and a
@@ -7026,13 +7162,21 @@ impl Workspace {
                 if character.is_single_scalar() {
                     let scalar = &character.scalars[0];
                     rows = rows
-                        .child(inspector_row("Name", scalar.display_name().to_string(), cx))
                         .child(inspector_row(
-                            "Block",
+                            localization::t("Name"),
+                            scalar.display_name().to_string(),
+                            cx,
+                        ))
+                        .child(inspector_row(
+                            localization::t("Block"),
                             scalar.display_block().to_string(),
                             cx,
                         ))
-                        .child(inspector_row("Category", scalar.category.to_string(), cx));
+                        .child(inspector_row(
+                            localization::t("Category"),
+                            scalar.category.to_string(),
+                            cx,
+                        ));
                 }
             }
             rows
@@ -7108,7 +7252,7 @@ impl Workspace {
                     .text_xs()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().muted_foreground)
-                    .child(INSPECTOR_SECTIONS[index]),
+                    .child(localization::t(INSPECTOR_SECTIONS[index])),
             );
 
         // Upstream's `DisclosureGroup` animates its content; the collapsed
@@ -7383,15 +7527,15 @@ impl Workspace {
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().muted_foreground)
-                    .child("Outline"),
+                    .child(localization::t("Outline")),
             )
             .child(
                 Button::new("outline-options")
                     .ghost()
                     .xsmall()
                     .icon(IconName::Ellipsis)
-                    .accessibility_label("Options")
-                    .tooltip("Options")
+                    .accessibility_label(localization::t("Options"))
+                    .tooltip(localization::t("Options"))
                     .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
                         let bigger = workspace.clone();
                         let smaller = workspace.clone();
@@ -7403,38 +7547,40 @@ impl Workspace {
                             // row cannot be laid out. See the Outline section of
                             // `docs/PLAN.md`.
                             .item(
-                                PopupMenuItem::new("Wrap Lines")
+                                PopupMenuItem::new(localization::t("Wrap Lines"))
                                     .checked(wraps)
                                     .disabled(true),
                             )
                             .separator()
-                            .label("Text Size")
-                            .item(
-                                PopupMenuItem::new("Bigger").on_click(move |_, _window, cx| {
+                            .label(localization::t("Text Size"))
+                            .item(PopupMenuItem::new(localization::t("Bigger")).on_click(
+                                move |_, _window, cx| {
                                     bigger
                                         .update(cx, |this, cx| this.bump_outline_font(1.0, cx))
                                         .ok();
-                                }),
-                            )
-                            .item(
-                                PopupMenuItem::new("Smaller").on_click(move |_, _window, cx| {
+                                },
+                            ))
+                            .item(PopupMenuItem::new(localization::t("Smaller")).on_click(
+                                move |_, _window, cx| {
                                     smaller
                                         .update(cx, |this, cx| this.bump_outline_font(-1.0, cx))
                                         .ok();
-                                }),
-                            )
-                            .item(PopupMenuItem::new("Reset to Default").on_click(
-                                move |_, _window, cx| {
-                                    reset
-                                        .update(cx, |this, cx| {
-                                            this.settings.outline_font_size =
-                                                DEFAULT_OUTLINE_FONT_SIZE;
-                                            let _ = this.settings.save();
-                                            cx.notify();
-                                        })
-                                        .ok();
                                 },
                             ))
+                            .item(
+                                PopupMenuItem::new(localization::t("Reset to Default")).on_click(
+                                    move |_, _window, cx| {
+                                        reset
+                                            .update(cx, |this, cx| {
+                                                this.settings.outline_font_size =
+                                                    DEFAULT_OUTLINE_FONT_SIZE;
+                                                let _ = this.settings.save();
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                    },
+                                ),
+                            )
                     }),
             )
     }
@@ -7587,9 +7733,9 @@ impl Workspace {
             let message = if filter.is_empty() {
                 // Not upstream: CotEditor shows a plain empty list here.
                 // SubText's placeholder predates this pane's tree and is kept.
-                "No outline items"
+                localization::t("No outline items")
             } else {
-                "No Filter Results"
+                localization::t("No Filter Results")
             };
             v_flex()
                 .p_2()
@@ -7660,9 +7806,9 @@ impl Workspace {
         let text = self.active_text(cx).unwrap_or_default();
 
         let status = if items.is_empty() {
-            "No issues found.".to_string()
+            localization::t("No issues found.").to_string()
         } else {
-            format!("Found {} incompatible characters.", items.len())
+            localization::tf("Found {} incompatible characters.", &[&items.len()])
         };
 
         let mut pane = v_flex()
@@ -7732,12 +7878,11 @@ impl Workspace {
         let items = subtext_core::inconsistent_line_endings(&text, base);
 
         let status = if items.is_empty() {
-            "No issues found.".to_string()
+            localization::t("No issues found.").to_string()
         } else {
-            format!(
+            localization::tf(
                 "Found {} line endings other than {}.",
-                items.len(),
-                base.abbreviation()
+                &[&items.len(), &base.abbreviation()],
             )
         };
 
@@ -7848,7 +7993,7 @@ impl Workspace {
                             .items_center()
                             .gap_1()
                             .when(index == 0, |this| this.justify_end())
-                            .child(*label)
+                            .child(localization::t(label))
                             .when_some(indicator, |this, icon| {
                                 this.child(
                                     Icon::new(icon)
@@ -7989,8 +8134,12 @@ impl Workspace {
             .ghost()
             .xsmall()
             .label(encoding.name())
-            .accessibility_label("Text Encoding")
-            .tooltip("Text Encoding")
+            // Upstream draws these with an `NSPopUpButton`, whose bezel carries
+            // a ⇕ indicator; without one a bordered-less label in a row of
+            // plain numbers reads as text rather than as a control.
+            .dropdown_caret(true)
+            .accessibility_label(localization::t("Text Encoding"))
+            .tooltip(localization::t("Text Encoding"))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
                 let mut menu = menu;
                 for item in items.iter().copied() {
@@ -8039,8 +8188,11 @@ impl Workspace {
             .xsmall()
             .label(current.abbreviation())
             .disabled(!editable)
-            .accessibility_label("Line Endings")
-            .tooltip("Line Endings")
+            // Same ⇕ as the encoding picker beside it: both are popup buttons
+            // upstream.
+            .dropdown_caret(true)
+            .accessibility_label(localization::t("Line Endings"))
+            .tooltip(localization::t("Line Endings"))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
                 let mut menu = menu;
                 for ending in subtext_core::line_ending::ALL {
@@ -8123,7 +8275,7 @@ impl Workspace {
             let convert = workspace.clone();
             let reinterpret = workspace.clone();
             dialog
-                .title("Text encoding change")
+                .title(localization::t("Text encoding change"))
                 .w(window.rem_size() * 26.)
                 .child(div().text_sm().child(body.clone()))
                 .footer(
@@ -8132,12 +8284,12 @@ impl Workspace {
                         // a dialog dismisses without a callback of its own.
                         .child(
                             Button::new("dialog-cancel")
-                                .label("Cancel")
+                                .label(localization::t("Cancel"))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("encoding-reinterpret")
-                                .label("Reinterpret")
+                                .label(localization::t("Reinterpret"))
                                 .on_click(move |_, window, cx| {
                                     reinterpret
                                         .update(cx, |workspace, cx| {
@@ -8153,7 +8305,7 @@ impl Workspace {
                         )
                         .child(
                             Button::new("encoding-convert")
-                                .label("Convert")
+                                .label(localization::t("Convert"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     convert
@@ -8214,9 +8366,17 @@ impl Workspace {
                     .ghost()
                     .xsmall()
                     .icon(IconName::Close)
+                    // Upstream does not grey this button out when there is no
+                    // split to close — it fades it to nothing
+                    // (`opacity(canClose ? 1 : 0)`) and leaves it in place, so
+                    // the outline navigator beside it does not shift as a
+                    // split opens and closes. The disabled flag is still there
+                    // because it is what keeps the button out of hit testing
+                    // and out of the Tab order.
                     .disabled(!can_close)
-                    .accessibility_label("Close Split Editor")
-                    .tooltip("Close split editor")
+                    .opacity(if can_close { 1. } else { 0. })
+                    .accessibility_label(localization::t("Close Split Editor"))
+                    .tooltip(localization::t("Close split editor"))
                     .on_click(move |_, window, cx| {
                         // Upstream sends the action from the bar's own text view
                         // and the responder chain resolves it to *that* pane.
@@ -8231,24 +8391,25 @@ impl Workspace {
                     }),
             )
             .when(can_close && !entries.is_empty(), |this| {
-                this.child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+                this.child(div().w(px(1.)).h(rems(1.)).bg(cx.theme().border))
             })
             .when(!entries.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .gap_0p5()
                         .child(
+                            // Upstream turns these chevrons sideways only when the
+                            // *text* is laid out vertically — `OutlineNavigator`
+                            // watches `textView.layoutOrientation`, not the split's.
+                            // GPUI's text engine has no vertical layout, so that
+                            // branch cannot be reached and the arrows stay up/down.
                             Button::new("nav-outline-previous")
                                 .ghost()
                                 .xsmall()
-                                .icon(if is_vertical {
-                                    IconName::ChevronLeft
-                                } else {
-                                    IconName::ChevronUp
-                                })
+                                .icon(IconName::ChevronUp)
                                 .disabled(!can_previous)
-                                .accessibility_label("Previous Outline Item")
-                                .tooltip("Jump to previous outline item")
+                                .accessibility_label(localization::t("Previous Outline Item"))
+                                .tooltip(localization::t("Jump to previous outline item"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.select_previous_outline_item(cx)
                                 })),
@@ -8257,14 +8418,10 @@ impl Workspace {
                             Button::new("nav-outline-next")
                                 .ghost()
                                 .xsmall()
-                                .icon(if is_vertical {
-                                    IconName::ChevronRight
-                                } else {
-                                    IconName::ChevronDown
-                                })
+                                .icon(IconName::ChevronDown)
                                 .disabled(!can_next)
-                                .accessibility_label("Next Outline Item")
-                                .tooltip("Jump to next outline item")
+                                .accessibility_label(localization::t("Next Outline Item"))
+                                .tooltip(localization::t("Jump to next outline item"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.select_next_outline_item(cx)),
                                 ),
@@ -8284,8 +8441,8 @@ impl Workspace {
                         Icon::new(IconName::SquareSplitHorizontal)
                             .rotate(percentage(if is_vertical { -0.25 } else { 0. })),
                     )
-                    .accessibility_label("Split Editor")
-                    .tooltip("Split editor")
+                    .accessibility_label(localization::t("Split Editor"))
+                    .tooltip(localization::t("Split editor"))
                     .on_click(move |_, window, cx| {
                         split
                             .update(cx, |workspace, cx| {
@@ -8300,9 +8457,9 @@ impl Workspace {
                         let orientation = orientation.clone();
                         menu.item(
                             PopupMenuItem::new(if is_vertical {
-                                "Stack Editors Horizontally"
+                                localization::t("Stack Editors Horizontally")
                             } else {
-                                "Stack Editors Vertically"
+                                localization::t("Stack Editors Vertically")
                             })
                             .on_click(move |_, _, cx| {
                                 orientation
@@ -8341,8 +8498,8 @@ impl Workspace {
             .ghost()
             .xsmall()
             .icon(IconName::List)
-            .accessibility_label("Outline Menu")
-            .tooltip("Outline Menu")
+            .accessibility_label(localization::t("Outline Menu"))
+            .tooltip(localization::t("Outline Menu"))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, _cx| {
                 let mut menu = menu;
                 for (index, (title, range)) in rows.iter().enumerate() {
@@ -8469,32 +8626,32 @@ impl Workspace {
         let mut items: Vec<(bool, &str, String)> = vec![
             (
                 window.show_status_bar_lines,
-                COUNT_LABELS[0],
+                localization::t(COUNT_LABELS[0]),
                 counts[0].formatted(),
             ),
             (
                 window.show_status_bar_chars,
-                COUNT_LABELS[1],
+                localization::t(COUNT_LABELS[1]),
                 counts[1].formatted(),
             ),
             (
                 window.show_status_bar_words,
-                COUNT_LABELS[2],
+                localization::t(COUNT_LABELS[2]),
                 counts[2].formatted(),
             ),
             (
                 window.show_status_bar_location,
-                POSITION_LABELS[0],
+                localization::t(POSITION_LABELS[0]),
                 location.to_string(),
             ),
             (
                 window.show_status_bar_line,
-                POSITION_LABELS[1],
+                localization::t(POSITION_LABELS[1]),
                 line.to_string(),
             ),
             (
                 window.show_status_bar_column,
-                POSITION_LABELS[2],
+                localization::t(POSITION_LABELS[2]),
                 column.to_string(),
             ),
         ];
@@ -8528,8 +8685,8 @@ impl Workspace {
                         .xsmall()
                         .icon(IconName::PenOff)
                         .disabled(true)
-                        .accessibility_label("Not editable")
-                        .tooltip("The document is not editable."),
+                        .accessibility_label(localization::t("Not editable"))
+                        .tooltip(localization::t("The document is not editable.")),
                 )
             })
             .child(
@@ -8679,9 +8836,18 @@ impl Workspace {
 /// without it.
 pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
     const UNITS: [(&str, f64); 4] = [("kB", 1e3), ("MB", 1e6), ("GB", 1e9), ("TB", 1e12)];
+    // CotEditor's Chinese status bar reads 58字节, with no space; English says
+    // "58 bytes". The kB and above units are spelled the same in both, which is
+    // why only this one is translated.
+    let bytes_word = localization::t("bytes");
+    let separator = if localization::language() == localization::Language::English {
+        " "
+    } else {
+        ""
+    };
     let value = bytes as f64;
     let scaled = if value < 1e3 {
-        format!("{bytes} bytes")
+        format!("{bytes}{separator}{bytes_word}")
     } else {
         let (unit, scale) = UNITS
             .iter()
@@ -8698,7 +8864,7 @@ pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
     };
 
     if includes_actual_byte_count {
-        format!("{scaled} ({bytes} bytes)")
+        format!("{scaled} ({bytes}{separator}{bytes_word})")
     } else {
         scaled
     }
@@ -8709,12 +8875,17 @@ pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
 /// Upstream draws both as 12-point semibold text in the secondary colour —
 /// the same style the Document inspector's four sections use, and the reason
 /// the two lists read as two things rather than one.
+/// A pane's heading.
+///
+/// Translated here rather than at each call site: the label is always a drawn
+/// heading, never an identity something matches on, so every caller wants the
+/// same answer.
 fn section_title(label: &'static str, cx: &App) -> impl IntoElement {
     div()
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(cx.theme().muted_foreground)
-        .child(label)
+        .child(localization::t(label))
 }
 
 /// One `LabeledContent` row of the Document inspector.
@@ -8862,7 +9033,7 @@ fn inspector_tags_row(tags: &[fileattrs::FinderTag], cx: &App) -> impl IntoEleme
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Tags"),
+                .child(localization::t("Tags")),
         )
         .child(div().min_w_0().child(value))
 }
@@ -8949,9 +9120,28 @@ impl Render for Workspace {
                 }
             }));
 
+        // The window's first row is one strip, not two: upstream's document
+        // window is a `fullSizeContentView` with a unified toolbar, so the
+        // traffic lights, the document name and the toolbar share a single
+        // title bar. `TitleBar` is the same arrangement — it reserves the
+        // controls' corner, draws the bar's background and border, and owns
+        // dragging and double-click — so the toolbar goes inside it instead of
+        // under it. The name is drawn here because the native title is hidden;
+        // it is a label, not a field, since renaming belongs to File ▸ Rename.
+        let mut title_bar = TitleBar::new().child(
+            div()
+                .flex_shrink_0()
+                .truncate()
+                .text_sm()
+                .child(SharedString::from(title)),
+        );
+        // With the toolbar hidden the strip is still the window's drag region,
+        // which is what upstream's `titleVisibility` window keeps too.
         if self.settings.window.show_toolbar {
-            root = root.child(self.render_toolbar(cx));
+            title_bar = title_bar.child(self.render_toolbar(cx));
         }
+        root = root.child(title_bar);
+
         if self.settings.window.show_tab_bar && self.documents.len() > 1 {
             root = root.child(self.render_tab_bar(cx));
         }
@@ -9004,11 +9194,20 @@ impl Render for Workspace {
         // of the editor, over the text rather than beside it. `relative()` is
         // what makes the `absolute()` capsule inside it measure against this
         // column rather than against the window.
+        //
+        // The panel's own root is a *row* flex (`flex().flex_grow_1().size_full()`),
+        // so its child has to be told to take the width. Without `w_full` a
+        // column shrink-wraps to the widest thing inside it — the status bar's
+        // run of counters and pickers — and the bar, the navigation bar and the
+        // current-line highlight all stop at that width instead of reaching the
+        // inspector's edge.
         let count_capsule = self.render_count_capsule(window.rem_size(), cx);
         panels.push(
             resizable_panel().child(
                 v_flex()
                     .relative()
+                    .w_full()
+                    .min_w_0()
                     .h_full()
                     .min_h_0()
                     .child(editor_area)

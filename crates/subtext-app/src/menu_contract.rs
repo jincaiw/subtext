@@ -20,7 +20,11 @@
 //!
 //! * It compares **names**, not behaviour: a dispatcher arm that reports "not
 //!   implemented yet" still counts as a handler. That is deliberate — saying why
-//!   a command is absent is the project's rule, and the item is not dead.
+//!   a command is absent is the project's rule, and the item is not dead. Those
+//!   arms are not left to trust, though: [`NOTICE_ONLY`] names every command the
+//!   project knowingly answers with an explanation, and the test below fails if
+//!   the set of notice-only arms drifts from it in either direction, so a new
+//!   dead item cannot hide behind a notice.
 //! * It reads the sources as text. It matches the shapes those files use today
 //!   (one `path => "Name",` per line in the binding table, one `"Name"` literal
 //!   per dispatcher arm). A rewrite into another shape is meant to fail loudly
@@ -62,6 +66,43 @@ const RUNTIME_ACTIONS: [&str; 8] = [
     "actions::text::NormalizeUnicode",
     "actions::file::OpenRecentDocument",
     "actions::script::RunScript",
+];
+
+/// The commands that are answered with an explanation instead of an edit.
+///
+/// Upstream implements these through AppKit (`NSPrintOperation`, the spelling
+/// and speech services, NSTextView's substitution panel and writing direction,
+/// the font panel, AppleScript). GPUI exposes none of them, so the honest
+/// answer is a notice saying why — but a notice is also indistinguishable from
+/// a dead item at a glance, which is exactly the bug this file exists to catch.
+/// Writing the names down here is the line between "understood limitation" and
+/// "silently broken": a new notice-only arm fails the test until it is added
+/// here with a reason, and an entry that no longer matches an arm fails too.
+const NOTICE_ONLY: [&str; 24] = [
+    "ShareDocument",
+    "RunPageLayout",
+    "PrintDocument",
+    "ShowGuessPanel",
+    "CheckSpelling",
+    "ToggleContinuousSpellChecking",
+    "ToggleGrammarChecking",
+    "ToggleAutomaticSpellingCorrection",
+    "ToggleAutomaticQuoteSubstitution",
+    "ToggleAutomaticDashSubstitution",
+    "ToggleAutomaticTextReplacement",
+    "ToggleSmartInsertDelete",
+    "OrderFrontSubstitutionsPanel",
+    "StartSpeaking",
+    "StopSpeaking",
+    "ReplaceQuotesInSelection",
+    "ReplaceDashesInSelection",
+    "ReplaceTextInSelection",
+    "OrderFrontFontPanel",
+    "MakeWritingDirectionLeftToRight",
+    "MakeWritingDirectionRightToLeft",
+    "MakeLayoutOrientationHorizontal",
+    "MakeLayoutOrientationVertical",
+    "OpenAppleScriptDictionary",
 ];
 
 /// `actions::group::Name` → the name the dispatcher matches on.
@@ -130,6 +171,113 @@ fn dispatched_names() -> BTreeSet<String> {
     names
 }
 
+/// The name literals inside the dispatcher's `match name { … }`, with their
+/// byte span in [`DISPATCH`] and the byte span of the whole match.
+///
+/// A literal counts only when it is identifier-shaped; notice messages hold
+/// spaces, so they do not disturb the walk.
+fn name_literals() -> (Vec<(usize, usize, String)>, std::ops::Range<usize>) {
+    let start = DISPATCH.find("match name {").unwrap_or(0);
+    let end = DISPATCH.find("other =>").unwrap_or(DISPATCH.len());
+    let body = &DISPATCH[start..end];
+
+    let mut literals = Vec::new();
+    let mut at = 0;
+    while let Some(open) = body[at..].find('"') {
+        let open = at + open;
+        let Some(close) = body[open + 1..].find('"').map(|offset| open + 1 + offset) else {
+            break;
+        };
+        let literal = &body[open + 1..close];
+        if !literal.is_empty()
+            && literal
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            literals.push((open, close + 1, literal.to_string()));
+        }
+        at = close + 1;
+    }
+    (literals, start..end)
+}
+
+/// `text` with `//` line comments removed.
+///
+/// An arm's body is taken up to the next name literal, which means it also
+/// carries any comment written above that next arm. The comments are prose and
+/// would otherwise make every notice look like it did more than it does.
+fn without_line_comments(text: &str) -> String {
+    text.lines()
+        .map(|line| line.find("//").map_or(line, |at| &line[..at]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether an arm body does nothing but call `self.notice(…)`.
+///
+/// The notice's arguments are removed first — the message text is prose, and
+/// two of the calls are `format!`-wrapped — then what is left has to be only
+/// the punctuation an arm needs. `RecolorAll` calls `self.notice` too, but it
+/// also rehighlights, so it is not notice-only.
+fn is_notice_only(arm_body: &str) -> bool {
+    let mut rest = String::new();
+    let mut at = 0;
+    let mut found = false;
+    while let Some(offset) = arm_body[at..].find("self.notice(") {
+        let open = at + offset + "self.notice".len();
+        rest.push_str(&arm_body[at..at + offset]);
+
+        let mut depth = 0usize;
+        let mut index = open;
+        while index < arm_body.len() {
+            match arm_body.as_bytes()[index] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        index += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        at = index;
+        found = true;
+    }
+    rest.push_str(&arm_body[at..]);
+    found
+        && rest
+            .chars()
+            .all(|c| c.is_whitespace() || matches!(c, '{' | '}' | ';' | ','))
+}
+
+/// The names whose dispatcher arm only calls `self.notice(…)`.
+fn notice_only_names() -> BTreeSet<String> {
+    let (literals, span) = name_literals();
+    let body = &DISPATCH[span];
+
+    let mut found = BTreeSet::new();
+    let mut group: Vec<String> = Vec::new();
+    for (index, (_, end, name)) in literals.iter().enumerate() {
+        group.push(name.clone());
+        let next = literals.get(index + 1).map_or(body.len(), |next| next.0);
+        let between = &body[*end..next];
+        let Some(arrow) = between.find("=>") else {
+            // Another `| "Name"` alternative of the same pattern.
+            continue;
+        };
+        let arm_body = without_line_comments(&body[*end + arrow + 2..next]);
+        if is_notice_only(&arm_body) {
+            found.extend(group.drain(..));
+        } else {
+            group.clear();
+        }
+    }
+    found
+}
+
 #[test]
 fn the_parsers_find_the_tables_they_are_meant_to_read() {
     // The health check for this gate: a parser that stopped matching reports
@@ -184,6 +332,33 @@ fn every_bound_name_is_answered() {
         "these bound names reach dispatch() with no arm for them, so the item reports \
          \"not implemented yet\" even though a menu command exists:\n  {}",
         unhandled.join("\n  ")
+    );
+}
+
+#[test]
+fn only_documented_gaps_are_answered_with_a_notice() {
+    // Both directions matter. A command that used to work must not be demoted
+    // to a notice without the list being edited, and a name left in the list
+    // after the arm became real would keep failing nothing but the docs.
+    let found = notice_only_names();
+    let expected: BTreeSet<String> = NOTICE_ONLY.iter().map(|name| name.to_string()).collect();
+    let unexpected: Vec<&String> = found.difference(&expected).collect();
+    let stale: Vec<&String> = expected.difference(&found).collect();
+    assert!(
+        unexpected.is_empty(),
+        "these dispatcher arms only say a command is unavailable; either implement them or \
+         add them to NOTICE_ONLY with the reason:\n  {unexpected:#?}"
+    );
+    assert!(
+        stale.is_empty(),
+        "NOTICE_ONLY lists commands that are no longer notice-only (or no longer dispatched):\n  \
+         {stale:#?}"
+    );
+    // And the parser has to be reading real arms, not silently finding none.
+    assert!(
+        found.len() >= 20,
+        "the notice parser found only {} names; the match probably changed shape",
+        found.len()
     );
 }
 

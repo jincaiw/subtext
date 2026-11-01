@@ -48,17 +48,17 @@ macro_rules! secondary {
 /// Every default shortcut, in CotEditor's menu order.
 pub fn default_bindings() -> Vec<KeyBinding> {
     vec![
-        // CotEditor > Settings…
+        // SubText > Settings…
         KeyBinding::new(secondary!("", ","), actions::app::ShowSettingsWindow, None),
-        // CotEditor > Hide CotEditor
+        // SubText > Hide SubText
         KeyBinding::new(secondary!("", "h"), actions::app::Hide, None),
-        // CotEditor > Hide Others
+        // SubText > Hide Others
         KeyBinding::new(
             secondary!("alt-", "h"),
             actions::app::HideOtherApplications,
             None,
         ),
-        // CotEditor > Quit CotEditor
+        // SubText > Quit SubText
         KeyBinding::new(secondary!("", "q"), actions::app::Terminate, None),
         // File > New
         KeyBinding::new(secondary!("", "n"), actions::file::NewDocument, None),
@@ -308,7 +308,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
             actions::window::PerformMiniaturize,
             None,
         ),
-        // Help > CotEditor Help
+        // Help > SubText Help
         KeyBinding::new(secondary!("shift-", "/"), actions::help::ShowHelp, None),
     ]
 }
@@ -328,23 +328,23 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 /// character to a key lives in the generator, and a second copy of it in Rust
 /// would be a second thing to get wrong.
 pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
-    ("CotEditor > Settings…", "⌘,", "command", ",", "secondary-,"),
+    ("SubText > Settings…", "⌘,", "command", ",", "secondary-,"),
     (
-        "CotEditor > Hide CotEditor",
+        "SubText > Hide SubText",
         "⌘H",
         "command",
         "h",
         "secondary-h",
     ),
     (
-        "CotEditor > Hide Others",
+        "SubText > Hide Others",
         "⌥⌘H",
         "option command",
         "h",
         "alt-secondary-h",
     ),
     (
-        "CotEditor > Quit CotEditor",
+        "SubText > Quit SubText",
         "⌘Q",
         "command",
         "q",
@@ -745,7 +745,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
     ("Find > Go to Line…", "⌘L", "command", "l", "secondary-l"),
     ("Window > Minimize", "⌘M", "command", "m", "secondary-m"),
     (
-        "Help > CotEditor Help",
+        "Help > SubText Help",
         "⇧⌘/",
         "shift command",
         "?",

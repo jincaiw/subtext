@@ -38,3 +38,8 @@ compile_commands.json
 *.dmg
 *.app/
 *.zip
+
+# Agent skills installed locally (npx skills add)
+/.agents/
+/.claude/skills/
+/skills-lock.json

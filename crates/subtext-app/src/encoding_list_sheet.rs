@@ -63,8 +63,9 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, rems,
 };
 
-use subtext_core::encoding::{EncodingList, FileEncoding, TextEncoding};
+use subtext_core::encoding::{EncodingList, FileEncoding, RemovalError, TextEncoding};
 
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// How tall the list is, in rem.
@@ -86,6 +87,21 @@ enum Removal {
     Refused(String),
     /// The selection can go.
     Allowed,
+}
+
+/// Why an entry cannot be taken out of the list, in the words upstream's
+/// tooltip uses.
+///
+/// `name` is the encoding's display name, which only the first message needs —
+/// upstream's second one does not name the encoding, because the user cannot
+/// see which one it is from the list alone.
+fn removal_message(error: RemovalError, name: &str) -> String {
+    match error {
+        RemovalError::Utf8 => localization::tf("{} can’t be removed.", &[&name]),
+        RemovalError::DefaultEncoding => {
+            localization::t("The encoding set as default can’t be removed.").to_string()
+        }
+    }
 }
 
 /// One row of the editor: an entry of the list, plus the identity the row keeps
@@ -337,7 +353,7 @@ impl EncodingListSheet {
                 // Both refusals are about encodings, so there is always a name
                 // to put in the message; a separator can never reach here.
                 let name = row.item.map_or("", |encoding| encoding.name);
-                return Removal::Refused(error.message(name));
+                return Removal::Refused(removal_message(error, name));
             }
         }
         Removal::Allowed
@@ -476,7 +492,7 @@ impl EncodingListSheet {
                 FileEncoding::utf8_with_bom().name()
             ),
             Some(encoding) => encoding.name.to_string(),
-            None => "Separator".to_string(),
+            None => localization::t("Separator").to_string(),
         };
 
         // What the pointer carries: the row's identity, and the label the
@@ -484,7 +500,7 @@ impl EncodingListSheet {
         // GPUI draws it above the window for as long as the drag lasts.
         let label: SharedString = match row.item {
             Some(encoding) => encoding.name.into(),
-            None => "Separator".into(),
+            None => localization::t("Separator").into(),
         };
         let dragged = Dragging {
             id,
@@ -602,21 +618,22 @@ impl EncodingListSheet {
         Button::new("encoding-add")
             .small()
             .icon(gpui_kit::assets::IconName::Plus)
-            .accessibility_label("Add encoding or separator")
-            .tooltip("Add a text encoding or a separator")
+            .accessibility_label(localization::t("Add encoding or separator"))
+            .tooltip(localization::t("Add a text encoding or a separator"))
             .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, window, _cx| {
                 let separator = sheet.clone();
-                let mut menu =
-                    menu.item(PopupMenuItem::new("Separator").on_click(move |_, _, cx| {
+                let mut menu = menu.item(
+                    PopupMenuItem::new(localization::t("Separator")).on_click(move |_, _, cx| {
                         separator
                             .update(cx, |sheet, cx| {
                                 sheet.add(None);
                                 sheet.refresh(cx);
                             })
                             .ok();
-                    }));
+                    }),
+                );
                 menu = menu.separator();
-                menu = menu.item(PopupMenuItem::label("Text Encoding"));
+                menu = menu.item(PopupMenuItem::label(localization::t("Text Encoding")));
                 for encoding in addable.iter().copied() {
                     let sheet = sheet.clone();
                     menu =
@@ -647,7 +664,7 @@ impl EncodingListSheet {
         Button::new("encoding-remove")
             .small()
             .icon(gpui_kit::assets::IconName::Minus)
-            .accessibility_label("Delete selected entries")
+            .accessibility_label(localization::t("Delete selected entries"))
             .disabled(!allowed)
             .tooltip(reason)
             .on_click(cx.listener(|this, _, _, cx| {
@@ -715,7 +732,7 @@ impl Render for EncodingListSheet {
             .child(
                 div()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Drag encodings to change the order:"),
+                    .child(localization::t("Drag encodings to change the order:")),
             )
             .child(self.render_list(cx))
             .child(
@@ -728,7 +745,7 @@ impl Render for EncodingListSheet {
                     .child(
                         Button::new("encoding-restore")
                             .small()
-                            .label("Restore Defaults")
+                            .label(localization::t("Restore Defaults"))
                             .disabled(is_default)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.restore_defaults();
@@ -1034,6 +1051,10 @@ mod tests {
     /// UTF-8 and the default encoding refuse, and the reason names the entry.
     #[test]
     fn the_delete_button_is_refused_for_utf8_and_the_default() {
+        // The refusals are upstream's sentences, translated as whole
+        // sentences, so the language is pinned here rather than left to
+        // whatever ran before.
+        let _language = localization::pin(localization::Language::English);
         let mut sheet = sheet(&[Some("utf-8"), Some("shift_jis"), Some("windows-1252")]);
         let rows = ids(&sheet);
 
@@ -1074,6 +1095,7 @@ mod tests {
     /// takes the first, rather than following the selection.
     #[test]
     fn the_first_refusal_in_list_order_is_the_one_reported() {
+        let _language = localization::pin(localization::Language::English);
         let shift_jis = TextEncoding::from_identifier("shift_jis").expect("registered");
 
         let mut above = sheet(&[Some("windows-1252"), Some("utf-8"), Some("shift_jis")]);

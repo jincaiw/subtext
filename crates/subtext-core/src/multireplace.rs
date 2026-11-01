@@ -95,18 +95,6 @@ pub enum PatternError {
     InvalidRegularExpression(String),
 }
 
-impl PatternError {
-    /// The one-line explanation the sheet shows in a warning's tooltip.
-    pub fn message(&self) -> String {
-        match self {
-            PatternError::EmptyFindString => "The find string is empty.".to_string(),
-            PatternError::InvalidRegularExpression(reason) => {
-                format!("[Invalid regular expression] {reason}")
-            }
-        }
-    }
-}
-
 /// One row of the Multiple Replace sheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Replacement {

@@ -64,10 +64,12 @@ use gpui_kit::{
 };
 
 use subtext_core::folderfind::{
-    Cancellation, Comparison, Conjunction, FileResult, FileScope, InclusionPredicate, Match,
-    Metrics, Mode, Options, Progress, Query, Rule, Search, Summary, Target,
+    Cancellation, Comparison, Conjunction, FileResult, FileScope, FileScopeError,
+    InclusionPredicate, Match, Metrics, Mode, Options, Progress, Query, QueryError, Rule, Search,
+    SearchError, Summary, Target,
 };
 
+use crate::localization;
 use crate::settings::Settings;
 use crate::workspace::Workspace;
 
@@ -152,7 +154,8 @@ impl FolderFindPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search in Folder"));
+        let query = cx
+            .new(|cx| InputState::new(window, cx).placeholder(localization::t("Search in Folder")));
         // Return starts a search, the way upstream's `.onSubmit` does; any
         // other edit means the results on screen no longer answer the question,
         // so they are dropped.
@@ -280,12 +283,14 @@ impl FolderFindPane {
         }
 
         let Some(root) = self.effective_root(cx) else {
-            self.state = SearchState::Failed("The folder cannot be found.".to_string());
+            self.state =
+                SearchState::Failed(localization::t("The folder cannot be found.").to_string());
             cx.notify();
             return;
         };
         if !root.is_dir() {
-            self.state = SearchState::Failed("The folder cannot be found.".to_string());
+            self.state =
+                SearchState::Failed(localization::t("The folder cannot be found.").to_string());
             cx.notify();
             return;
         }
@@ -296,12 +301,12 @@ impl FolderFindPane {
         };
         let query = Query::new(find_string.clone(), mode);
         if let Err(error) = query.searcher() {
-            self.state = SearchState::Failed(error.message());
+            self.state = SearchState::Failed(query_error_message(&error));
             cx.notify();
             return;
         }
         if let Err(error) = self.scope.validate() {
-            self.state = SearchState::Failed(error.message());
+            self.state = SearchState::Failed(scope_error_message(&error));
             cx.notify();
             return;
         }
@@ -334,7 +339,7 @@ impl FolderFindPane {
                             Ok(summary) => Some(Ok(summary)),
                             Err(_cancelled) => None,
                         },
-                        Err(error) => Some(Err(error.message())),
+                        Err(error) => Some(Err(search_error_message(&error))),
                     }
                 })
                 .await;
@@ -485,7 +490,7 @@ impl FolderFindPane {
         let sheet = cx.new(|cx| FileScopeSheet::new(pane, scope, name, saved, false, window, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("File Scope")
+                .title(localization::t("File Scope"))
                 .w(window.rem_size() * 36.)
                 .child(sheet.clone())
                 // The sheet draws its own buttons; Enter belongs to them.
@@ -500,7 +505,7 @@ impl FolderFindPane {
         let sheet = cx.new(|cx| SavedScopesSheet::new(pane, saved, cx));
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("Saved Scopes")
+                .title(localization::t("Saved Scopes"))
                 .w(window.rem_size() * 30.)
                 .child(sheet.clone())
                 .footer(
@@ -508,7 +513,7 @@ impl FolderFindPane {
                     // stretches to the whole row, so a lone one reads as a bar.
                     DialogFooter::new().child(
                         Button::new("saved-scopes-ok")
-                            .label("OK")
+                            .label(localization::t("OK"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -590,9 +595,9 @@ impl FolderFindPane {
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let pane = cx.entity().downgrade();
         let mode_label = if self.uses_regular_expression {
-            "Regular Expression"
+            localization::t("Regular Expression")
         } else {
-            "Text"
+            localization::t("Text")
         };
 
         v_flex()
@@ -618,8 +623,8 @@ impl FolderFindPane {
                             .small()
                             .icon(gpui_kit::assets::IconName::CaseSensitive)
                             .selected(!self.ignores_case)
-                            .accessibility_label("Case Sensitive")
-                            .tooltip("Case Sensitive")
+                            .accessibility_label(localization::t("Case Sensitive"))
+                            .tooltip(localization::t("Case Sensitive"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.ignores_case = !this.ignores_case;
                                 this.persist(cx);
@@ -636,7 +641,7 @@ impl FolderFindPane {
     fn render_folder_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let root = self.effective_root(cx);
         let label = root.as_ref().map_or_else(
-            || "No folder — open a document".to_string(),
+            || localization::t("No folder — open a document").to_string(),
             |root| {
                 root.file_name()
                     .map(|name| name.to_string_lossy().into_owned())
@@ -674,8 +679,8 @@ impl FolderFindPane {
                         .ghost()
                         .xsmall()
                         .icon(gpui_kit::assets::IconName::File)
-                        .accessibility_label("Use the document's folder")
-                        .tooltip("Use the document's folder")
+                        .accessibility_label(localization::t("Use the document's folder"))
+                        .tooltip(localization::t("Use the document's folder"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.root = None;
                             cx.notify();
@@ -687,8 +692,8 @@ impl FolderFindPane {
                     .ghost()
                     .xsmall()
                     .icon(gpui_kit::assets::IconName::FolderOpen)
-                    .accessibility_label("Choose Folder")
-                    .tooltip("Choose Folder")
+                    .accessibility_label(localization::t("Choose Folder"))
+                    .tooltip(localization::t("Choose Folder"))
                     .on_click(cx.listener(|this, _, window, cx| this.choose_folder(window, cx))),
             )
     }
@@ -712,7 +717,7 @@ impl FolderFindPane {
         let trigger_label = self
             .scope_name
             .clone()
-            .unwrap_or_else(|| "File Scope".to_string());
+            .unwrap_or_else(|| localization::t("File Scope").to_string());
 
         Popover::new("folder-find-scope")
             .open(self.is_menu_open("scope"))
@@ -819,7 +824,7 @@ impl FolderFindPane {
                                     .py_1()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child("Saved Scopes"),
+                                    .child(localization::t("Saved Scopes")),
                             );
                         for name in saved.keys() {
                             let is_current = current.as_deref() == Some(name.as_str());
@@ -902,13 +907,15 @@ impl FolderFindPane {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Search a folder for text, like CotEditor's Folder Find."),
+                        .child(localization::t(
+                            "Search a folder for text, like CotEditor's Folder Find.",
+                        )),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Type a find string and press Return."),
+                        .child(localization::t("Type a find string and press Return.")),
                 )
                 .into_any_element(),
             SearchState::Searching { .. } => v_flex()
@@ -924,21 +931,21 @@ impl FolderFindPane {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Searching in folder…"),
+                        .child(localization::t("Searching in folder…")),
                 )
                 .into_any_element(),
             SearchState::Failed(message) => overlay(
                 gpui_kit::assets::IconName::TriangleAlert,
-                "Search Failed",
+                localization::t("Search Failed"),
                 Some(message.clone()),
                 cx,
             ),
             SearchState::Finished(summary) if summary.metrics.match_count == 0 => overlay(
                 gpui_kit::assets::IconName::Search,
-                "No Results",
-                Some(format!(
+                localization::t("No Results"),
+                Some(localization::tf(
                     "No matches for “{}” were found.",
-                    summary.metrics.find_string
+                    &[&summary.metrics.find_string],
                 )),
                 cx,
             ),
@@ -966,7 +973,7 @@ impl FolderFindPane {
                     .text_center()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Search Limit Reached"),
+                    .child(localization::t("Search Limit Reached")),
             );
         }
 
@@ -1013,9 +1020,9 @@ impl FolderFindPane {
                     gpui_kit::assets::IconName::ChevronDown
                 })
                 .accessibility_label(if is_collapsed {
-                    "Expand this file's matches"
+                    localization::t("Expand this file's matches")
                 } else {
-                    "Collapse this file's matches"
+                    localization::t("Collapse this file's matches")
                 })
                 .on_click({
                     let pane = pane.clone();
@@ -1084,12 +1091,12 @@ impl FolderFindPane {
                             let open_path = path.clone();
                             let copy_path = path.clone();
                             menu.item(
-                                PopupMenuItem::new("Show in Finder")
+                                PopupMenuItem::new(localization::t("Show in Finder"))
                                     .icon(gpui_kit::assets::IconName::FolderSearch)
                                     .on_click(move |_, _, cx| cx.reveal_path(&finder_path)),
                             )
                             .item(
-                                PopupMenuItem::new("Open in New Tab")
+                                PopupMenuItem::new(localization::t("Open in New Tab"))
                                     .icon(gpui_kit::assets::IconName::SquareArrowOutUpRight)
                                     .on_click({
                                         let pane = pane.clone();
@@ -1104,7 +1111,7 @@ impl FolderFindPane {
                             )
                             .separator()
                             .item(
-                                PopupMenuItem::new("Copy Path")
+                                PopupMenuItem::new(localization::t("Copy Path"))
                                     .icon(gpui_kit::assets::IconName::File)
                                     .on_click(move |_, _, cx| {
                                         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
@@ -1123,9 +1130,13 @@ impl FolderFindPane {
                 column = column.child(render_match_row(matched, primary, muted));
             }
             if file.is_truncated {
-                column = column.child(div().pl(rems(2.)).text_xs().text_color(muted).child(
-                    format!("Only the first {} matches were found.", file.matches.len()),
-                ));
+                column = column.child(
+                    div()
+                        .pl(rems(2.))
+                        .text_xs()
+                        .text_color(muted)
+                        .child(truncated_label(file.matches.len())),
+                );
             }
         }
 
@@ -1206,7 +1217,7 @@ impl FileScopeSheet {
             .collect::<Vec<_>>();
         let name_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Name")
+                .placeholder(localization::t("Name"))
                 .default_value(name.clone().unwrap_or_default())
         });
         Self {
@@ -1275,10 +1286,10 @@ impl FileScopeSheet {
                 return Some(error);
             }
         } else if self.named_only {
-            return Some("The name cannot be empty.".to_string());
+            return Some(localization::t("The name cannot be empty.").to_string());
         }
         if let Err(error) = scope.validate() {
-            return Some(error.message());
+            return Some(scope_error_message(&error));
         }
         None
     }
@@ -1318,7 +1329,7 @@ impl FileScopeSheet {
             .trigger(
                 Button::new("scope-conjunction-trigger")
                     .small()
-                    .label(current.label()),
+                    .label(localization::t(current.label())),
             )
             .content({
                 let sheet = sheet.clone();
@@ -1331,7 +1342,7 @@ impl FileScopeSheet {
                                     "scope-conjunction:{}",
                                     conjunction.label()
                                 ))),
-                                conjunction.label(),
+                                localization::t(conjunction.label()),
                                 conjunction == current,
                                 cx,
                             )
@@ -1362,7 +1373,7 @@ impl FileScopeSheet {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No conditions — every file is searched."),
+                    .child(localization::t("No conditions — every file is searched.")),
             );
         }
 
@@ -1378,7 +1389,7 @@ impl FileScopeSheet {
                     "scope-target-trigger:{index}"
                 ))))
                 .small()
-                .label(target.label()),
+                .label(localization::t(target.label())),
             )
             .content({
                 let sheet = sheet.clone();
@@ -1391,7 +1402,7 @@ impl FileScopeSheet {
                                     "scope-target:{index}:{}",
                                     option.label()
                                 ))),
-                                option.label(),
+                                localization::t(option.label()),
                                 option == target,
                                 cx,
                             )
@@ -1423,7 +1434,7 @@ impl FileScopeSheet {
                     "scope-comparison-trigger:{index}"
                 ))))
                 .small()
-                .label(comparison.label()),
+                .label(localization::t(comparison.label())),
             )
             .content({
                 let sheet = sheet.clone();
@@ -1436,7 +1447,7 @@ impl FileScopeSheet {
                                     "scope-comparison:{index}:{}",
                                     option.label()
                                 ))),
-                                option.label(),
+                                localization::t(option.label()),
                                 option == comparison,
                                 cx,
                             )
@@ -1474,8 +1485,8 @@ impl FileScopeSheet {
                         .ghost()
                         .small()
                         .icon(gpui_kit::assets::IconName::Close)
-                        .accessibility_label("Remove this condition")
-                        .tooltip("Remove this condition")
+                        .accessibility_label(localization::t("Remove this condition"))
+                        .tooltip(localization::t("Remove this condition"))
                         .on_click(cx.listener(move |this, _, _, cx| this.remove_rule(index, cx))),
                     ),
             );
@@ -1497,7 +1508,7 @@ impl FileScopeSheet {
                     Button::new("scope-delete")
                         .small()
                         .danger()
-                        .label("Delete")
+                        .label(localization::t("Delete"))
                         .on_click(cx.listener(|this, _, window, cx| this.delete_named(window, cx))),
                 )
             })
@@ -1505,14 +1516,14 @@ impl FileScopeSheet {
             .child(
                 Button::new("scope-cancel")
                     .small()
-                    .label("Cancel")
+                    .label(localization::t("Cancel"))
                     .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
             )
             .child(
                 Button::new("scope-apply")
                     .small()
                     .primary()
-                    .label("Apply")
+                    .label(localization::t("Apply"))
                     .disabled(blocked)
                     .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
             )
@@ -1525,16 +1536,25 @@ impl Render for FileScopeSheet {
             h_flex()
                 .gap_1()
                 .items_center()
-                .child(div().text_sm().child("Match"))
+                .child(div().text_sm().child(localization::t("Match")))
                 .child(self.render_conjunction(cx))
-                .child(div().text_sm().child("of the following conditions:")),
+                .child(
+                    div()
+                        .text_sm()
+                        .child(localization::t("of the following conditions:")),
+                ),
         );
 
         if self.wants_name() {
             body = body.child(
                 h_flex()
                     .gap_2()
-                    .child(div().w(rems(SHEET_LABEL_WIDTH)).text_sm().child("Name"))
+                    .child(
+                        div()
+                            .w(rems(SHEET_LABEL_WIDTH))
+                            .text_sm()
+                            .child(localization::t("Name")),
+                    )
                     .child(div().flex_1().child(Input::new(&self.name_input).small())),
             );
         }
@@ -1543,14 +1563,14 @@ impl Render for FileScopeSheet {
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().child("Conditions"))
+                    .child(div().text_sm().child(localization::t("Conditions")))
                     .child(self.render_rules(cx))
                     .child(
                         Button::new("scope-add")
                             .small()
                             .ghost()
                             .icon(gpui_kit::assets::IconName::Plus)
-                            .label("Add Condition")
+                            .label(localization::t("Add Condition"))
                             .on_click(cx.listener(|this, _, window, cx| this.add_rule(window, cx))),
                     ),
             )
@@ -1638,7 +1658,7 @@ impl SavedScopesSheet {
         });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("New Saved Scope")
+                .title(localization::t("New Saved Scope"))
                 .w(window.rem_size() * 36.)
                 .child(sheet.clone())
                 .on_ok(|_, _, _| false)
@@ -1658,7 +1678,7 @@ impl SavedScopesSheet {
         });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title("Edit Saved Scope")
+                .title(localization::t("Edit Saved Scope"))
                 .w(window.rem_size() * 36.)
                 .child(sheet.clone())
                 .on_ok(|_, _, _| false)
@@ -1681,7 +1701,7 @@ impl Render for SavedScopesSheet {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No saved scopes."),
+                    .child(localization::t("No saved scopes.")),
             );
         }
 
@@ -1701,7 +1721,7 @@ impl Render for SavedScopesSheet {
                             Button::new("saved-scope-rename-confirm")
                                 .small()
                                 .primary()
-                                .label("Rename")
+                                .label(localization::t("Rename"))
                                 .on_click(cx.listener(|this, _, _, cx| this.commit_rename(cx))),
                         );
                 }
@@ -1738,8 +1758,8 @@ impl Render for SavedScopesSheet {
                         .ghost()
                         .xsmall()
                         .icon(gpui_kit::assets::IconName::FileText)
-                        .accessibility_label("Rename")
-                        .tooltip("Rename")
+                        .accessibility_label(localization::t("Rename"))
+                        .tooltip(localization::t("Rename"))
                         .on_click(cx.listener({
                             let name = name.clone();
                             move |this, _, window, cx| this.start_rename(&name, window, cx)
@@ -1752,8 +1772,8 @@ impl Render for SavedScopesSheet {
                         .ghost()
                         .xsmall()
                         .icon(gpui_kit::assets::IconName::Close)
-                        .accessibility_label("Delete")
-                        .tooltip("Delete")
+                        .accessibility_label(localization::t("Delete"))
+                        .tooltip(localization::t("Delete"))
                         .on_click(cx.listener({
                             let name = name.clone();
                             move |this, _, _, cx| this.delete(&name, cx)
@@ -1770,14 +1790,14 @@ impl Render for SavedScopesSheet {
 
         v_flex()
             .gap_2()
-            .child(div().text_sm().child("Saved scopes:"))
+            .child(div().text_sm().child(localization::t("Saved scopes:")))
             .child(list)
             .child(
                 Button::new("saved-scope-add")
                     .small()
                     .ghost()
                     .icon(gpui_kit::assets::IconName::Plus)
-                    .label("Add")
+                    .label(localization::t("Add"))
                     .on_click(cx.listener(|this, _, window, cx| this.add_scope(window, cx))),
             )
     }
@@ -1829,9 +1849,12 @@ fn mode_menu(
             let pane = pane.clone();
             move |_, _, cx| {
                 let mut content = v_flex().w(rems(11.)).gap_0p5();
-                for (index, (option, pattern)) in [("Text", false), ("Regular Expression", true)]
-                    .into_iter()
-                    .enumerate()
+                for (index, (option, pattern)) in [
+                    (localization::t("Text"), false),
+                    (localization::t("Regular Expression"), true),
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     content = content.child(
                         menu_row(
@@ -1942,13 +1965,30 @@ fn overlay(
         .into_any_element()
 }
 
+/// `Only the first match was found.` / `Only the first N matches were found.`,
+/// upstream's `FolderFind.FileResult.truncated.label`, pluralized the way it
+/// pluralizes.
+fn truncated_label(count: usize) -> String {
+    if count == 1 {
+        localization::t("Only the first match was found.").to_string()
+    } else {
+        localization::tf("Only the first {} matches were found.", &[&count])
+    }
+}
+
 /// `N matches in M files`, with a `+` when the count is a lower bound.
+///
+/// Upstream words the two as separate sentences
+/// (`FolderFind.Metrics.message` and `.message.truncated`), and Chinese puts
+/// the file count first — which is why the values are named rather than
+/// positional.
 fn metrics_message(metrics: &Metrics, is_truncated: bool) -> String {
-    let plus = if is_truncated { "+" } else { "" };
-    format!(
-        "{}{plus} matches in {} files",
-        metrics.match_count, metrics.matched_file_count
-    )
+    let values: [&dyn std::fmt::Display; 2] = [&metrics.match_count, &metrics.matched_file_count];
+    if is_truncated {
+        localization::tf("{1}+ matches in {2} files", &values)
+    } else {
+        localization::tf("{1} matches in {2} files", &values)
+    }
 }
 
 /// Split a match's line into the part before the hit, the hit, and the part
@@ -2030,19 +2070,59 @@ fn syntax_predicate(extensions: HashSet<String>) -> InclusionPredicate {
     })
 }
 
+/// Why a query could not be compiled, spelled the way upstream spells it.
+///
+/// Upstream's `FolderFinder.Error.invalidQuery` forwards to `TextFind.Error`'s
+/// description, which is the plain sentence: the reason a pattern failed to
+/// compile is a *recovery suggestion* there, and folder find shows only the
+/// description.
+fn query_error_message(error: &QueryError) -> String {
+    match error {
+        QueryError::EmptyFindString => localization::t("Empty find text").to_string(),
+        QueryError::InvalidRegularExpression(_) => {
+            localization::t("Invalid regular expression").to_string()
+        }
+    }
+}
+
+/// Why a file scope cannot be used — upstream's `FileScope.Error` messages.
+fn scope_error_message(error: &FileScopeError) -> String {
+    match error {
+        FileScopeError::EmptyValue => {
+            localization::t("The scope contains a rule without a value.").to_string()
+        }
+        FileScopeError::InvalidRegularExpression(_) => {
+            localization::t("The scope contains an invalid regular expression.").to_string()
+        }
+    }
+}
+
+/// Why a search could not start: whichever of the two did not compile.
+fn search_error_message(error: &SearchError) -> String {
+    match error {
+        SearchError::Query(error) => query_error_message(error),
+        SearchError::Scope(error) => scope_error_message(error),
+    }
+}
+
 /// Why a scope cannot be saved under `name`.
 ///
 /// Upstream's `validateFileScopeName`: a name has to exist, has to be one line,
 /// and has to be free — except when it is the name the scope already had.
 fn validate_scope_name(name: &str, taken: &[String], original: Option<&str>) -> Result<(), String> {
     if name.is_empty() {
-        return Err("The name cannot be empty.".to_string());
+        return Err(localization::t("The name cannot be empty.").to_string());
     }
     if name.contains('\n') || name.contains('\r') {
-        return Err("The name cannot contain a line break.".to_string());
+        return Err(localization::t("The name cannot contain a line break.").to_string());
     }
     if Some(name) != original && taken.iter().any(|existing| existing == name) {
-        return Err(format!("“{name}” is already in use."));
+        // The name is interpolated, so only the sentence around it is looked
+        // up; the quotation marks stay around the name in both languages.
+        return Err(format!(
+            "“{name}” {}",
+            localization::t("is already in use.")
+        ));
     }
     Ok(())
 }
@@ -2050,8 +2130,10 @@ fn validate_scope_name(name: &str, taken: &[String], original: Option<&str>) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        metrics_message, search_options, split_display_line, syntax_predicate, validate_scope_name,
+        metrics_message, search_options, split_display_line, syntax_predicate, truncated_label,
+        validate_scope_name,
     };
+    use crate::localization;
     use std::collections::HashSet;
     use std::ops::Range;
     use std::path::PathBuf;
@@ -2120,6 +2202,9 @@ mod tests {
 
     #[test]
     fn the_metrics_message_marks_a_lower_bound() {
+        // The sentences are translated as wholes, so the language is pinned
+        // here rather than left to whatever ran before.
+        let _language = localization::pin(localization::Language::English);
         let metrics = Metrics {
             find_string: "x".to_string(),
             match_count: 3,
@@ -2128,6 +2213,8 @@ mod tests {
         };
         assert_eq!(metrics_message(&metrics, false), "3 matches in 2 files");
         assert_eq!(metrics_message(&metrics, true), "3+ matches in 2 files");
+        assert_eq!(truncated_label(3), "Only the first 3 matches were found.");
+        assert_eq!(truncated_label(1), "Only the first match was found.");
     }
 
     #[test]

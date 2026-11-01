@@ -1367,3 +1367,245 @@ fn dragging_a_row_reorders_the_encoding_list(cx: &mut TestAppContext) {
     })
     .expect("drag the row");
 }
+
+// ---- the menu bar's commands ---------------------------------------------
+
+/// Wire the application's menu handlers into a test window.
+///
+/// The application does this in `lib.rs` when its window opens: `install`
+/// registers one global handler per action, `register` records which workspace
+/// a command belongs to. Without both, dispatching an action reaches nothing —
+/// which is exactly the "the menu item does nothing" failure this file is here
+/// to catch, so every menu test below starts here rather than clicking.
+fn install_menu_handlers(
+    cx: &mut TestAppContext,
+    window: gpui_kit::AnyWindowHandle,
+    workspace: &gpui_kit::Entity<subtext_app::workspace::Workspace>,
+) {
+    cx.update(|cx| {
+        subtext_app::bridge::install(cx);
+        subtext_app::bridge::register(workspace.downgrade(), window, cx);
+    });
+}
+
+fn active_text(
+    cx: &mut TestAppContext,
+    workspace: &gpui_kit::Entity<subtext_app::workspace::Workspace>,
+) -> Option<String> {
+    cx.update(|cx| workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)))
+}
+
+fn clipboard_text(cx: &TestAppContext) -> Option<String> {
+    cx.read_from_clipboard().and_then(|item| item.text())
+}
+
+fn select(
+    cx: &mut TestAppContext,
+    workspace: &gpui_kit::Entity<subtext_app::workspace::Workspace>,
+    range: std::ops::Range<usize>,
+) {
+    let editor = workspace
+        .read_with(cx, |workspace, _| workspace.active_editor().cloned())
+        .expect("the opening document should have an editor");
+    editor.update(cx, |state, cx| state.set_selected_range(range, cx));
+}
+
+/// *Edit ▸ Undo* undoes what was typed.
+///
+/// The menu item carries `actions::edit::Undo`, while the text engine listens
+/// for `gpui_kit::base::input::Undo`. Sending the menu's action to the
+/// workspace and having it report "handled by the text engine" used to leave
+/// the command doing nothing; this test follows the menu's own path and reads
+/// the document, so the difference between a notice and an edit is visible.
+#[gpui_kit::test]
+fn undo_from_the_menu_bar_undoes_the_typing(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-undo", "abc");
+    install_menu_handlers(cx, window, &workspace);
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("X", cx);
+        window.render_frame(cx);
+    })
+    .expect("type");
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("Xabc".to_owned()),
+        "the keystroke should have landed first"
+    );
+
+    cx.dispatch_action(window, actions::edit::Undo);
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("abc".to_owned()),
+        "Edit ▸ Undo should undo the typing, not merely report that it was seen"
+    );
+}
+
+/// *Edit ▸ Select All* followed by *Edit ▸ Copy* puts the document on the
+/// clipboard.
+#[gpui_kit::test]
+fn select_all_then_copy_from_the_menu_reaches_the_clipboard(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-copy", "alpha beta");
+    install_menu_handlers(cx, window, &workspace);
+
+    cx.dispatch_action(window, actions::edit::SelectAll);
+    cx.run_until_parked();
+    cx.dispatch_action(window, actions::edit::Copy);
+    cx.run_until_parked();
+
+    assert_eq!(
+        clipboard_text(cx).as_deref(),
+        Some("alpha beta"),
+        "Select All and Copy should have put the whole document on the clipboard, \
+         with nothing selected the copy has nothing to write"
+    );
+}
+
+/// *Edit ▸ Cut* removes the selection and puts it on the clipboard.
+#[gpui_kit::test]
+fn cut_from_the_menu_removes_the_selection(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-cut", "alpha beta");
+    install_menu_handlers(cx, window, &workspace);
+
+    cx.dispatch_action(window, actions::edit::SelectAll);
+    cx.run_until_parked();
+    cx.dispatch_action(window, actions::edit::Cut);
+    cx.run_until_parked();
+
+    assert_eq!(active_text(cx, &workspace), Some(String::new()));
+    assert_eq!(clipboard_text(cx).as_deref(), Some("alpha beta"));
+}
+
+/// *Edit ▸ Paste* inserts the clipboard's text at the caret.
+#[gpui_kit::test]
+fn paste_from_the_menu_inserts_the_clipboard(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-paste", "abc");
+    install_menu_handlers(cx, window, &workspace);
+
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("xyz".to_owned()));
+    cx.dispatch_action(window, actions::edit::Paste);
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("xyzabc".to_owned()),
+        "the caret opens at the start of the document, so the paste belongs there"
+    );
+}
+
+/// *Edit ▸ Paste as Plain Text* reads the clipboard through the workspace
+/// rather than the engine — the command is answered without a focused field.
+#[gpui_kit::test]
+fn paste_as_plain_text_from_the_menu_inserts_the_clipboard(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-paste-asis", "abc");
+    install_menu_handlers(cx, window, &workspace);
+
+    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("xyz".to_owned()));
+    cx.dispatch_action(window, actions::edit::PasteAsIs);
+    cx.run_until_parked();
+
+    assert_eq!(active_text(cx, &workspace), Some("xyzabc".to_owned()));
+}
+
+/// *Text ▸ Change Case ▸ Uppercase* reaches the selected word.
+///
+/// The case commands read the selection from the editor rather than from the
+/// focused input field, so this walks the same menu path as the rest and then
+/// reads the document.
+#[gpui_kit::test]
+fn uppercase_from_the_menu_transforms_the_selection(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-uppercase", "hello world");
+    install_menu_handlers(cx, window, &workspace);
+    select(cx, &workspace, 0..5);
+
+    cx.dispatch_action(window, actions::text::UppercaseWord);
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("HELLO world".to_owned()),
+        "uppercase should touch only the selection"
+    );
+}
+
+/// *Text ▸ Sort Lines* reorders the whole document when everything is selected.
+#[gpui_kit::test]
+fn sort_lines_from_the_menu_reorders_the_document(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) =
+        open_workspace_with_document(cx, "menu-sort", "banana\napple\ncherry");
+    install_menu_handlers(cx, window, &workspace);
+    select(cx, &workspace, 0..18);
+
+    cx.dispatch_action(window, actions::text::SortLinesAscending);
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("apple\nbanana\ncherry".to_owned())
+    );
+}
+
+/// *Text ▸ Reverse Lines* turns the selection's lines around.
+#[gpui_kit::test]
+fn reverse_lines_from_the_menu_reorders_the_document(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-reverse", "one\ntwo\nthree");
+    install_menu_handlers(cx, window, &workspace);
+    select(cx, &workspace, 0..13);
+
+    cx.dispatch_action(window, actions::text::ReverseLines);
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace),
+        Some("three\ntwo\none".to_owned())
+    );
+}
+
+/// *Text ▸ Delete Duplicate Line* keeps the first copy of each line.
+#[gpui_kit::test]
+fn delete_duplicate_line_from_the_menu_removes_the_repeat(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-dedup", "a\nb\na");
+    install_menu_handlers(cx, window, &workspace);
+    select(cx, &workspace, 0..5);
+
+    cx.dispatch_action(window, actions::text::DeleteDuplicateLine);
+    cx.run_until_parked();
+
+    assert_eq!(active_text(cx, &workspace), Some("a\nb".to_owned()));
+}
+
+/// *Text ▸ Trim Trailing Whitespace* cleans every selected line.
+#[gpui_kit::test]
+fn trim_trailing_whitespace_from_the_menu_cleans_the_document(cx: &mut TestAppContext) {
+    use subtext_app::actions;
+
+    let (window, workspace) = open_workspace_with_document(cx, "menu-trim", "a  \nb\t\nc");
+    install_menu_handlers(cx, window, &workspace);
+    select(cx, &workspace, 0..8);
+
+    cx.dispatch_action(window, actions::text::TrimTrailingWhitespace);
+    cx.run_until_parked();
+
+    assert_eq!(active_text(cx, &workspace), Some("a\nb\nc".to_owned()));
+}

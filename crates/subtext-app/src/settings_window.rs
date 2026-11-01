@@ -48,6 +48,7 @@ use subtext_core::{FileEncoding, LineEnding};
 
 use crate::encoding_list_sheet::EncodingListSheet;
 use crate::keymap;
+use crate::localization::{self, Language};
 use crate::settings::{
     DocumentAppearance, DocumentConflictOption, EditOptions, FontType, NoDocumentOnLaunchOption,
     Settings, SettingsPane, WindowTabbing, WritingDirection,
@@ -122,11 +123,13 @@ impl SettingsWindow {
             .unwrap_or_default();
 
         let snippet_format = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Text to insert, with <<<SELECTION>>> and <<<CURSOR>>> in it")
+            TextareaState::new(window, cx).placeholder(localization::t(
+                "Text to insert, with <<<SELECTION>>> and <<<CURSOR>>> in it",
+            ))
         });
         let file_drop_format = cx.new(|cx| {
-            TextareaState::new(window, cx).placeholder("Text to insert when a file is dropped")
+            TextareaState::new(window, cx)
+                .placeholder(localization::t("Text to insert when a file is dropped"))
         });
 
         let mut this = Self {
@@ -206,11 +209,36 @@ impl SettingsWindow {
             cx.notify();
         }
     }
+
+    /// Switch the interface language.
+    ///
+    /// This is not `edit`: changing the language has to rebuild the menu bar
+    /// and repaint every window, and `apply_settings` does neither. The order
+    /// matters — the language is stored first so the pass below reads it, then
+    /// the settings are saved, then the menu is rebuilt in the new language.
+    fn choose_language(&mut self, language: Language, cx: &mut Context<Self>) {
+        if self.settings(cx).language == language {
+            return;
+        }
+        localization::set_language(language);
+        self.workspace
+            .update_in(cx, move |workspace, window, cx| {
+                workspace.settings.language = language;
+                workspace.apply_settings(window, cx);
+                workspace.rebuild_menus(cx);
+                // The panes, the sheets and every open document draw strings
+                // through `t()`, and none of them is subscribed to the
+                // language: the whole window tree is repainted instead.
+                cx.refresh_windows();
+            })
+            .ok();
+        cx.notify();
+    }
 }
 
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_window_title("Settings");
+        window.set_window_title(localization::t("Settings"));
         let settings = self.settings(cx);
 
         let rail = SettingsPane::ALL
@@ -220,14 +248,18 @@ impl Render for SettingsWindow {
                 // pane is current, not the default commit of a decision area.
                 // Filling the rail width is what makes the selected row read as
                 // a row rather than a floating button.
+                //
+                // The title stays English in [`crate::settings`] because it
+                // names the pane as well as labelling it; it is translated
+                // here, where it is drawn.
                 Button::new(pane.title())
                     .ghost()
                     .w_full()
                     .selected(self.pane == pane)
                     .icon(icon_for(pane))
-                    .label(pane.title())
-                    .tooltip(pane.summary())
-                    .accessibility_label(format!("{} settings", pane.title()))
+                    .label(localization::t(pane.title()))
+                    .tooltip(localization::t(pane.summary()))
+                    .accessibility_label(format!("{} settings", localization::t(pane.title())))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.pane = pane;
                         cx.notify();
@@ -284,7 +316,7 @@ impl Render for SettingsWindow {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(self.pane.title()),
+                                    .child(localization::t(self.pane.title())),
                             )
                             .child(body),
                     ),
@@ -299,12 +331,33 @@ impl SettingsWindow {
     fn render_general(&self, settings: &Settings, cx: &mut Context<Self>) -> AnyElement {
         let general = settings.general;
 
+        // The interface language, first because it decides what every other
+        // row in this window says. CotEditor follows the system language and
+        // has no such row; SubText defaults to Chinese and has to let the
+        // reader leave.
+        //
+        // The two names are drawn in their own language and are deliberately
+        // not translated: an English reader looking for English should not
+        // have to find it spelled 英文.
+        let language = radio_row(
+            "interface-language",
+            &Language::ALL.map(Language::label),
+            Language::ALL
+                .iter()
+                .position(|language| *language == settings.language)
+                .unwrap_or(0),
+            cx.listener(|this, index: &usize, _, cx| {
+                let language = Language::ALL[*index];
+                this.choose_language(language, cx);
+            }),
+        );
+
         let startup = v_flex()
             .gap_2()
             .child(
                 Checkbox::new("quit-always-keeps-windows")
                     .checked(general.quit_always_keeps_windows)
-                    .label("Reopen windows from last session")
+                    .label(localization::t("Reopen windows from last session"))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| {
@@ -313,10 +366,10 @@ impl SettingsWindow {
                     })),
             )
             .child(field(
-                "When nothing else is open:",
+                localization::t("When nothing else is open:"),
                 radio_row(
                     "no-document-on-launch",
-                    &NoDocumentOnLaunchOption::ALL.map(NoDocumentOnLaunchOption::label),
+                    &NoDocumentOnLaunchOption::ALL.map(|option| localization::t(option.label())),
                     general.no_document_on_launch_option as usize,
                     cx.listener(|this, index: &usize, _, cx| {
                         let option = NoDocumentOnLaunchOption::ALL[*index];
@@ -332,7 +385,7 @@ impl SettingsWindow {
             .child(
                 Checkbox::new("enables-autosave-in-place")
                     .checked(general.enables_autosave_in_place)
-                    .label("Enable Auto Save with Versions")
+                    .label(localization::t("Enable Auto Save with Versions"))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| {
@@ -341,14 +394,16 @@ impl SettingsWindow {
                     })),
             )
             .child(note(
-                "Documents are saved automatically while you work, and earlier versions stay \
-                 reachable from File ▸ Revert To.",
+                localization::t(
+                    "Documents are saved automatically while you work, and earlier versions stay \
+                     reachable from File ▸ Revert To.",
+                ),
                 cx,
             ));
 
         let conflicts = radio_row(
             "document-conflict",
-            &DocumentConflictOption::ALL.map(DocumentConflictOption::label),
+            &DocumentConflictOption::ALL.map(|option| localization::t(option.label())),
             general.document_conflict_option as usize,
             cx.listener(|this, index: &usize, _, cx| {
                 let option = DocumentConflictOption::ALL[*index];
@@ -366,18 +421,17 @@ impl SettingsWindow {
                     .child(
                         Button::new("settings-export")
                             .small()
-                            .label("Export…")
+                            .label(localization::t("Export…"))
                             .disabled(true),
                     )
                     .child(
                         Button::new("settings-import")
                             .small()
-                            .label("Import…")
+                            .label(localization::t("Import…"))
                             .disabled(true),
                     ),
             )
-            .child(note(
-                "Not implemented yet. The settings file can be edited directly, at the path below.",
+            .child(note(localization::t("Not implemented yet. The settings file can be edited directly, at the path below."),
                 cx,
             ))
             .child(note(Settings::path().display().to_string(), cx));
@@ -390,13 +444,15 @@ impl SettingsWindow {
                 h_flex().child(
                     Button::new("manage-warnings")
                         .small()
-                        .label("Manage Warnings…")
+                        .label(localization::t("Manage Warnings…"))
                         .disabled(true),
                 ),
             )
             .child(note(
-                "Not implemented yet. CotEditor lets you switch off each dialog it can show; \
-                 SubText shows no such dialogs.",
+                localization::t(
+                    "Not implemented yet. CotEditor lets you switch off each dialog it can show; \
+                     SubText shows no such dialogs.",
+                ),
                 cx,
             ));
 
@@ -405,7 +461,7 @@ impl SettingsWindow {
             .child(
                 Checkbox::new("automatic-update-checks")
                     .checked(general.enable_automatic_update_checks)
-                    .label("Check for updates automatically")
+                    .label(localization::t("Check for updates automatically"))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| {
@@ -417,7 +473,7 @@ impl SettingsWindow {
                 Checkbox::new("checks-updates-for-beta")
                     .checked(general.checks_updates_for_beta)
                     .disabled(!general.enable_automatic_update_checks)
-                    .label("Update to prereleases")
+                    .label(localization::t("Update to prereleases"))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| {
@@ -428,15 +484,19 @@ impl SettingsWindow {
 
         v_flex()
             .gap_6()
-            .child(section("On startup", startup))
-            .child(section("Document save", saving))
+            .child(section(localization::t("Interface language"), language))
+            .child(section(localization::t("On startup"), startup))
+            .child(section(localization::t("Document save"), saving))
             .child(section(
-                "When a file is modified by another application",
+                localization::t("When a file is modified by another application"),
                 conflicts,
             ))
-            .child(section("Settings import & export", transfers))
-            .child(section("Dialog warnings", warnings))
-            .child(section("Software update", updates))
+            .child(section(
+                localization::t("Settings import & export"),
+                transfers,
+            ))
+            .child(section(localization::t("Dialog warnings"), warnings))
+            .child(section(localization::t("Software update"), updates))
             .into_any_element()
     }
 
@@ -483,7 +543,7 @@ impl SettingsWindow {
 
         let appearance_mode = radio_row(
             "document-appearance",
-            &DocumentAppearance::ALL.map(DocumentAppearance::label),
+            &DocumentAppearance::ALL.map(|mode| localization::t(mode.label())),
             DocumentAppearance::ALL
                 .iter()
                 .position(|mode| *mode == appearance.document_appearance)
@@ -498,7 +558,7 @@ impl SettingsWindow {
 
         let status_bar = radio_row(
             "status-bar-background",
-            &["Tinted", "Opaque"],
+            &[localization::t("Tinted"), localization::t("Opaque")],
             usize::from(settings.window.prefers_opaque_bar_background),
             cx.listener(|this, index: &usize, _, cx| {
                 let opaque = *index == 1;
@@ -528,7 +588,7 @@ impl SettingsWindow {
                     })
                 },
             ))
-            .child(note("20% – 100%, as in CotEditor", cx));
+            .child(note(localization::t("20% – 100%, as in CotEditor"), cx));
 
         let themes = self
             .workspace
@@ -565,20 +625,20 @@ impl SettingsWindow {
 
         v_flex()
             .gap_5()
-            .child(field("Standard font:", standard))
-            .child(field("Monospaced font:", monospaced))
+            .child(field(localization::t("Standard font:"), standard))
+            .child(field(localization::t("Monospaced font:"), monospaced))
             .child(field(
-                "Line height:",
+                localization::t("Line height:"),
                 h_flex()
                     .gap_2()
                     .items_center()
                     .child(line_height)
-                    .child(note("times", cx)),
+                    .child(note(localization::t("times"), cx)),
             ))
-            .child(field("Appearance:", appearance_mode))
-            .child(field("Status bar:", status_bar))
-            .child(field("Editor opacity:", opacity))
-            .child(section("Theme", theme_list))
+            .child(field(localization::t("Appearance:"), appearance_mode))
+            .child(field(localization::t("Status bar:"), status_bar))
+            .child(field(localization::t("Editor opacity:"), opacity))
+            .child(section(localization::t("Theme"), theme_list))
             .into_any_element()
     }
 
@@ -592,7 +652,7 @@ impl SettingsWindow {
         ligature: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let shown = family.unwrap_or_else(|| "System monospaced".to_string());
+        let shown = family.unwrap_or_else(|| localization::t("System monospaced").to_string());
 
         v_flex()
             .gap_1()
@@ -631,7 +691,7 @@ impl SettingsWindow {
                     "{key}-antialias"
                 ))))
                 .checked(antialias)
-                .label("Antialias text")
+                .label(localization::t("Antialias text"))
                 .on_click(cx.listener(move |this, checked, _, cx| {
                     let checked = *checked;
                     this.edit(cx, move |settings| {
@@ -649,7 +709,7 @@ impl SettingsWindow {
                     "{key}-ligature"
                 ))))
                 .checked(ligature)
-                .label("Use ligatures")
+                .label(localization::t("Use ligatures"))
                 .on_click(cx.listener(move |this, checked, _, cx| {
                     let checked = *checked;
                     this.edit(cx, move |settings| {
@@ -674,7 +734,7 @@ impl SettingsWindow {
 
         let tabbing = radio_row(
             "window-tabbing",
-            &WindowTabbing::ALL.map(WindowTabbing::label),
+            &WindowTabbing::ALL.map(|option| localization::t(option.label())),
             WindowTabbing::ALL
                 .iter()
                 .position(|option| *option == window.window_tabbing)
@@ -699,7 +759,7 @@ impl SettingsWindow {
                                     "{} px",
                                     window_size_label(window.window_width)
                                 )))
-                                .child(note("Width", cx)),
+                                .child(note(localization::t("Width"), cx)),
                         )
                         .child(
                             v_flex()
@@ -708,11 +768,11 @@ impl SettingsWindow {
                                     "{} px",
                                     window_size_label(window.window_height)
                                 )))
-                                .child(note("Height", cx)),
+                                .child(note(localization::t("Height"), cx)),
                         ),
                 )
                 .child(note(
-                    "“Auto” means the window sizes itself to its content.",
+                    localization::t("“Auto” means the window sizes itself to its content."),
                     cx,
                 ));
 
@@ -720,14 +780,14 @@ impl SettingsWindow {
             .gap_1()
             .child(edit_switch(
                 "show-line-numbers",
-                "Line numbers",
+                localization::t("Line numbers"),
                 editor.show_line_numbers,
                 cx,
                 |settings, checked| settings.editor.show_line_numbers = checked,
             ))
             .child(edit_switch(
                 "show-invisibles",
-                "Invisible characters",
+                localization::t("Invisible characters"),
                 editor.show_invisibles,
                 cx,
                 |settings, checked| settings.editor.show_invisibles = checked,
@@ -738,7 +798,7 @@ impl SettingsWindow {
                     .pl_4()
                     .child(child_switch(
                         "show-invisible-new-line",
-                        "Line ending",
+                        localization::t("Line ending"),
                         editor.show_invisible_new_line,
                         editor.show_invisibles,
                         cx,
@@ -746,7 +806,7 @@ impl SettingsWindow {
                     ))
                     .child(child_switch(
                         "show-invisible-tab",
-                        "Tab",
+                        localization::t("Tab"),
                         editor.show_invisible_tab,
                         editor.show_invisibles,
                         cx,
@@ -754,7 +814,7 @@ impl SettingsWindow {
                     ))
                     .child(child_switch(
                         "show-invisible-space",
-                        "Space",
+                        localization::t("Space"),
                         editor.show_invisible_space,
                         editor.show_invisibles,
                         cx,
@@ -762,7 +822,7 @@ impl SettingsWindow {
                     ))
                     .child(child_switch(
                         "show-invisible-whitespaces",
-                        "Other whitespace",
+                        localization::t("Other whitespace"),
                         editor.show_invisible_whitespaces,
                         editor.show_invisibles,
                         cx,
@@ -770,7 +830,7 @@ impl SettingsWindow {
                     ))
                     .child(child_switch(
                         "show-invisible-control",
-                        "Other control characters",
+                        localization::t("Other control characters"),
                         editor.show_invisible_control,
                         editor.show_invisibles,
                         cx,
@@ -779,7 +839,7 @@ impl SettingsWindow {
             )
             .child(edit_switch(
                 "show-indent-guides",
-                "Indent guides",
+                localization::t("Indent guides"),
                 editor.show_indent_guides,
                 cx,
                 |settings, checked| settings.editor.show_indent_guides = checked,
@@ -790,7 +850,7 @@ impl SettingsWindow {
                     .items_center()
                     .child(edit_switch(
                         "show-page-guide",
-                        "Page guide at column:",
+                        localization::t("Page guide at column:"),
                         editor.show_page_guide,
                         cx,
                         |settings, checked| settings.editor.show_page_guide = checked,
@@ -818,7 +878,7 @@ impl SettingsWindow {
             .gap_1()
             .child(edit_switch(
                 "wrap-lines",
-                "Wrap lines to editor width",
+                localization::t("Wrap lines to editor width"),
                 editor.wrap_lines,
                 cx,
                 |settings, checked| settings.editor.wrap_lines = checked,
@@ -833,7 +893,7 @@ impl SettingsWindow {
                     .flex_wrap()
                     .child(edit_switch(
                         "hanging-indent",
-                        "Indent wrapped lines by",
+                        localization::t("Indent wrapped lines by"),
                         window.enables_hanging_indent,
                         cx,
                         |settings, checked| settings.window.enables_hanging_indent = checked,
@@ -855,12 +915,15 @@ impl SettingsWindow {
                             })
                         },
                     ))
-                    .child(note("spaces", cx)),
+                    .child(note(localization::t("spaces"), cx)),
             );
 
         let writing_direction = radio_row(
             "writing-direction",
-            &["Left to Right", "Right to Left"],
+            &[
+                localization::t("Left to Right"),
+                localization::t("Right to Left"),
+            ],
             usize::from(window.writing_direction == WritingDirection::RightToLeft),
             cx.listener(|this, index: &usize, _, cx| {
                 let direction = if *index == 1 {
@@ -882,21 +945,21 @@ impl SettingsWindow {
                     .gap_1()
                     .child(edit_switch(
                         "status-lines",
-                        "Line count",
+                        localization::t("Line count"),
                         window.show_status_bar_lines,
                         cx,
                         |settings, checked| settings.window.show_status_bar_lines = checked,
                     ))
                     .child(edit_switch(
                         "status-chars",
-                        "Character count",
+                        localization::t("Character count"),
                         window.show_status_bar_chars,
                         cx,
                         |settings, checked| settings.window.show_status_bar_chars = checked,
                     ))
                     .child(edit_switch(
                         "status-words",
-                        "Word count",
+                        localization::t("Word count"),
                         window.show_status_bar_words,
                         cx,
                         |settings, checked| settings.window.show_status_bar_words = checked,
@@ -907,21 +970,21 @@ impl SettingsWindow {
                     .gap_1()
                     .child(edit_switch(
                         "status-location",
-                        "Location",
+                        localization::t("Location"),
                         window.show_status_bar_location,
                         cx,
                         |settings, checked| settings.window.show_status_bar_location = checked,
                     ))
                     .child(edit_switch(
                         "status-line",
-                        "Current line",
+                        localization::t("Current line"),
                         window.show_status_bar_line,
                         cx,
                         |settings, checked| settings.window.show_status_bar_line = checked,
                     ))
                     .child(edit_switch(
                         "status-column",
-                        "Current column",
+                        localization::t("Current column"),
                         window.show_status_bar_column,
                         cx,
                         |settings, checked| settings.window.show_status_bar_column = checked,
@@ -930,25 +993,28 @@ impl SettingsWindow {
 
         v_flex()
             .gap_4()
-            .child(field("Open documents in tabs:", tabbing))
-            .child(field("Window size:", size))
+            .child(field(localization::t("Open documents in tabs:"), tabbing))
+            .child(field(localization::t("Window size:"), size))
             .child(divider(cx))
-            .child(field("Show:", show))
+            .child(field(localization::t("Show:"), show))
             .child(field(
-                "Current line:",
+                localization::t("Current line:"),
                 edit_switch(
                     "highlight-current-line",
-                    "Change background color",
+                    localization::t("Change background color"),
                     editor.highlight_current_line,
                     cx,
                     |settings, checked| settings.editor.highlight_current_line = checked,
                 ),
             ))
             .child(divider(cx))
-            .child(field("Line wrapping:", wrapping))
-            .child(field("Writing direction:", writing_direction))
+            .child(field(localization::t("Line wrapping:"), wrapping))
+            .child(field(
+                localization::t("Writing direction:"),
+                writing_direction,
+            ))
             .child(divider(cx))
-            .child(field("Status bar shows:", status_bar))
+            .child(field(localization::t("Status bar shows:"), status_bar))
             .into_any_element()
     }
 
@@ -961,10 +1027,10 @@ impl SettingsWindow {
         let indentation = v_flex()
             .gap_2()
             .child(field(
-                "Prefer using:",
+                localization::t("Prefer using:"),
                 radio_row(
                     "indent-style",
-                    &["Spaces", "Tabs"],
+                    &[localization::t("Spaces"), localization::t("Tabs")],
                     usize::from(!edit.auto_expand_tab),
                     cx.listener(|this, index: &usize, _, cx| {
                         let uses_spaces = *index == 0;
@@ -988,7 +1054,7 @@ impl SettingsWindow {
                             .flex_shrink_0()
                             .flex()
                             .justify_end()
-                            .child(div().text_sm().child("Indent width:")),
+                            .child(div().text_sm().child(localization::t("Indent width:"))),
                     )
                     .child(stepper(
                         "indent-width",
@@ -1009,25 +1075,25 @@ impl SettingsWindow {
                             })
                         },
                     ))
-                    .child(note("spaces", cx)),
+                    .child(note(localization::t("spaces"), cx)),
             )
             .child(edit_switch(
                 "detects-indent-style",
-                "Detect indent style on document opening",
+                localization::t("Detect indent style on document opening"),
                 edit.detects_indent_style,
                 cx,
                 |settings, checked| settings.edit.detects_indent_style = checked,
             ))
             .child(edit_switch(
                 "auto-indent",
-                "Automatically indent while typing",
+                localization::t("Automatically indent while typing"),
                 edit.auto_indent,
                 cx,
                 |settings, checked| settings.edit.auto_indent = checked,
             ))
             .child(edit_switch(
                 "indent-with-tab-key",
-                "Indent selection with Tab key",
+                localization::t("Indent selection with Tab key"),
                 edit.indent_with_tab_key,
                 cx,
                 |settings, checked| settings.edit.indent_with_tab_key = checked,
@@ -1037,14 +1103,14 @@ impl SettingsWindow {
             .gap_1()
             .child(edit_switch(
                 "trim-trailing-whitespace",
-                "Automatically trim trailing whitespace",
+                localization::t("Automatically trim trailing whitespace"),
                 edit.auto_trims_trailing_whitespace,
                 cx,
                 |settings, checked| settings.edit.auto_trims_trailing_whitespace = checked,
             ))
             .child(v_flex().pl_4().child(child_switch(
                 "trim-whitespace-only-lines",
-                "Including whitespace-only lines",
+                localization::t("Including whitespace-only lines"),
                 edit.trims_whitespace_only_lines,
                 edit.auto_trims_trailing_whitespace,
                 cx,
@@ -1055,14 +1121,14 @@ impl SettingsWindow {
             .gap_1()
             .child(edit_switch(
                 "comment-delimiters-after-indent",
-                "Insert comment delimiters after indent",
+                localization::t("Insert comment delimiters after indent"),
                 edit.inserts_comment_delimiters_after_indent,
                 cx,
                 |settings, checked| settings.edit.inserts_comment_delimiters_after_indent = checked,
             ))
             .child(edit_switch(
                 "comment-spacer",
-                "Add a space to comment delimiters",
+                localization::t("Add a space to comment delimiters"),
                 edit.appends_comment_spacer,
                 cx,
                 |settings, checked| settings.edit.appends_comment_spacer = checked,
@@ -1072,21 +1138,21 @@ impl SettingsWindow {
             .gap_1()
             .child(edit_switch(
                 "auto-link-detection",
-                "Link URLs in document",
+                localization::t("Link URLs in document"),
                 edit.auto_link_detection,
                 cx,
                 |settings, checked| settings.edit.auto_link_detection = checked,
             ))
             .child(edit_switch(
                 "highlight-braces",
-                "Highlight matching braces",
+                localization::t("Highlight matching braces"),
                 edit.highlight_braces,
                 cx,
                 |settings, checked| settings.edit.highlight_braces = checked,
             ))
             .child(edit_switch(
                 "highlight-selection-instance",
-                "Highlight instances of selected text",
+                localization::t("Highlight instances of selected text"),
                 edit.highlight_selection_instance,
                 cx,
                 |settings, checked| settings.edit.highlight_selection_instance = checked,
@@ -1096,7 +1162,7 @@ impl SettingsWindow {
                     .gap_2()
                     .items_center()
                     .pl_4()
-                    .child(div().text_sm().child("Delay:"))
+                    .child(div().text_sm().child(localization::t("Delay:")))
                     .child(stepper(
                         "selection-instance-delay",
                         format!("{:.2}", edit.selection_instance_highlight_delay),
@@ -1120,7 +1186,7 @@ impl SettingsWindow {
                             })
                         },
                     ))
-                    .child(note("seconds", cx)),
+                    .child(note(localization::t("seconds"), cx)),
             );
 
         // Upstream's Edit pane is these four sections and no more. There is no
@@ -1129,10 +1195,10 @@ impl SettingsWindow {
         // pane's default file encoding, and that is where it is set.
         v_flex()
             .gap_6()
-            .child(section("Indentation", indentation))
-            .child(section("Whitespace", whitespace))
-            .child(section("Comment", comment))
-            .child(section("Content parse", content_parse))
+            .child(section(localization::t("Indentation"), indentation))
+            .child(section(localization::t("Whitespace"), whitespace))
+            .child(section(localization::t("Comment"), comment))
+            .child(section(localization::t("Content parse"), content_parse))
             .into_any_element()
     }
 
@@ -1146,11 +1212,11 @@ impl SettingsWindow {
         let options = v_flex()
             .gap_4()
             .child(field_with_column(
-                "Font:",
+                localization::t("Font:"),
                 MODE_LABEL_COLUMN,
                 radio_row(
                     "mode-font",
-                    &["Standard", "Monospaced"],
+                    &[localization::t("Standard"), localization::t("Monospaced")],
                     usize::from(mode.font_type == FontType::Monospaced),
                     cx.listener(|this, index: &usize, _, cx| {
                         let font = if *index == 1 {
@@ -1163,13 +1229,13 @@ impl SettingsWindow {
                 ),
             ))
             .child(field_with_column(
-                "Substitution:",
+                localization::t("Substitution:"),
                 MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
                     .child(mode_switch(
                         "smart-insert-delete",
-                        "Smart copy/paste",
+                        localization::t("Smart copy/paste"),
                         mode.smart_insert_delete,
                         false,
                         cx,
@@ -1177,7 +1243,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "smart-quotes",
-                        "Smart quotes",
+                        localization::t("Smart quotes"),
                         mode.automatic_quote_substitution,
                         true,
                         cx,
@@ -1185,7 +1251,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "smart-dashes",
-                        "Smart dashes",
+                        localization::t("Smart dashes"),
                         mode.automatic_dash_substitution,
                         true,
                         cx,
@@ -1193,7 +1259,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "text-replacement",
-                        "Text replacement",
+                        localization::t("Text replacement"),
                         mode.automatic_text_replacement,
                         true,
                         cx,
@@ -1201,7 +1267,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "period-substitution",
-                        "Add period with double-space",
+                        localization::t("Add period with double-space"),
                         mode.automatic_period_substitution,
                         true,
                         cx,
@@ -1209,7 +1275,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "symbol-balancing",
-                        "Automatically insert closing brackets and quotes",
+                        localization::t("Automatically insert closing brackets and quotes"),
                         mode.automatic_symbol_balancing,
                         false,
                         cx,
@@ -1217,13 +1283,13 @@ impl SettingsWindow {
                     )),
             ))
             .child(field_with_column(
-                "Spelling:",
+                localization::t("Spelling:"),
                 MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
                     .child(mode_switch(
                         "spell-checking",
-                        "Check spelling while typing",
+                        localization::t("Check spelling while typing"),
                         mode.continuous_spell_checking,
                         true,
                         cx,
@@ -1231,7 +1297,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "grammar-checking",
-                        "Check grammar with spelling",
+                        localization::t("Check grammar with spelling"),
                         mode.grammar_checking,
                         true,
                         cx,
@@ -1239,7 +1305,7 @@ impl SettingsWindow {
                     ))
                     .child(mode_switch(
                         "spelling-correction",
-                        "Correct spelling automatically",
+                        localization::t("Correct spelling automatically"),
                         mode.automatic_spelling_correction,
                         true,
                         cx,
@@ -1247,18 +1313,18 @@ impl SettingsWindow {
                     )),
             ))
             .child(field_with_column(
-                "Completion:",
+                localization::t("Completion:"),
                 MODE_LABEL_COLUMN,
                 v_flex()
                     .gap_1()
-                    .child(note("Completion list includes:", cx))
+                    .child(note(localization::t("Completion list includes:"), cx))
                     .child(
                         v_flex()
                             .gap_1()
                             .pl_4()
                             .child(mode_switch(
                                 "completion-standard",
-                                "Standard words",
+                                localization::t("Standard words"),
                                 mode.completion_standard_words,
                                 true,
                                 cx,
@@ -1268,7 +1334,7 @@ impl SettingsWindow {
                             ))
                             .child(mode_switch(
                                 "completion-document",
-                                "Words in document",
+                                localization::t("Words in document"),
                                 mode.completion_document_words,
                                 false,
                                 cx,
@@ -1278,7 +1344,7 @@ impl SettingsWindow {
                             ))
                             .child(mode_switch(
                                 "completion-syntax",
-                                "Words defined in syntax",
+                                localization::t("Words defined in syntax"),
                                 mode.completion_syntax_words,
                                 false,
                                 cx,
@@ -1287,7 +1353,7 @@ impl SettingsWindow {
                     )
                     .child(mode_switch(
                         "automatic-completion",
-                        "Suggest completions while typing",
+                        localization::t("Suggest completions while typing"),
                         mode.automatic_completion,
                         false,
                         cx,
@@ -1310,8 +1376,8 @@ impl SettingsWindow {
                     .small()
                     .w_full()
                     .selected(true)
-                    .label("General")
-                    .accessibility_label("General mode"),
+                    .label(localization::t("General"))
+                    .accessibility_label(localization::t("General mode")),
             )
             .child(
                 Button::new("mode-code")
@@ -1320,8 +1386,10 @@ impl SettingsWindow {
                     .w_full()
                     .selected(false)
                     .disabled(true)
-                    .label("Code")
-                    .tooltip("Per-syntax modes arrive with the syntax editor"),
+                    .label(localization::t("Code"))
+                    .tooltip(localization::t(
+                        "Per-syntax modes arrive with the syntax editor",
+                    )),
             );
 
         v_flex()
@@ -1373,7 +1441,7 @@ impl SettingsWindow {
             let submit = sheet.clone();
             let refresh = this.clone();
             dialog
-                .title("Encoding List")
+                .title(localization::t("Encoding List"))
                 // `Dialog::w` takes pixels, not a `Length`, so the interface
                 // scale is applied by hand rather than by the layout engine.
                 // Upstream asks for `idealWidth: 440` points.
@@ -1384,13 +1452,19 @@ impl SettingsWindow {
                         // Escape and the dialog's own close button both reach
                         // `Cancel`, and the sheet edits a copy, so cancelling
                         // costs nothing.
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
+                            DialogClose::new()
+                                .trigger(|button| button.label(localization::t("Cancel"))),
+                        )
                         // Enter reaches `Confirm`; the footer's own button has
                         // to dispatch it by hand, which is what `DialogAction`
                         // is for.
                         .child(
-                            DialogAction::new()
-                                .child(Button::new("encoding-list-ok").label("OK").primary()),
+                            DialogAction::new().child(
+                                Button::new("encoding-list-ok")
+                                    .label(localization::t("OK"))
+                                    .primary(),
+                            ),
                         ),
                 )
                 .on_ok(move |_, _, cx| {
@@ -1480,7 +1554,7 @@ impl SettingsWindow {
                 h_flex().child(
                     Button::new("encoding-priorities")
                         .small()
-                        .label("Edit List…")
+                        .label(localization::t("Edit List…"))
                         .on_click(
                             cx.listener(|this, _, window, cx| this.edit_encoding_list(window, cx)),
                         ),
@@ -1489,7 +1563,9 @@ impl SettingsWindow {
             .child(
                 Checkbox::new("refer-to-encoding-tag")
                     .checked(settings.refer_to_encoding_tag)
-                    .label("Refer to the encoding declaration in the document")
+                    .label(localization::t(
+                        "Refer to the encoding declaration in the document",
+                    ))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| settings.refer_to_encoding_tag = checked);
@@ -1543,10 +1619,16 @@ impl SettingsWindow {
 
         v_flex()
             .gap_6()
-            .child(section("Default line endings", line_endings))
-            .child(section("Default text encoding", default_encoding))
-            .child(section("Encoding priorities", priorities))
-            .child(section("Default syntax", default_syntax))
+            .child(section(
+                localization::t("Default line endings"),
+                line_endings,
+            ))
+            .child(section(
+                localization::t("Default text encoding"),
+                default_encoding,
+            ))
+            .child(section(localization::t("Encoding priorities"), priorities))
+            .child(section(localization::t("Default syntax"), default_syntax))
             .child(section(
                 format!("Available syntaxes ({})", syntaxes.len()),
                 available,
@@ -1575,7 +1657,7 @@ impl SettingsWindow {
 
         let tabs = [SnippetTab::Command, SnippetTab::FileDrop]
             .into_iter()
-            .map(|tab| Tab::new().label(tab.label()))
+            .map(|tab| Tab::new().label(localization::t(tab.label())))
             .collect::<Vec<_>>();
 
         let tab_bar = TabBar::new("snippet-tabs")
@@ -1595,8 +1677,10 @@ impl SettingsWindow {
                     .map(|row| row.clone().into_any_element())
                     .collect(),
                 self.snippet_selection,
-                "No snippets yet. Add one to insert its text from the Insert Snippet submenu \
-                 or from a key equivalent.",
+                localization::t(
+                    "No snippets yet. Add one to insert its text from the Insert Snippet submenu \
+                     or from a key equivalent.",
+                ),
             ),
             SnippetTab::FileDrop => (
                 self.file_drop
@@ -1604,8 +1688,10 @@ impl SettingsWindow {
                     .map(|row| row.clone().into_any_element())
                     .collect(),
                 self.file_drop_selection,
-                "No file-drop settings yet. Add one to describe what dropping a file onto \
-                 the editor inserts.",
+                localization::t(
+                    "No file-drop settings yet. Add one to describe what dropping a file onto \
+                     the editor inserts.",
+                ),
             ),
         };
 
@@ -1613,14 +1699,14 @@ impl SettingsWindow {
             SnippetTab::Command => header(
                 CommandColumn::ALL
                     .iter()
-                    .map(|column| (column.label(), column.width())),
+                    .map(|column| (localization::t(column.label()), column.width())),
                 cx,
             )
             .into_any_element(),
             SnippetTab::FileDrop => header(
                 FileDropColumn::ALL
                     .iter()
-                    .map(|column| (column.label(), column.width())),
+                    .map(|column| (localization::t(column.label()), column.width())),
                 cx,
             )
             .into_any_element(),
@@ -1656,7 +1742,7 @@ impl SettingsWindow {
                 v_flex()
                     .h(rems(SNIPPETS_TAB_HEIGHT))
                     .gap_3()
-                    .child(note(tab.intro(), cx))
+                    .child(note(localization::t(tab.intro()), cx))
                     .child(table)
                     .child(self.render_snippet_buttons(tab, selection, cx))
                     .child(self.render_format_editor(tab, selection, cx)),
@@ -1694,8 +1780,8 @@ impl SettingsWindow {
                 // bordered `NSButton`s.
                 .small()
                 .icon(gpui_kit::assets::IconName::Plus)
-                .accessibility_label("Add")
-                .tooltip("Add new item")
+                .accessibility_label(localization::t("Add"))
+                .tooltip(localization::t("Add new item"))
                 .on_click(add),
             )
             .child(
@@ -1704,8 +1790,8 @@ impl SettingsWindow {
                 ))))
                 .small()
                 .icon(gpui_kit::assets::IconName::Minus)
-                .accessibility_label("Delete")
-                .tooltip("Delete selected items")
+                .accessibility_label(localization::t("Delete"))
+                .tooltip(localization::t("Delete selected items"))
                 .disabled(selection.is_none())
                 .on_click(remove),
             )
@@ -1719,8 +1805,10 @@ impl SettingsWindow {
                 this.child(
                     Button::new("file-drop-restore-defaults")
                         .small()
-                        .label("Restore Defaults")
-                        .tooltip("Put the file-drop settings back to the ones CotEditor ships.")
+                        .label(localization::t("Restore Defaults"))
+                        .tooltip(localization::t(
+                            "Put the file-drop settings back to the ones CotEditor ships.",
+                        ))
                         .disabled(!self.can_restore_file_drop(cx))
                         .on_click(
                             cx.listener(|this, _, window, cx| this.restore_file_drop(window, cx)),
@@ -1753,7 +1841,7 @@ impl SettingsWindow {
             .w_full()
             .items_end()
             .gap_2()
-            .child(div().text_sm().child("Insertion format:"))
+            .child(div().text_sm().child(localization::t("Insertion format:")))
             .child(div().flex_1())
             .child(self.render_variable_menu(tab, disabled, cx));
 
@@ -1770,7 +1858,7 @@ impl SettingsWindow {
                     .bordered(false)
                     .h(rems(FORMAT_EDITOR_HEIGHT))
                     .disabled(disabled)
-                    .aria_label("Insertion format"),
+                    .aria_label(localization::t("Insertion format")),
             )
             .when(disabled, |this| {
                 this.child(
@@ -1786,7 +1874,7 @@ impl SettingsWindow {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No item selected"),
+                                .child(localization::t("No item selected")),
                         ),
                 )
             });
@@ -1823,8 +1911,10 @@ impl SettingsWindow {
         ))))
         .ghost()
         .small()
-        .label("Insert Variable")
-        .tooltip("Insert a variable into the insertion format.")
+        .label(localization::t("Insert Variable"))
+        .tooltip(localization::t(
+            "Insert a variable into the insertion format.",
+        ))
         .disabled(disabled)
         .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
             let mut menu = menu;
@@ -2259,8 +2349,10 @@ impl SettingsWindow {
         v_flex()
             .gap_3()
             .child(note(
-                "To change a shortcut, use the menu bar's own key equivalents. ⌘ maps to \
-                 Control on Windows and Linux, where Command does not exist.",
+                localization::t(
+                    "To change a shortcut, use the menu bar's own key equivalents. ⌘ maps to \
+                     Control on Windows and Linux, where Command does not exist.",
+                ),
                 cx,
             ))
             .child(
@@ -2284,9 +2376,9 @@ impl SettingsWindow {
                     .child(
                         Button::new("restore-shortcuts")
                             .small()
-                            .label("Restore Defaults")
+                            .label(localization::t("Restore Defaults"))
                             .disabled(true)
-                            .tooltip("Nothing has been customised yet"),
+                            .tooltip(localization::t("Nothing has been customised yet")),
                     )
                     .child(note(
                         format!(
@@ -2311,15 +2403,17 @@ impl SettingsWindow {
                 h_flex().child(
                     Button::new("learn-more-cli")
                         .small()
-                        .label("Learn More…")
+                        .label(localization::t("Learn More…"))
                         .disabled(true),
                 ),
             )
             .child(note(
                 // No backticks: this is interface copy, not a README.
-                "With the “cot” command-line tool you can open files in CotEditor from a \
-                 terminal. SubText installs “subtext” for the same purpose: put it on your \
-                 PATH and run “subtext FILE”.",
+                localization::t(
+                    "With the “cot” command-line tool you can open files in CotEditor from a \
+                     terminal. SubText installs “subtext” for the same purpose: put it on your \
+                     PATH and run “subtext FILE”.",
+                ),
                 cx,
             ));
 
@@ -2328,7 +2422,7 @@ impl SettingsWindow {
             .child(
                 Checkbox::new("enables-remote-editing")
                     .checked(settings.enables_remote_editing)
-                    .label("Accept rmate connections")
+                    .label(localization::t("Accept rmate connections"))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         let checked = *checked;
                         this.edit(cx, move |settings| {
@@ -2341,7 +2435,7 @@ impl SettingsWindow {
                     .gap_2()
                     .items_center()
                     .pl_4()
-                    .child(div().text_sm().child("Port:"))
+                    .child(div().text_sm().child(localization::t("Port:")))
                     .child(stepper(
                         "remote-editing-port",
                         format!("{}", settings.remote_editing_port),
@@ -2361,15 +2455,17 @@ impl SettingsWindow {
                     )),
             )
             .child(note(
-                "The setting is stored, but the rmate listener is not implemented yet: no \
-                 socket is opened and no remote file can be received.",
+                localization::t(
+                    "The setting is stored, but the rmate listener is not implemented yet: no \
+                     socket is opened and no remote file can be received.",
+                ),
                 cx,
             ));
 
         v_flex()
             .gap_6()
-            .child(section("Command-line tool", command_line))
-            .child(section("Remote editing", remote))
+            .child(section(localization::t("Command-line tool"), command_line))
+            .child(section(localization::t("Remote editing"), remote))
             .into_any_element()
     }
 }
@@ -2488,7 +2584,7 @@ fn stepper(
             ))))
             .small()
             .label("−")
-            .accessibility_label("Decrease")
+            .accessibility_label(localization::t("Decrease"))
             .on_click(minus),
         )
         // 2.5 rem holds three digits, which is as wide as any of these
@@ -2501,7 +2597,7 @@ fn stepper(
             ))))
             .small()
             .label("+")
-            .accessibility_label("Increase")
+            .accessibility_label(localization::t("Increase"))
             .on_click(plus),
         )
         .into_any_element()
@@ -2661,7 +2757,9 @@ fn mode_switch(
         // Only when there is something to say: `.tooltip("")` still builds a
         // bubble, so a switch that has no note would hover up an empty card.
         .when(appkit_only, |this| {
-            this.tooltip("Provided by the system text engine, which SubText does not use")
+            this.tooltip(localization::t(
+                "Provided by the system text engine, which SubText does not use",
+            ))
         })
         .on_click(cx.listener(move |this, checked, _, cx| {
             let checked = *checked;

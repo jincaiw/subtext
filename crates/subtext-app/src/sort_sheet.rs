@@ -37,9 +37,10 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, Styled as _, WeakEntity, Window, div, rems,
 };
 
-use subtext_core::textops::{SortKey, SortOptions};
+use subtext_core::textops::{SortKey, SortKeyError, SortOptions};
 
 use crate::dialog_escape::DismissOnEscape as _;
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// Which sort key the sheet is on, in CotEditor's order.
@@ -108,7 +109,9 @@ impl SortSheet {
         // — group 0 being the whole match, which the "use a group" switch is
         // there to opt into.
         let position = cx.new(|cx| InputState::new(window, cx).default_value("1").min(1.0));
-        let pattern = cx.new(|cx| InputState::new(window, cx).placeholder("Regular Expression"));
+        let pattern = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(localization::t("Regular Expression"))
+        });
         let group = cx.new(|cx| InputState::new(window, cx).default_value("1").min(0.0));
 
         Self {
@@ -193,7 +196,7 @@ impl SortSheet {
 
         v_flex()
             .gap_1()
-            .child(div().text_sm().child("Sample:"))
+            .child(div().text_sm().child(localization::t("Sample:")))
             .child(
                 div()
                     .p_2()
@@ -203,7 +206,7 @@ impl SortSheet {
                     .child(line),
             )
             .child(note(
-                "The highlighted part is what the lines are compared on.",
+                localization::t("The highlighted part is what the lines are compared on."),
                 cx,
             ))
     }
@@ -214,13 +217,13 @@ impl SortSheet {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().text_sm().child("Delimiter:"))
+                    .child(div().text_sm().child(localization::t("Delimiter:")))
                     .child(div().w(rems(5.)).child(Input::new(&self.delimiter).small())),
             )
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().text_sm().child("Position:"))
+                    .child(div().text_sm().child(localization::t("Position:")))
                     .child(
                         div()
                             .w(rems(7.))
@@ -229,24 +232,20 @@ impl SortSheet {
             )
     }
 
-    fn render_pattern(
-        &self,
-        error: Option<&'static str>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_pattern(&self, error: Option<String>, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_2()
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().text_sm().child("Pattern:"))
+                    .child(div().text_sm().child(localization::t("Pattern:")))
                     .child(div().flex_1().child(Input::new(&self.pattern).small())),
             )
             .child(
                 h_flex().gap_4().child(
                     Checkbox::new("sort-pattern-case")
                         .checked(self.pattern_ignores_case)
-                        .label("Ignore case")
+                        .label(localization::t("Ignore case"))
                         .on_click(cx.listener(|this, checked, _, cx| {
                             this.pattern_ignores_case = *checked;
                             cx.notify();
@@ -259,7 +258,7 @@ impl SortSheet {
                     .child(
                         Checkbox::new("sort-capture-group")
                             .checked(self.uses_capture_group)
-                            .label("Use captured group:")
+                            .label(localization::t("Use captured group:"))
                             .on_click(cx.listener(|this, checked, _, cx| {
                                 this.uses_capture_group = *checked;
                                 cx.notify();
@@ -283,28 +282,28 @@ impl SortSheet {
             .gap_1()
             .child(option_switch(
                 "sort-ignore-case",
-                "Ignore case",
+                localization::t("Ignore case"),
                 self.options.ignores_case,
                 cx,
                 |options, value| options.ignores_case = value,
             ))
             .child(option_switch(
                 "sort-numeric",
-                "Treat numbers as numeric values",
+                localization::t("Treat numbers as numeric values"),
                 self.options.numeric,
                 cx,
                 |options, value| options.numeric = value,
             ))
             .child(option_switch(
                 "sort-keep-first",
-                "Keep the first line at the top",
+                localization::t("Keep the first line at the top"),
                 self.options.keeps_first_line,
                 cx,
                 |options, value| options.keeps_first_line = value,
             ))
             .child(option_switch(
                 "sort-descending",
-                "In descending order",
+                localization::t("In descending order"),
                 self.options.descending,
                 cx,
                 |options, value| options.descending = value,
@@ -315,10 +314,10 @@ impl SortSheet {
                 Checkbox::new("sort-localized")
                     .checked(false)
                     .disabled(true)
-                    .label("Respect language rules")
-                    .tooltip(
+                    .label(localization::t("Respect language rules"))
+                    .tooltip(localization::t(
                         "Locale-aware collation needs an ICU dependency SubText does not carry",
-                    ),
+                    )),
             )
     }
 
@@ -329,13 +328,13 @@ impl SortSheet {
             .justify_end()
             .child(
                 Button::new("sort-cancel")
-                    .label("Cancel")
+                    .label(localization::t("Cancel"))
                     .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
             )
             .child(
                 Button::new("sort-apply")
                     .primary()
-                    .label("Sort")
+                    .label(localization::t("Sort"))
                     .disabled(!can_sort)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit(cx);
@@ -358,12 +357,13 @@ impl Render for SortSheet {
         }
 
         let key = self.sort_key(cx);
-        let error = key.validate().map(|error| error.message());
+        let error = key.validate().map(sort_error_message);
+        let can_sort = error.is_none();
 
         let mut keys = v_flex().gap_2().child(
             RadioGroup::horizontal("sort-key")
                 .selected_index(Some(self.key.index()))
-                .children(KeyChoice::ALL.map(KeyChoice::label))
+                .children(KeyChoice::ALL.map(|choice| localization::t(choice.label())))
                 .on_click(cx.listener(|this, index: &usize, _, cx| {
                     this.key = KeyChoice::from_index(*index);
                     cx.notify();
@@ -392,9 +392,25 @@ impl Render for SortSheet {
                 }),
             )
             .child(self.render_sample(&key, cx))
-            .child(field("Sort key:", keys))
-            .child(field("Sort option:", self.render_options(cx)))
-            .child(self.render_buttons(error.is_none(), cx))
+            .child(field(localization::t("Sort key:"), keys))
+            .child(field(
+                localization::t("Sort option:"),
+                self.render_options(cx),
+            ))
+            .child(self.render_buttons(can_sort, cx))
+    }
+}
+
+/// Why a sort key cannot be used, in the words CotEditor's sheet uses.
+///
+/// The position message has no upstream counterpart — CotEditor's column field
+/// simply cannot hold a zero — so it stays English, spelled for a person rather
+/// than as an identifier.
+fn sort_error_message(error: SortKeyError) -> String {
+    match error {
+        SortKeyError::EmptyPattern => localization::t("Empty pattern").to_string(),
+        SortKeyError::InvalidPattern => localization::t("Invalid pattern").to_string(),
+        SortKeyError::EmptyColumn => "The position starts at 1".to_string(),
     }
 }
 

@@ -38,6 +38,7 @@ use gpui_kit::{
 };
 
 use crate::dialog_escape::DismissOnEscape as _;
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// How wide the label column beside each field is.
@@ -135,13 +136,13 @@ impl SurroundSheet {
             .justify_end()
             .child(
                 Button::new("surround-cancel")
-                    .label("Cancel")
+                    .label(localization::t("Cancel"))
                     .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
             )
             .child(
                 Button::new("surround-apply")
                     .primary()
-                    .label("OK")
+                    .label(localization::t("OK"))
                     .disabled(!can_submit)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit(cx);
@@ -181,7 +182,7 @@ impl Render for SurroundSheet {
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Surround with:"),
+                    .child(localization::t("Surround with:")),
             )
             // One pair per row. Upstream puts them side by side in an AppKit
             // sheet, which is as wide as its content; a GPUI dialog is a fixed
@@ -191,13 +192,13 @@ impl Render for SurroundSheet {
                 v_flex()
                     .gap_2()
                     .child(field(
-                        "Begin:",
+                        localization::t("Begin:"),
                         Input::new(&self.begin)
                             .id("surround-begin")
                             .w(rems(FIELD_WIDTH)),
                     ))
                     .child(field(
-                        "End:",
+                        localization::t("End:"),
                         Input::new(&self.end)
                             .id("surround-end")
                             .w(rems(FIELD_WIDTH)),

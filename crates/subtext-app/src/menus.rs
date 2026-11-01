@@ -107,13 +107,13 @@ use crate::snippets;
 /// How a command's path separates two menu levels.
 pub(crate) const PATH_SEPARATOR: &str = " > ";
 
-/// How the application menu is spelled in a command's path.
+/// How upstream spells the application menu in its own command paths.
 ///
-/// [`menu::COMMANDS`] and [`crate::keymap::SHORTCUTS`] both spell it with the
-/// source application's name, because the key map is generated from the same
-/// table; the Quick Actions bar substitutes the display name when it draws a
-/// row. The live bar's own title is already the display name, so [`spelled`]
-/// puts the source name back.
+/// The generated tables spell it with this application's name instead — a row
+/// that read "Quit CotEditor" in SubText's own bar would be a lie — so nothing
+/// has to convert the live bar's title. This constant remains for the one job
+/// that is still about upstream: recognising the spelling in a path that came
+/// from somewhere else, such as a comparison against the source storyboard.
 pub(crate) const UPSTREAM_MENU_TITLE: &str = "CotEditor";
 
 /// The submenu names the runtime fills in, as `resources/menu.json` spells them.
@@ -320,7 +320,10 @@ impl MenuState {
 
 /// Rebuild the menu bar, and the key bindings that go with it.
 pub fn install(cx: &mut App, state: &MenuState) {
-    let menus = build(state);
+    // Translated last, and only here: the tree above is matched by English
+    // names (`replace`, `keymap`'s paths), so it has to stay English until the
+    // platform takes it.
+    let menus = crate::localization::localize_menus(build(state));
 
     cx.clear_key_bindings();
     cx.bind_keys(keymap::default_bindings());
@@ -492,7 +495,7 @@ pub fn commands(state: &MenuState) -> Vec<Command> {
 
 /// The recursive half of [`commands`]: one menu, with the titles above it.
 fn walk(menu: &Menu, ancestors: &mut Vec<String>, state: &MenuState, commands: &mut Vec<Command>) {
-    ancestors.push(spelled(&menu.name).to_string());
+    ancestors.push(menu.name.to_string());
 
     for item in &menu.items {
         match item {
@@ -530,15 +533,6 @@ fn walk(menu: &Menu, ancestors: &mut Vec<String>, state: &MenuState, commands: &
     }
 
     ancestors.pop();
-}
-
-/// A menu's title, as a command's path spells it.
-fn spelled(title: &str) -> &str {
-    if title == menu::APP_MENU_TITLE {
-        UPSTREAM_MENU_TITLE
-    } else {
-        title
-    }
 }
 
 /// The key to draw beside a command's row, if it has one.
@@ -1742,13 +1736,69 @@ mod tests {
     }
 
     /// The path is spelled the way [`crate::keymap::SHORTCUTS`] spells it, so
-    /// the two can be joined — and the Quick Actions bar substitutes the display
-    /// name when it draws a row.
+    /// the two can be joined — and, since both are what the user sees, that
+    /// spelling is SubText's own name rather than upstream's.
     #[test]
     fn the_application_menu_is_spelled_the_way_the_key_map_spells_it() {
         let paths = paths(&state());
-        assert!(paths.contains(&"CotEditor > Settings…".to_string()));
-        assert!(!paths.iter().any(|path| path.starts_with("SubText > ")));
+        assert!(paths.contains(&"SubText > Settings…".to_string()));
+        assert!(!paths.iter().any(|path| path.contains(UPSTREAM_MENU_TITLE)));
+    }
+
+    /// Nothing the user can read still carries upstream's name.
+    ///
+    /// The bar is upstream's item for item — that is the point of rebuilding
+    /// it — but it is SubText's bar, so the application menu, About, Donate,
+    /// Hide, Quit, the Help menu and every command path the Quick Actions
+    /// panel searches have to say SubText. The generated tables are checked
+    /// through the live bar and the runtime tables rather than as source text,
+    /// because this is what the user actually sees: a regenerate that lost the
+    /// rebranding would light this up while the sources still looked fine.
+    #[test]
+    fn nothing_the_user_reads_says_upstreams_name() {
+        fn check(menu: &Menu) {
+            assert!(
+                !menu.name.contains(UPSTREAM_MENU_TITLE),
+                "the menu titled {:?} still says upstream's name",
+                menu.name
+            );
+            for item in &menu.items {
+                match item {
+                    MenuItem::Action { name, .. } => assert!(
+                        !name.contains(UPSTREAM_MENU_TITLE),
+                        "the item {name:?} still says upstream's name"
+                    ),
+                    MenuItem::Submenu(submenu) => check(submenu),
+                    _ => {}
+                }
+            }
+        }
+
+        let state = state();
+        for menu in build(&state) {
+            check(&menu);
+        }
+        // `build` starts from the compile-time bar and fills in the runtime
+        // submenus; checking both catches a runtime table that reintroduces
+        // the spelling on its own.
+        for menu in crate::menu::app_menus(&state.gates) {
+            check(&menu);
+        }
+
+        for command in crate::menu::COMMANDS {
+            assert!(
+                !command.path.contains(UPSTREAM_MENU_TITLE),
+                "the command path {:?} still says upstream's name",
+                command.path
+            );
+        }
+        for row in crate::keymap::SHORTCUTS {
+            assert!(
+                !row.0.contains(UPSTREAM_MENU_TITLE),
+                "the shortcut label {:?} still says upstream's name",
+                row.0
+            );
+        }
     }
 
     /// A greyed item is not a command: upstream's walk asks `isEnabled` before

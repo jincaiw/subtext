@@ -17,11 +17,13 @@
 
 use std::time::SystemTime;
 
+use crate::localization;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
 };
+
 use gpui_kit::{
     App, AppContext as _, Context, Entity, Global, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div,
@@ -165,7 +167,7 @@ impl ConsoleView {
 
 impl Render for ConsoleView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_window_title("Console");
+        window.set_window_title(localization::t("Console"));
 
         let logs = self.console.read(cx).logs().to_vec();
         let console = self.console.clone();
@@ -184,7 +186,9 @@ impl Render for ConsoleView {
                         .text_xs()
                         .text_center()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No output yet. A script's standard error appears here."),
+                        .child(localization::t(
+                            "No output yet. A script's standard error appears here.",
+                        )),
                 )
                 .into_any_element()
         } else {
@@ -236,7 +240,7 @@ impl Render for ConsoleView {
                         Button::new("console-clear")
                             .ghost()
                             .xsmall()
-                            .label("Clear")
+                            .label(localization::t("Clear"))
                             .disabled(logs.is_empty())
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 console.update(cx, |console, cx| console.clear(cx));

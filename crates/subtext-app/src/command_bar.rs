@@ -79,6 +79,7 @@ use gpui_kit::{
     SharedString, Styled as _, Subscription, WeakEntity, Window, div, px, rems, size,
 };
 
+use crate::localization;
 use crate::menu;
 use crate::menus::{self, CommandKind, PATH_SEPARATOR, UPSTREAM_MENU_TITLE};
 use crate::outline::highlight_segments;
@@ -423,7 +424,7 @@ impl CommandBar {
 
 impl Render for CommandBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_window_title(TITLE);
+        window.set_window_title(localization::t(TITLE));
 
         let mut palette = Command::new(&self.state)
             // The window is the panel, so the palette draws no frame of its

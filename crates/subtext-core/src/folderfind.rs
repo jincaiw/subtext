@@ -136,18 +136,6 @@ pub enum QueryError {
     InvalidRegularExpression(String),
 }
 
-impl QueryError {
-    /// The one-line explanation the pane shows.
-    pub fn message(&self) -> String {
-        match self {
-            QueryError::EmptyFindString => "The find string is empty.".to_string(),
-            QueryError::InvalidRegularExpression(reason) => {
-                format!("[Invalid regular expression] {reason}")
-            }
-        }
-    }
-}
-
 /// What to search, and what to leave alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
@@ -574,16 +562,6 @@ pub enum SearchError {
     Query(QueryError),
     /// The file scope did not compile.
     Scope(FileScopeError),
-}
-
-impl SearchError {
-    /// The one-line explanation the pane shows.
-    pub fn message(&self) -> String {
-        match self {
-            SearchError::Query(error) => error.message(),
-            SearchError::Scope(error) => error.message(),
-        }
-    }
 }
 
 impl From<QueryError> for SearchError {
@@ -1259,18 +1237,6 @@ pub enum FileScopeError {
     EmptyValue,
     /// A regular expression rule does not compile.
     InvalidRegularExpression(String),
-}
-
-impl FileScopeError {
-    /// The one-line explanation the scope editor shows.
-    pub fn message(&self) -> String {
-        match self {
-            FileScopeError::EmptyValue => "The scope contains a rule without a value.".to_string(),
-            FileScopeError::InvalidRegularExpression(_) => {
-                "The scope contains an invalid regular expression.".to_string()
-            }
-        }
-    }
 }
 
 /// A compiled file scope.

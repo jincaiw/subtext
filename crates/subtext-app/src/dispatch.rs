@@ -10,10 +10,12 @@
 //! one that admits the gap: the user cannot tell a missing feature from a
 //! broken one.
 
+use gpui_kit::base::input as engine;
 use gpui_kit::{Action, Context, Window};
 
 use subtext_core::textops;
 
+use crate::localization;
 use crate::settings::{InspectorPane, SettingsPane, SidebarPane};
 use crate::workspace::Workspace;
 
@@ -39,6 +41,21 @@ impl Workspace {
         self.dispatch(crate::bridge::name_of(action), window, cx);
     }
 
+    /// Hand a command to the text engine's own action, as a keystroke would.
+    ///
+    /// `window.dispatch_action` resolves the focus when the deferred dispatch
+    /// runs, not now, so this follows the keyboard focus wherever it has moved
+    /// to — the document, a find field, a settings text box. That is the
+    /// responder-chain behaviour the menu bar has upstream, and the reason the
+    /// command cannot be run against `self.editor()` directly.
+    fn send_to_text_engine(
+        action: impl Action + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.dispatch_action(Box::new(action), cx);
+    }
+
     /// Run the command named `name` (the last segment of the action's path).
     ///
     /// Returns `true` when the command was recognised. An unrecognised name is
@@ -58,10 +75,9 @@ impl Workspace {
             // text, so the page it links to is the honest equivalent.
             "ShowWhatsNew" => cx.open_url(RELEASES_URL),
             "ShowDonationWindow" => self.show_donation(cx),
-            "Hide" => self.notice("Hide is handled by the window system", cx),
-            "HideOtherApplications" | "UnhideAllApplications" => {
-                self.notice("Application hiding is handled by the window system", cx)
-            }
+            "Hide" => cx.hide(),
+            "HideOtherApplications" => cx.hide_other_apps(),
+            "UnhideAllApplications" => cx.unhide_other_apps(),
 
             // ---- files ------------------------------------------------
             // CotEditor's File ▸ New opens a document window of its own, and
@@ -78,13 +94,16 @@ impl Workspace {
             "RevertDocumentToSaved" => self.revert(window, cx),
             "ShowInFinder" => self.show_in_finder(cx),
             "CopyPath" => self.copy_path(cx),
-            "ShareDocument" => self.notice("Share is not implemented yet", cx),
+            "ShareDocument" => self.notice(localization::t("Share is not implemented yet"), cx),
             // CotEditor prints through AppKit's `NSPrintOperation` and lays the
             // pages out in a `PrintTextView`. GPUI exposes neither a print
             // panel nor a page-layout model, so there is nothing to hand the
             // document to.
             "RunPageLayout" | "PrintDocument" => {
-                self.notice("Printing needs AppKit's print panel, which GPUI does not expose", cx)
+                self.notice(
+                    localization::t("Printing needs AppKit's print panel, which GPUI does not expose"),
+                    cx,
+                )
             }
 
             // ---- editing ----------------------------------------------
@@ -93,13 +112,26 @@ impl Workspace {
             // pasteboard — and the editor keeps the text engine's behaviour
             // everywhere else.
             "Copy" if self.find_results_focused() => self.copy_find_results(cx),
-            // Undo, redo, cut, copy, paste and select all are bound in the
-            // editor's own key context, which is more specific than this one,
-            // so the text engine handles them while the editor has focus. The
-            // menu items still reach it: GPUI dispatches a menu command down
-            // the same focus path a keystroke takes.
-            "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "PasteAsIs" | "SelectAll" => {
-                self.notice("Handled by the text engine", cx)
+            // The menu items carry this crate's actions, while the editor
+            // listens for the text engine's own — a menu command that arrived
+            // here is one the engine has not seen, and saying "handled by the
+            // text engine" would leave Edit ▸ Undo doing nothing. Sending the
+            // matching engine action back down the focus path is what makes
+            // the menu run the same code a keystroke does, and it lands in a
+            // focused text field as readily as in the document.
+            "Undo" => Self::send_to_text_engine(engine::Undo, window, cx),
+            "Redo" => Self::send_to_text_engine(engine::Redo, window, cx),
+            "Cut" => Self::send_to_text_engine(engine::Cut, window, cx),
+            "Copy" => Self::send_to_text_engine(engine::Copy, window, cx),
+            "Paste" => Self::send_to_text_engine(engine::Paste, window, cx),
+            "SelectAll" => Self::send_to_text_engine(engine::SelectAll, window, cx),
+            // Paste as plain text: the engine's paste already inserts the
+            // clipboard's string, so the only thing to drop is the metadata
+            // a rich paste would read — which SubText never reads either.
+            "PasteAsIs" => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.insert_text(&text, window, cx);
+                }
             }
             // The one clipboard command the text engine cannot do: it needs the
             // syntax colours, which the engine does not know about.
@@ -120,9 +152,10 @@ impl Workspace {
             "SelectColumnUp" => self.select_column(true, cx),
             "SelectColumnDown" => self.select_column(false, cx),
             "Complete" => self.complete(window, cx),
-            "ShowUnicodeInputPanel" => {
-                self.notice("That selection command is not implemented yet", cx)
-            }
+            // The macOS Character Viewer is the system's code-point picker;
+            // GPUI can ask for it, though not for a palette scoped to the
+            // current document as CotEditor's Unicode input panel is.
+            "ShowUnicodeInputPanel" => window.show_character_palette(),
 
             // ---- spelling and substitutions ---------------------------
             "ShowGuessPanel"
@@ -137,7 +170,7 @@ impl Workspace {
             | "OrderFrontSubstitutionsPanel"
             | "StartSpeaking"
             | "StopSpeaking" => {
-                self.notice("System spelling and speech services are macOS-only", cx)
+                self.notice(localization::t("System spelling and speech services are macOS-only"), cx)
             }
             "StraightenQuotesInSelection" => self.straighten_quotes(window, cx),
             // The other three are NSTextView's own. They are not in AppKit's
@@ -145,13 +178,13 @@ impl Workspace {
             // the class does not — which makes them the Substitutions panel's
             // system service rather than a transform anything can reimplement.
             "ReplaceQuotesInSelection" | "ReplaceDashesInSelection" | "ReplaceTextInSelection" => {
-                self.notice("System text substitution services are macOS-only", cx)
+                self.notice(localization::t("System text substitution services are macOS-only"), cx)
             }
 
             // ---- format ------------------------------------------------
             "RecolorAll" => {
                 self.rehighlight(cx);
-                self.notice("Syntax analysis reset", cx)
+                self.notice(localization::t("Syntax analysis reset"), cx)
             }
             // Upstream's `showEncodingsListEditor`: the settings window's Format
             // pane, and then the encoding list editor over it. The list is what
@@ -177,7 +210,7 @@ impl Workspace {
                 self.set_font(None, cx);
                 self.set_font_size(13.0, cx)
             }
-            "OrderFrontFontPanel" => self.notice("Use Format ▸ Font to change the font", cx),
+            "OrderFrontFontPanel" => self.notice(localization::t("Use Format ▸ Font to change the font"), cx),
             "ToggleAntialias" => self.toggle_antialias(window, cx),
             "ToggleLigatures" => self.toggle_ligatures(window, cx),
             "ChangeTabWidth" | "CustomizeTabWidth" => self.cycle_tab_width(cx),
@@ -200,12 +233,16 @@ impl Workspace {
             // vertical orientation are the two text-engine settings GPUI does
             // not expose: its shaping is per-character bidi with no paragraph
             // base direction, and it lays text out horizontally only.
-            "MakeWritingDirectionLeftToRight" | "MakeWritingDirectionRightToLeft" => self.notice(
-                "GPUI's text engine has no paragraph writing direction; CotEditor gets it from NSTextView",
-                cx,
-            ),
+            "MakeWritingDirectionLeftToRight" | "MakeWritingDirectionRightToLeft" => {
+                self.notice(
+                    localization::t(
+                        "GPUI's text engine has no paragraph writing direction; CotEditor gets it from NSTextView",
+                    ),
+                    cx,
+                )
+            }
             "MakeLayoutOrientationHorizontal" | "MakeLayoutOrientationVertical" => {
-                self.notice("GPUI's text engine cannot lay out vertical text", cx)
+                self.notice(localization::t("GPUI's text engine cannot lay out vertical text"), cx)
             }
 
             // ---- view --------------------------------------------------
@@ -389,7 +426,10 @@ impl Workspace {
             // ---- window ------------------------------------------------
             "PerformMiniaturize" => window.minimize_window(),
             "PerformZoom" => window.zoom_window(),
-            "ArrangeInFront" => self.notice("Handled by the window system", cx),
+            // AppKit's "Bring All to Front": activate this application, which
+            // raises its windows together. GPUI keeps no z-order list to walk,
+            // so activating is the part of it there is to do.
+            "ArrangeInFront" => cx.activate(true),
             "ShowConsolePanel" => self.show_console(cx),
 
             // ---- help --------------------------------------------------
@@ -400,7 +440,7 @@ impl Workspace {
             // directory of the repository.
             "ShowHelp" | "OpenHelpAnchor" => cx.open_url(DOCS_URL),
             "OpenAppleScriptDictionary" => {
-                self.notice("AppleScript support does not exist on GPUI", cx)
+                self.notice(localization::t("AppleScript support does not exist on GPUI"), cx)
             }
             "OpenWebSite" => cx.open_url(PROJECT_URL),
             "ReportBug" => cx.open_url(ISSUES_URL),
@@ -409,7 +449,7 @@ impl Workspace {
             "CreateBugReport" => self.create_bug_report(window, cx),
 
             other => {
-                self.notice(format!("{other} is not implemented yet"), cx);
+                self.notice(localization::tf("{} is not implemented yet", &[&other]), cx);
                 return false;
             }
         }

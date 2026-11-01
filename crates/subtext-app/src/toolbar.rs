@@ -49,6 +49,7 @@ use gpui_kit::{
 use serde::{Deserialize, Serialize};
 
 use crate::dialog_escape::DismissOnEscape as _;
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// How tall each of the palette's two lists is, in rem.
@@ -400,7 +401,7 @@ impl ToolbarSheet {
     ) -> AnyElement {
         let dragged = Dragging {
             from: index,
-            label: item.label().into(),
+            label: localization::t(item.label()).into(),
         };
         let dropped = {
             let sheet = cx.entity().downgrade();
@@ -438,7 +439,7 @@ impl ToolbarSheet {
                             .min_w_0()
                             .text_sm()
                             .truncate()
-                            .child(item.label()),
+                            .child(localization::t(item.label())),
                     )
                     .child(
                         Button::new(("toolbar-remove", item as usize))
@@ -450,11 +451,15 @@ impl ToolbarSheet {
                             // item is not removable.
                             .opacity(if movable { 1.0 } else { 0.35 })
                             .disabled(!movable)
-                            .accessibility_label(format!("Remove {}", item.label()))
+                            .accessibility_label(format!(
+                                "{} {}",
+                                localization::t("Remove"),
+                                localization::t(item.label())
+                            ))
                             .tooltip(if movable {
-                                "Remove from the toolbar"
+                                localization::t("Remove from the toolbar")
                             } else {
-                                "This item cannot be removed"
+                                localization::t("This item cannot be removed")
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove(item);
@@ -480,7 +485,7 @@ impl ToolbarSheet {
                     .py_1()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Every item is already in the toolbar."),
+                    .child(localization::t("Every item is already in the toolbar.")),
             );
         }
         for item in available {
@@ -490,7 +495,11 @@ impl ToolbarSheet {
                     .px_2()
                     .py_1()
                     .cursor_pointer()
-                    .accessibility_label(format!("Add {}", item.label()))
+                    .accessibility_label(format!(
+                        "{} {}",
+                        localization::t("Add"),
+                        localization::t(item.label())
+                    ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.add(item);
                         this.write(cx);
@@ -507,7 +516,7 @@ impl ToolbarSheet {
                                     .min_w_0()
                                     .text_sm()
                                     .truncate()
-                                    .child(item.label()),
+                                    .child(localization::t(item.label())),
                             )
                             .child(IconName::Plus),
                     ),
@@ -534,7 +543,7 @@ impl ToolbarSheet {
             .child(
                 Button::new("toolbar-default-set")
                     .small()
-                    .label("Default Set")
+                    .label(localization::t("Default Set"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.reset();
                         this.write(cx);
@@ -544,7 +553,7 @@ impl ToolbarSheet {
                 Button::new("toolbar-done")
                     .small()
                     .primary()
-                    .label("Done")
+                    .label(localization::t("Done"))
                     .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
             )
             .into_any_element()
@@ -572,13 +581,13 @@ impl Render for ToolbarSheet {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(div().text_sm().child("Toolbar:"))
+                            .child(div().text_sm().child(localization::t("Toolbar:")))
                             .child(self.render_current(cx)),
                     )
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(div().text_sm().child("Available:"))
+                            .child(div().text_sm().child(localization::t("Available:")))
                             .child(self.render_available(cx)),
                     ),
             )

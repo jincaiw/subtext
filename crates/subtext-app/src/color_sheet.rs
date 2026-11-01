@@ -45,6 +45,7 @@ use gpui_kit::{
 use subtext_core::colorcode::{self, Color, ColorCodeType};
 
 use crate::dialog_escape::DismissOnEscape as _;
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// The label column, wide enough for the longest label the panel uses.
@@ -98,7 +99,8 @@ impl ColorSheet {
         };
         let uppercase = text.chars().any(|character| character.is_ascii_uppercase());
 
-        let code = cx.new(|cx| InputState::new(window, cx).placeholder("Color Code"));
+        let code =
+            cx.new(|cx| InputState::new(window, cx).placeholder(localization::t("Color Code")));
         let picker = cx.new(|cx| ColorPickerState::new(window, cx).default_value(hsla_of(color)));
         let kind_state = cx.new(|cx| SelectState::new(kinds(), Some(index_of(kind)), window, cx));
 
@@ -210,7 +212,10 @@ impl ColorSheet {
         let Some((_, color)) = Color::from_code(&text) else {
             self.workspace
                 .update(cx, |workspace, cx| {
-                    workspace.notice(format!("{} is not a color code", text.trim()), cx);
+                    workspace.notice(
+                        localization::tf("{} is not a color code", &[&text.trim()]),
+                        cx,
+                    );
                 })
                 .ok();
             return false;
@@ -290,7 +295,12 @@ impl ColorSheet {
     fn render_picker(&self) -> impl IntoElement {
         h_flex()
             .gap_2()
-            .child(div().w(rems(LABEL_COLUMN)).text_sm().child("Color:"))
+            .child(
+                div()
+                    .w(rems(LABEL_COLUMN))
+                    .text_sm()
+                    .child(localization::t("Color:")),
+            )
             .child(
                 div()
                     .flex_1()
@@ -301,12 +311,17 @@ impl ColorSheet {
     fn render_kind(&self) -> impl IntoElement {
         h_flex()
             .gap_2()
-            .child(div().w(rems(LABEL_COLUMN)).text_sm().child("Notation:"))
+            .child(
+                div()
+                    .w(rems(LABEL_COLUMN))
+                    .text_sm()
+                    .child(localization::t("Notation:")),
+            )
             .child(
                 div().flex_1().child(
                     Select::new(&self.kind_state)
                         .with_size(Size::Small)
-                        .accessibility_label("Notation"),
+                        .accessibility_label(localization::t("Notation")),
                 ),
             )
     }
@@ -318,13 +333,13 @@ impl ColorSheet {
             .justify_end()
             .child(
                 Button::new("color-cancel")
-                    .label("Cancel")
+                    .label(localization::t("Cancel"))
                     .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
             )
             .child(
                 Button::new("color-insert")
                     .primary()
-                    .label("Insert")
+                    .label(localization::t("Insert"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         if this.submit(cx) {
                             window.close_dialog(cx);

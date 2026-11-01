@@ -942,22 +942,6 @@ pub enum RemovalError {
     DefaultEncoding,
 }
 
-impl RemovalError {
-    /// What the editor says about the refusal.
-    ///
-    /// `name` is the encoding's display name, which only the first message
-    /// needs — upstream's second one does not name the encoding, because the
-    /// user cannot see which one it is from the list alone.
-    pub fn message(self, name: &str) -> String {
-        match self {
-            RemovalError::Utf8 => format!("{name} can’t be removed."),
-            RemovalError::DefaultEncoding => {
-                "The encoding set as default can’t be removed.".to_string()
-            }
-        }
-    }
-}
-
 impl EncodingList {
     /// Upstream's default list: the menu's groups, with a separator between
     /// each pair.
@@ -2450,15 +2434,6 @@ mod tests {
         // not removable, but it is not a refusal with a message either.
         assert_eq!(list.can_remove(1, TextEncoding::UTF8), None);
         assert_eq!(list.can_remove(list.len(), TextEncoding::UTF8), None);
-
-        assert_eq!(
-            RemovalError::Utf8.message("Unicode (UTF-8)"),
-            "Unicode (UTF-8) can’t be removed."
-        );
-        assert_eq!(
-            RemovalError::DefaultEncoding.message("Japanese (Shift JIS)"),
-            "The encoding set as default can’t be removed."
-        );
     }
 
     /// The Add button puts the entry below the row the user had selected, and

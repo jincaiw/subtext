@@ -156,7 +156,7 @@ impl DocumentConflictOption {
 
     pub fn label(self) -> &'static str {
         match self {
-            DocumentConflictOption::KeepOpenVersion => "Keep CotEditor's version",
+            DocumentConflictOption::KeepOpenVersion => "Keep SubText's version",
             DocumentConflictOption::AskHowToResolve => "Ask how to resolve",
             DocumentConflictOption::UpdateToModifiedVersion => "Update to modified version",
         }
@@ -363,10 +363,13 @@ impl WindowOptions {
             writing_direction: WritingDirection::default(),
             show_status_bar_lines: true,
             show_status_bar_chars: true,
-            show_status_bar_words: true,
+            // Upstream hides the word count and the column by default
+            // (`DefaultSettings.swift`), leaving the row to the four numbers a
+            // reader looks at while typing: lines, characters, location, line.
+            show_status_bar_words: false,
             show_status_bar_location: true,
             show_status_bar_line: true,
-            show_status_bar_column: true,
+            show_status_bar_column: false,
         }
     }
 }
@@ -618,6 +621,15 @@ pub struct Settings {
     pub sidebar_pane: SidebarPane,
     pub inspector_pane: InspectorPane,
 
+    /// The language the interface is drawn in.
+    ///
+    /// CotEditor takes its language from the system (`AppleLanguages`); SubText
+    /// makes it a preference instead, because a reader whose system is in
+    /// English may still want the editor in Chinese, and because switching it
+    /// from the General pane is the only way to see the change without a
+    /// restart. Defaults to Chinese — see [`crate::localization`].
+    pub language: crate::localization::Language,
+
     /// The document toolbar's items, in the order they are drawn.
     ///
     /// CotEditor's `NSToolbar` autosaves its configuration under the toolbar's
@@ -824,6 +836,7 @@ impl Default for Settings {
             window: WindowOptions::coteditor_defaults(),
             sidebar_pane: SidebarPane::default(),
             inspector_pane: InspectorPane::default(),
+            language: crate::localization::Language::default(),
             toolbar_items: crate::toolbar::ToolbarItemId::DEFAULT.to_vec(),
             theme: None,
             font_family: None,

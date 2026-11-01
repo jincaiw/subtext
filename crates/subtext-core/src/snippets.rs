@@ -108,25 +108,6 @@ pub enum Rejection {
     SingleKey,
 }
 
-impl Rejection {
-    /// The sentence to show a person, in CotEditor's wording.
-    ///
-    /// `shortcut` is the combination the user typed, which two of the three
-    /// sentences quote back.
-    pub fn message(self, shortcut: Shortcut) -> String {
-        match self {
-            Self::Unsupported => format!(
-                "The combination “{}” is not supported for the shortcut customization.",
-                shortcut.symbol()
-            ),
-            Self::ShiftOnly => {
-                "The Shift key can be used only with another modifier key.".to_string()
-            }
-            Self::SingleKey => "Single type is invalid for a shortcut.".to_string(),
-        }
-    }
-}
-
 // ---- shortcuts -----------------------------------------------------------
 
 /// A key equivalent, in the two forms Cocoa stores and shows one in.

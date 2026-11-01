@@ -795,17 +795,6 @@ pub enum SortKeyError {
     EmptyColumn,
 }
 
-impl SortKeyError {
-    /// The message CotEditor's sheet shows next to the field.
-    pub fn message(self) -> &'static str {
-        match self {
-            SortKeyError::EmptyPattern => "Empty pattern",
-            SortKeyError::InvalidPattern => "Invalid pattern",
-            SortKeyError::EmptyColumn => "The position starts at 1",
-        }
-    }
-}
-
 /// Sort the selected lines by `key`.
 pub fn sort_lines(
     text: &str,

@@ -63,6 +63,7 @@ use gpui_kit::{
 use subtext_core::multireplace::{MultipleReplace, PatternError, Replacement, Settings};
 
 use crate::dialog_escape::DismissOnEscape as _;
+use crate::localization;
 use crate::workspace::Workspace;
 
 /// Stable identity for one rule.
@@ -92,8 +93,25 @@ enum Action {
 /// The line under the table, which is upstream's `FindResult.message`.
 fn result_message(action: Action, count: usize) -> String {
     match action {
-        Action::Find => format!("{count} matches"),
-        Action::Replace => format!("{count} replaced"),
+        Action::Find => localization::tf("{} matches", &[&count]),
+        Action::Replace => localization::tf("{} replaced", &[&count]),
+    }
+}
+
+/// Why a rule is invalid, spelled the way upstream's warning tooltip spells it:
+/// the description in brackets, then the suggestion.
+///
+/// The wording lives here rather than in `subtext-core`, which owns no
+/// translations: the sheet is what draws the sentence.
+fn pattern_error_message(error: &PatternError) -> String {
+    match error {
+        PatternError::EmptyFindString => localization::tf(
+            "[Empty find text] {}",
+            &[&localization::t("Enter text to find.")],
+        ),
+        PatternError::InvalidRegularExpression(reason) => {
+            localization::tf("[Invalid regular expression] {}", &[reason])
+        }
     }
 }
 
@@ -173,7 +191,7 @@ fn header(cx: &App) -> impl IntoElement {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(column.label()),
+                .child(localization::t(column.label())),
         ));
     }
     row.border_b_1().border_color(cx.theme().border)
@@ -224,17 +242,17 @@ impl RuleRow {
     ) -> Self {
         let find = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Find")
+                .placeholder(localization::t("Find"))
                 .default_value(rule.find_string.clone())
         });
         let replacement = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Replace With")
+                .placeholder(localization::t("Replace With"))
                 .default_value(rule.replacement_string.clone())
         });
         let description = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Description")
+                .placeholder(localization::t("Description"))
                 .default_value(rule.description.clone().unwrap_or_default())
         });
 
@@ -346,7 +364,7 @@ impl RuleRow {
                     Input::new(&self.find)
                         .small()
                         .disabled(!self.is_enabled)
-                        .aria_label("Find"),
+                        .aria_label(localization::t("Find")),
                 ),
             )
     }
@@ -374,8 +392,8 @@ impl Render for RuleRow {
                 Column::Enabled,
                 Checkbox::new(self.id.element("enabled"))
                     .checked(self.is_enabled)
-                    .accessibility_label("Enable")
-                    .tooltip("Select to use this replacement rule.")
+                    .accessibility_label(localization::t("Enable"))
+                    .tooltip(localization::t("Select to use this replacement rule."))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         this.is_enabled = *checked;
                         this.sheet.update(cx, |_, cx| cx.notify()).ok();
@@ -388,15 +406,15 @@ impl Render for RuleRow {
                 Input::new(&self.replacement)
                     .small()
                     .disabled(!enabled)
-                    .aria_label("Replace With"),
+                    .aria_label(localization::t("Replace With")),
             ))
             .child(cell(
                 Column::RegularExpression,
                 Checkbox::new(self.id.element("regular-expression"))
                     .checked(self.uses_regular_expression)
                     .disabled(!enabled)
-                    .accessibility_label("RE")
-                    .tooltip("Select to search with regular expression.")
+                    .accessibility_label(localization::t("RE"))
+                    .tooltip(localization::t("Select to search with regular expression."))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         this.uses_regular_expression = *checked;
                         this.sheet.update(cx, |_, cx| cx.notify()).ok();
@@ -408,8 +426,10 @@ impl Render for RuleRow {
                 Checkbox::new(self.id.element("ignores-case"))
                     .checked(self.ignores_case)
                     .disabled(!enabled)
-                    .accessibility_label("IC")
-                    .tooltip("Select to ignore character case on search.")
+                    .accessibility_label(localization::t("IC"))
+                    .tooltip(localization::t(
+                        "Select to ignore character case on search.",
+                    ))
                     .on_click(cx.listener(|this, checked, _, cx| {
                         this.ignores_case = *checked;
                         cx.notify();
@@ -420,7 +440,7 @@ impl Render for RuleRow {
                 Input::new(&self.description)
                     .small()
                     .disabled(!enabled)
-                    .aria_label("Description"),
+                    .aria_label(localization::t("Description")),
             ))
     }
 }
@@ -579,9 +599,9 @@ impl MultipleReplaceSheet {
                 Button::new("multiple-replace-options")
                     .small()
                     .icon(gpui_kit::assets::IconName::Settings)
-                    .label("Advanced")
-                    .accessibility_label("Advanced options")
-                    .tooltip("Show advanced options")
+                    .label(localization::t("Advanced"))
+                    .accessibility_label(localization::t("Advanced options"))
+                    .tooltip(localization::t("Show advanced options"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.options_open = !this.options_open;
                         cx.notify();
@@ -608,76 +628,80 @@ impl MultipleReplaceSheet {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(note("Advanced Find Options", cx))
+            .child(note(localization::t("Advanced Find Options"), cx))
             .child(option_switch(
                 "mr-matches-full-word",
-                "Match only whole words",
+                localization::t("Match only whole words"),
                 settings.matches_full_word,
                 false,
-                "Restrict search results to whole words.",
+                localization::t("Restrict search results to whole words."),
                 cx,
                 |settings, value| settings.matches_full_word = value,
             ))
             .child(option_switch(
                 "mr-is-literal-search",
-                "Distinguish characters strictly",
+                localization::t("Distinguish characters strictly"),
                 settings.is_literal_search,
                 true,
-                "SubText's search compares characters exactly, which is what this asks for.",
+                localization::t(
+                    "SubText's search compares characters exactly, which is what this asks for.",
+                ),
                 cx,
                 |settings, value| settings.is_literal_search = value,
             ))
             .child(option_switch(
                 "mr-ignores-diacritic-marks",
-                "Ignore diacritical marks",
+                localization::t("Ignore diacritical marks"),
                 settings.ignores_diacritic_marks,
                 true,
-                "Needs the ICU collation SubText does not carry",
+                localization::t("Needs the ICU collation SubText does not carry"),
                 cx,
                 |settings, value| settings.ignores_diacritic_marks = value,
             ))
             .child(option_switch(
                 "mr-ignores-width",
-                "Ignore width differences",
+                localization::t("Ignore width differences"),
                 settings.ignores_width,
                 true,
-                "Needs the ICU collation SubText does not carry",
+                localization::t("Needs the ICU collation SubText does not carry"),
                 cx,
                 |settings, value| settings.ignores_width = value,
             ))
             .child(option_switch(
                 "mr-is-single-line",
-                "Dot matches line separators",
+                localization::t("Dot matches line separators"),
                 settings.is_single_line,
                 false,
-                "Allow . to match any character, including newline characters (singleline).",
+                localization::t(
+                    "Allow . to match any character, including newline characters (singleline).",
+                ),
                 cx,
                 |settings, value| settings.is_single_line = value,
             ))
             .child(option_switch(
                 "mr-is-multiline",
-                "Anchors match lines",
+                localization::t("Anchors match lines"),
                 settings.is_multiline,
                 false,
-                "Allow ^ and $ to match the start and end of lines (multiline).",
+                localization::t("Allow ^ and $ to match the start and end of lines (multiline)."),
                 cx,
                 |settings, value| settings.is_multiline = value,
             ))
             .child(option_switch(
                 "mr-uses-unicode-boundaries",
-                "Use Unicode word boundaries",
+                localization::t("Use Unicode word boundaries"),
                 settings.uses_unicode_boundaries,
                 true,
-                "SubText's word boundaries are Unicode-aware by definition.",
+                localization::t("SubText's word boundaries are Unicode-aware by definition."),
                 cx,
                 |settings, value| settings.uses_unicode_boundaries = value,
             ))
             .child(option_switch(
                 "mr-unescapes-replacement-string",
-                "Unescape replacement text",
+                localization::t("Unescape replacement text"),
                 settings.unescapes_replacement_string,
                 false,
-                "Unescape metacharacters with backslash in replacement text.",
+                localization::t("Unescape metacharacters with backslash in replacement text."),
                 cx,
                 |settings, value| settings.unescapes_replacement_string = value,
             ))
@@ -693,8 +717,8 @@ impl MultipleReplaceSheet {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::Plus)
-                    .accessibility_label("Add")
-                    .tooltip("Add new item")
+                    .accessibility_label(localization::t("Add"))
+                    .tooltip(localization::t("Add new item"))
                     .on_click(cx.listener(|this, _, window, cx| this.add_rule(window, cx))),
             )
             .child(
@@ -702,8 +726,8 @@ impl MultipleReplaceSheet {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::Minus)
-                    .accessibility_label("Remove")
-                    .tooltip("Delete selected items")
+                    .accessibility_label(localization::t("Remove"))
+                    .tooltip(localization::t("Delete selected items"))
                     .disabled(self.selected.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.remove_rule(window, cx))),
             )
@@ -725,11 +749,9 @@ impl Render for MultipleReplaceSheet {
             .dismiss_on_escape()
             .w_full()
             .gap_3()
-            .child(
-                div().text_sm().child(
-                    "Perform replacement using these rules in succession from the top down:",
-                ),
-            )
+            .child(div().text_sm().child(localization::t(
+                "Perform replacement using these rules in succession from the top down:",
+            )))
             .child(
                 v_flex()
                     .w_full()
@@ -751,13 +773,13 @@ impl Render for MultipleReplaceSheet {
             .child(
                 v_flex()
                     .gap_1()
-                    .child(note("Invalid rules will be skipped.", cx))
+                    .child(note(localization::t("Invalid rules will be skipped."), cx))
                     .when_some(error, |this, error| {
                         this.child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().danger)
-                                .child(error.message()),
+                                .child(pattern_error_message(&error)),
                         )
                     })
                     .when_some(self.result.clone(), |this, result| {
@@ -772,8 +794,8 @@ impl Render for MultipleReplaceSheet {
                     .child(
                         Checkbox::new("multiple-replace-in-selection")
                             .checked(self.in_selection)
-                            .label("In Selection")
-                            .tooltip("Select to replace text only in selection.")
+                            .label(localization::t("In Selection"))
+                            .tooltip(localization::t("Select to replace text only in selection."))
                             .on_click(cx.listener(|this, checked, _, cx| {
                                 this.in_selection = *checked;
                                 cx.notify();
@@ -782,15 +804,19 @@ impl Render for MultipleReplaceSheet {
                     .child(div().flex_1())
                     .child(
                         Button::new("multiple-replace-highlight")
-                            .label("Highlight All")
-                            .tooltip("Highlight all matches of the replacement rules.")
+                            .label(localization::t("Highlight All"))
+                            .tooltip(localization::t(
+                                "Highlight all matches of the replacement rules.",
+                            ))
                             .on_click(cx.listener(|this, _, _, cx| this.highlight_all(cx))),
                     )
                     .child(
                         Button::new("multiple-replace-replace-all")
                             .primary()
-                            .label("Replace All")
-                            .tooltip("Replace all matches according to the replacement rules.")
+                            .label(localization::t("Replace All"))
+                            .tooltip(localization::t(
+                                "Replace all matches according to the replacement rules.",
+                            ))
                             .on_click(cx.listener(|this, _, _, cx| this.replace_all(cx))),
                     ),
             )
@@ -856,6 +882,9 @@ mod tests {
 
     #[test]
     fn the_result_line_reads_the_way_upstream_words_it() {
+        // The sentence is upstream's, translated as a whole, so the language is
+        // pinned here rather than left to whatever ran before.
+        let _language = localization::pin(localization::Language::English);
         assert_eq!(result_message(Action::Find, 3), "3 matches");
         assert_eq!(result_message(Action::Replace, 0), "0 replaced");
         assert_eq!(result_message(Action::Replace, 12), "12 replaced");

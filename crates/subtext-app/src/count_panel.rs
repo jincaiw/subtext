@@ -45,6 +45,7 @@ use gpui_kit::{
 use subtext_core::charinfo::CharacterUnit;
 use subtext_core::textops::Normalization;
 
+use crate::localization;
 use crate::settings::Settings;
 use crate::workspace::Workspace;
 
@@ -77,7 +78,10 @@ impl CountOptionsView {
         let unit = cx.new(|cx| {
             SelectState::new(
                 units(),
-                Some(index_of(&unit_labels(), settings.count_unit.label())),
+                Some(index_of(
+                    &unit_display_labels(),
+                    localization::t(settings.count_unit.label()),
+                )),
                 window,
                 cx,
             )
@@ -127,9 +131,12 @@ impl CountOptionsView {
         let OptionsEvent::Confirm(Some(label)) = event else {
             return;
         };
+        // The menu shows the translated label, so the way back to the unit is
+        // through the translation as well. `label()` stays English because it
+        // is also the identity the settings file stores.
         let Some(unit) = CharacterUnit::ALL
             .into_iter()
-            .find(|unit| unit.label() == *label)
+            .find(|unit| localization::t(unit.label()) == *label)
         else {
             return;
         };
@@ -192,12 +199,28 @@ impl CountOptionsView {
 }
 
 /// The label of each unit, in upstream's order.
+///
+/// The tests read the English identities; the panel itself draws
+/// [`unit_display_labels`].
+#[cfg(test)]
 fn unit_labels() -> Vec<&'static str> {
     CharacterUnit::ALL.iter().map(|unit| unit.label()).collect()
 }
 
+/// The same labels as the menu draws them.
+///
+/// `label()` stays English because it is the identity the settings file stores
+/// and the tests assert on; the menu and the selection have to use the
+/// translated spelling on both sides of the round trip.
+fn unit_display_labels() -> Vec<&'static str> {
+    CharacterUnit::ALL
+        .iter()
+        .map(|unit| localization::t(unit.label()))
+        .collect()
+}
+
 fn units() -> OptionsDelegate {
-    SearchableVec::new(unit_labels())
+    SearchableVec::new(unit_display_labels())
 }
 
 /// The normalization forms, in upstream's order.
@@ -253,7 +276,7 @@ impl Render for CountOptionsView {
                     .gap_2()
                     .child(checkbox(
                         "count-ignore-newlines",
-                        "Ignore line endings",
+                        localization::t("Ignore line endings"),
                         settings.count_ignores_newlines,
                         true,
                         {
@@ -271,7 +294,7 @@ impl Render for CountOptionsView {
                     ))
                     .child(checkbox(
                         "count-ignore-whitespaces",
-                        "Ignore whitespace",
+                        localization::t("Ignore whitespace"),
                         settings.count_ignores_whitespaces,
                         true,
                         {
@@ -289,7 +312,7 @@ impl Render for CountOptionsView {
                     ))
                     .child(checkbox(
                         "count-collapse-whitespace",
-                        "Treat consecutive whitespace as one space",
+                        localization::t("Treat consecutive whitespace as one space"),
                         settings.count_treats_consecutive_whitespace_as_single,
                         !collapsing_is_pointless,
                         {
@@ -310,7 +333,7 @@ impl Render for CountOptionsView {
                         },
                     )),
             )
-            .child(field("Unit:", {
+            .child(field(localization::t("Unit:"), {
                 let mut block = v_flex()
                     .gap_1()
                     .child(Select::new(&self.unit).with_size(Size::Small))
@@ -319,11 +342,11 @@ impl Render for CountOptionsView {
                             .max_w(rems(24.))
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(unit.description()),
+                            .child(localization::t(unit.description())),
                     );
                 if byte_unit {
                     block = block.child(field(
-                        "Encoding:",
+                        localization::t("Encoding:"),
                         Select::new(&self.encoding).with_size(Size::Small),
                     ));
                 }
@@ -334,7 +357,7 @@ impl Render for CountOptionsView {
                             .gap_2()
                             .child(checkbox(
                                 "count-normalizes",
-                                "Normalization:",
+                                localization::t("Normalization:"),
                                 settings.count_normalizes,
                                 true,
                                 {
@@ -424,13 +447,13 @@ impl Render for CountSheet {
                 .justify_end()
                 .child(
                     Button::new("count-cancel")
-                        .label("Cancel")
+                        .label(localization::t("Cancel"))
                         .on_click(cx.listener(|_, _, window, cx| window.close_dialog(cx))),
                 )
                 .child(
                     Button::new("count-start")
                         .primary()
-                        .label("Start")
+                        .label(localization::t("Start"))
                         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                 ),
         )

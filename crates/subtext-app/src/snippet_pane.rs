@@ -56,9 +56,10 @@ use gpui_kit::{
 };
 
 use subtext_core::filedrop::FileDropItem;
-use subtext_core::snippets::{Shortcut, Snippet};
+use subtext_core::snippets::{Rejection, Shortcut, Snippet};
 
 use crate::keymap;
+use crate::localization;
 use crate::settings_window::SettingsWindow;
 
 /// Which of the pane's two tables a row belongs to.
@@ -238,12 +239,28 @@ fn command_name(path: &str) -> &str {
 /// here is the generated table the menu bar itself is built from.
 pub fn shortcut_rejection(shortcut: Shortcut) -> Option<String> {
     if let Some(rejection) = shortcut.rejection() {
-        return Some(rejection.message(shortcut));
+        // The three sentences are spelled here rather than in
+        // `subtext_core::snippets`, where the refusal is a value with no
+        // interface of its own: the crate that draws the sentence is the
+        // crate that translates it.
+        return Some(match rejection {
+            Rejection::Unsupported => localization::tf(
+                "The combination “{}” is not supported for the shortcut customization.",
+                &[&shortcut.symbol()],
+            ),
+            Rejection::ShiftOnly => {
+                localization::t("The Shift key can be used only with another modifier key.")
+                    .to_string()
+            }
+            Rejection::SingleKey => {
+                localization::t("Single type is invalid for a shortcut.").to_string()
+            }
+        });
     }
     taken_by(shortcut).map(|command| {
-        format!(
-            "“{}” is already taken by the “{command}” command.",
-            shortcut.symbol()
+        localization::tf(
+            "“{}” is already taken by the “{}” command.",
+            &[&shortcut.symbol(), &command],
         )
     })
 }
@@ -365,7 +382,7 @@ impl SnippetRow {
     ) -> Self {
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Name")
+                .placeholder(localization::t("Name"))
                 .default_value(snippet.name.clone())
         });
         let focus = cx.focus_handle();
@@ -520,19 +537,24 @@ impl SnippetRow {
     fn render_syntax(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let row = cx.entity().downgrade();
         let syntaxes = self.state.syntaxes.clone();
-        let label = self.scope.clone().unwrap_or_else(|| "All".to_string());
+        let label = self
+            .scope
+            .clone()
+            .unwrap_or_else(|| localization::t("All").to_string());
 
         Button::new(self.element("snippet-syntax"))
             .ghost()
             .small()
             .w_full()
             .label(label)
-            .tooltip("Syntax in which this snippet is offered.")
+            .tooltip(localization::t("Syntax in which this snippet is offered."))
             .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
                 let clear = row.clone();
-                let mut menu = menu.item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
-                    clear.update(cx, |row, cx| row.set_scope(None, cx)).ok();
-                }));
+                let mut menu = menu.item(PopupMenuItem::new(localization::t("All")).on_click(
+                    move |_, _, cx| {
+                        clear.update(cx, |row, cx| row.set_scope(None, cx)).ok();
+                    },
+                ));
                 menu = menu.separator();
                 for name in syntaxes.iter() {
                     let row = row.clone();
@@ -571,9 +593,9 @@ impl SnippetRow {
             .tooltip(move |_, cx| {
                 cx.new(move |_| {
                     Tooltip::new(if recording {
-                        "Press the key combination to record."
+                        localization::t("Press the key combination to record.")
                     } else {
-                        "Click, then press a key combination."
+                        localization::t("Click, then press a key combination.")
                     })
                 })
                 .into()
@@ -614,7 +636,9 @@ impl Render for SnippetRow {
             .child(cell(CommandColumn::Syntax.width(), self.render_syntax(cx)))
             .child(cell(
                 CommandColumn::Name.width(),
-                Input::new(&self.name).small().aria_label("Name"),
+                Input::new(&self.name)
+                    .small()
+                    .aria_label(localization::t("Name")),
             ))
             .child(cell(
                 CommandColumn::Key.width(),
@@ -647,12 +671,12 @@ impl FileDropRow {
     ) -> Self {
         let extensions = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("All")
+                .placeholder(localization::t("All"))
                 .default_value(item.extensions.join(", "))
         });
         let description = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Description")
+                .placeholder(localization::t("Description"))
                 .default_value(item.description.clone().unwrap_or_default())
         });
 
@@ -742,19 +766,26 @@ impl FileDropRow {
     fn render_syntax(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let row = cx.entity().downgrade();
         let syntaxes = self.state.syntaxes.clone();
-        let label = self.scope.clone().unwrap_or_else(|| "All".to_string());
+        let label = self
+            .scope
+            .clone()
+            .unwrap_or_else(|| localization::t("All").to_string());
 
         Button::new(self.element("drop-syntax"))
             .ghost()
             .small()
             .w_full()
             .label(label)
-            .tooltip("Syntax in which this file drop setting is used.")
+            .tooltip(localization::t(
+                "Syntax in which this file drop setting is used.",
+            ))
             .dropdown_menu_with_anchor(Anchor::TopLeft, move |menu, _window, _cx| {
                 let clear = row.clone();
-                let mut menu = menu.item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
-                    clear.update(cx, |row, cx| row.set_scope(None, cx)).ok();
-                }));
+                let mut menu = menu.item(PopupMenuItem::new(localization::t("All")).on_click(
+                    move |_, _, cx| {
+                        clear.update(cx, |row, cx| row.set_scope(None, cx)).ok();
+                    },
+                ));
                 menu = menu.separator();
                 for name in syntaxes.iter() {
                     let row = row.clone();
@@ -792,13 +823,13 @@ impl Render for FileDropRow {
                 FileDropColumn::Extensions.width(),
                 Input::new(&self.extensions)
                     .small()
-                    .aria_label("Extensions"),
+                    .aria_label(localization::t("Extensions")),
             ))
             .child(cell(
                 FileDropColumn::Description.width(),
                 Input::new(&self.description)
                     .small()
-                    .aria_label("Description"),
+                    .aria_label(localization::t("Description")),
             ))
     }
 }
@@ -924,6 +955,9 @@ mod tests {
     /// order: the three the combination answers on its own, then the menu.
     #[test]
     fn a_shortcut_is_refused_the_way_upstream_refuses_it() {
+        // The sentences are translated as wholes, so the language is pinned
+        // here rather than left to whatever ran before.
+        let _language = localization::pin(localization::Language::English);
         // Tab moves the caret in a text view.
         let tab = Shortcut::parse("@\t").unwrap();
         assert_eq!(
@@ -947,6 +981,18 @@ mod tests {
         );
         // A combination nothing has is accepted.
         assert_eq!(shortcut_rejection(Shortcut::parse("^$k").unwrap()), None);
+    }
+
+    /// The Chinese side of the same refusal: the sentence is one key, so the
+    /// command's name is still the English identity and only the wording
+    /// around it changes.
+    #[test]
+    fn the_already_taken_sentence_translates_around_the_command_name() {
+        let _language = localization::pin(localization::Language::Chinese);
+        assert_eq!(
+            shortcut_rejection(Shortcut::parse("@s").unwrap()).as_deref(),
+            Some("“⌘\u{2009}S”已被“Save”命令使用。")
+        );
     }
 
     /// The check runs against the real key map, so it can only be as right as

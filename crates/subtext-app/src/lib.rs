@@ -42,6 +42,7 @@ pub mod find_panel;
 pub mod folder_find;
 pub mod highlighter;
 pub mod keymap;
+pub mod localization;
 pub mod menu;
 #[cfg(test)]
 mod menu_contract;
@@ -109,6 +110,10 @@ pub fn run() {
             let syntaxes = load_syntaxes(resources.as_ref());
             let themes = load_themes(resources.as_ref());
             let settings = Settings::load();
+            // The interface language, before anything is drawn. The menu bar
+            // is built below, so setting it here is what makes the very first
+            // frame read in the language the user last chose.
+            localization::set_language(settings.language);
 
             // The console exists for the life of the process: a script's
             // standard error is written to it whether or not its window is
@@ -189,9 +194,17 @@ fn open_main_window(
     settings: Settings,
     paths: Vec<PathBuf>,
 ) {
+    // Upstream's document window has no title bar of its own: the toolbar is
+    // drawn *in* the title bar row, with the traffic lights at its left and the
+    // file name centred, which is what `NSWindowStyleMaskFullSizeContentView`
+    // gives an AppKit window. `TitleBar::window_options` is the same style mask
+    // for GPUI — a transparent, hidden title, the controls inset by nine points
+    // — and `app_owns_titlebar_drag` hands dragging to the `TitleBar` this
+    // window renders, rather than letting AppKit also treat the row as a move
+    // region (which would delay every click in it by the double-click timeout).
     let options = WindowOptions {
         window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
-        ..Default::default()
+        ..gpui_kit::component::TitleBar::window_options()
     };
 
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {

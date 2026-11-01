@@ -16,6 +16,7 @@ use gpui_kit::{
     Context, FontWeight, IntoElement, ParentElement as _, Render, Styled as _, Window, div,
 };
 
+use crate::localization;
 use crate::resources::Resources;
 
 /// The version SubText reports.
@@ -43,7 +44,7 @@ impl Default for DonationView {
 
 impl Render for DonationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_window_title("Donation");
+        window.set_window_title(localization::t("Donation"));
 
         v_flex()
             .size_full()
@@ -79,20 +80,20 @@ impl Render for DonationView {
                     .pt_2()
                     .child(
                         Button::new("donation-app-store")
-                            .label("Open CotEditor in App Store")
+                            .label(localization::t("Open CotEditor in App Store"))
                             .on_click(|_, _, cx| {
                                 cx.open_url("https://apps.apple.com/app/id1024640650")
                             }),
                     )
                     .child(
                         Button::new("donation-sponsors")
-                            .label("Open GitHub Sponsors")
+                            .label(localization::t("Open GitHub Sponsors"))
                             .on_click(|_, _, cx| cx.open_url("https://github.com/sponsors/1024jp")),
                     ),
             )
             .child(
                 Button::new("close-donation")
-                    .label("Close")
+                    .label(localization::t("Close"))
                     .on_click(|_, window, _| window.remove_window()),
             )
     }
@@ -114,7 +115,7 @@ impl Default for AboutView {
 
 impl Render for AboutView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_window_title("About SubText");
+        window.set_window_title(localization::t("About SubText"));
 
         let resources = Resources::discover()
             .map(|resources| {
@@ -143,7 +144,7 @@ impl Render for AboutView {
                 div()
                     .text_xl()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("SubText"),
+                    .child(localization::t("SubText")),
             )
             .child(div().text_sm().child(format!("Version {VERSION}")))
             .child(
@@ -166,7 +167,7 @@ impl Render for AboutView {
             .child(
                 h_flex().gap_2().pt_2().child(
                     Button::new("close-about")
-                        .label("Close")
+                        .label(localization::t("Close"))
                         .on_click(|_, window, _| window.remove_window()),
                 ),
             )

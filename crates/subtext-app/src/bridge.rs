@@ -258,7 +258,10 @@ pub fn perform(
 /// [`run`] without the "is it mine" question, for the commands reached through a
 /// runtime menu item: the item exists because a workspace put it there, so the
 /// workspace it reaches is the one that wants it.
-fn tell(cx: &mut App, command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>)) {
+fn tell(
+    cx: &mut App,
+    command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
+) {
     run(cx, move |workspace, window, cx| {
         command(workspace, window, cx);
         true
@@ -277,7 +280,7 @@ fn tell(cx: &mut App, command: impl Fn(&mut Workspace, &mut Window, &mut Context
 /// see [`Workspaces`].
 fn run(
     cx: &mut App,
-    command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) -> bool,
+    command: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) -> bool + 'static,
 ) {
     let (mut workspaces, front) = cx
         .try_global::<Workspaces>()
@@ -301,16 +304,26 @@ fn run(
         workspaces.rotate_left(index);
     }
 
-    for (workspace, window) in workspaces {
-        let handled = window.update(cx, |_, window, cx| {
-            workspace
-                .update(cx, |workspace, cx| command(workspace, window, cx))
-                .is_ok()
-        });
-        if matches!(handled, Ok(true)) {
-            return;
+    // The action arrives while the window it belongs to is already being
+    // updated: a menu click and a key equivalent both reach a global handler
+    // from inside the window's dispatch, and `Window::dispatch_action` defers
+    // its own dispatch for the same reason. `AnyWindowHandle::update` refuses
+    // a window that is on the update stack — it reports "window not found" —
+    // so the command has to be run one effect-cycle later, after the window
+    // has been put back. Running it inline leaves every menu command dead
+    // without a word.
+    cx.defer(move |cx| {
+        for (workspace, window) in workspaces {
+            let handled = window.update(cx, |_, window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| command(workspace, window, cx))
+                    .is_ok()
+            });
+            if matches!(handled, Ok(true)) {
+                return;
+            }
         }
-    }
+    });
 }
 
 /// Register every action's global handler.

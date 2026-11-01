@@ -46,6 +46,7 @@ use gpui_kit::{
 use subtext_core::findresult::CELL_HEAD_OFFSET;
 use subtext_core::truncate_head_with_ranges;
 
+use crate::localization;
 use crate::settings::FIND_HISTORY_LIMIT;
 use crate::workspace::Workspace;
 
@@ -137,8 +138,10 @@ impl FindPanel {
                     .ghost()
                     .compact()
                     .icon(gpui_kit::assets::IconName::CircleQuestionMark)
-                    .accessibility_label("Show quick reference")
-                    .tooltip("Show quick reference for regular expression syntax."),
+                    .accessibility_label(localization::t("Show quick reference"))
+                    .tooltip(localization::t(
+                        "Show quick reference for regular expression syntax.",
+                    )),
             )
             .content(|_, _, cx| {
                 // The panel window is short, and a GPUI overlay cannot leave
@@ -163,8 +166,8 @@ impl FindPanel {
                     .ghost()
                     .compact()
                     .icon(gpui_kit::assets::IconName::CircleEllipsis)
-                    .accessibility_label("Advanced options")
-                    .tooltip("Show advanced options"),
+                    .accessibility_label(localization::t("Advanced options"))
+                    .tooltip(localization::t("Show advanced options")),
             )
             .content(move |_, _, cx| {
                 // Same window-bound limit as the quick reference.
@@ -208,7 +211,7 @@ impl Render for FindPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Upstream titles the panel's window itself, and it is the window's own
         // title bar that offers the close button.
-        window.set_window_title("Find & Replace");
+        window.set_window_title(localization::t("Find & Replace"));
         let Some(workspace) = self.workspace.upgrade() else {
             return div().into_any_element();
         };
@@ -245,7 +248,7 @@ impl Render for FindPanel {
                 .read(cx)
                 .replace_result_message()
                 .filter(|(_, text)| *text == replacement_value)
-                .map(|(count, _)| (format!("{count} replaced"), false))
+                .map(|(count, _)| (localization::tf("{} replaced", &[&count]), false))
         };
 
         v_flex()
@@ -397,8 +400,8 @@ impl FindPanel {
                             .ghost()
                             .compact()
                             .icon(gpui_kit::assets::IconName::ChevronUp)
-                            .accessibility_label("Close")
-                            .tooltip("Close find result.")
+                            .accessibility_label(localization::t("Close"))
+                            .tooltip(localization::t("Close find result."))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_document(cx, |workspace, _, cx| {
                                     workspace.close_find_results(cx);
@@ -417,7 +420,10 @@ impl FindPanel {
                             // open without one, so the fallback would be a
                             // spelling of "never" rather than a state a reader
                             // meets.
-                            .child(format!("Found {count} matches in “{document}.”")),
+                            .child(localization::tf(
+                                "Found {1} matches in “{2}.”",
+                                &[&count, &document],
+                            )),
                     ),
             )
             .child(
@@ -425,7 +431,7 @@ impl FindPanel {
                     .flex_none()
                     .text_sm()
                     .truncate()
-                    .child(format!("Find text: {query}")),
+                    .child(localization::tf("Find text: {}", &[&query])),
             )
             .child(
                 // The table is the section's scroll owner: the split item is
@@ -508,32 +514,41 @@ impl FindPanel {
                         let smaller = stop.clone();
                         let reset = stop.clone();
                         let size_menu = PopupMenu::build(window, cx, move |menu, _, _| {
-                            menu.item(PopupMenuItem::new("Bigger").on_click(move |_, _, cx| {
-                                bigger
-                                    .update(cx, |workspace, cx| {
-                                        workspace.step_find_result_font_size(true, cx);
-                                    })
-                                    .ok();
-                            }))
-                            .item(PopupMenuItem::new("Smaller").on_click(move |_, _, cx| {
-                                smaller
-                                    .update(cx, |workspace, cx| {
-                                        workspace.step_find_result_font_size(false, cx);
-                                    })
-                                    .ok();
-                            }))
-                            .separator()
-                            .item(
-                                PopupMenuItem::new("Reset to Default").on_click(move |_, _, cx| {
-                                    reset
+                            menu.item(PopupMenuItem::new(localization::t("Bigger")).on_click(
+                                move |_, _, cx| {
+                                    bigger
                                         .update(cx, |workspace, cx| {
-                                            workspace.reset_find_result_font_size(cx);
+                                            workspace.step_find_result_font_size(true, cx);
                                         })
                                         .ok();
-                                }),
+                                },
+                            ))
+                            .item(PopupMenuItem::new(localization::t("Smaller")).on_click(
+                                move |_, _, cx| {
+                                    smaller
+                                        .update(cx, |workspace, cx| {
+                                            workspace.step_find_result_font_size(false, cx);
+                                        })
+                                        .ok();
+                                },
+                            ))
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(localization::t("Reset to Default")).on_click(
+                                    move |_, _, cx| {
+                                        reset
+                                            .update(cx, |workspace, cx| {
+                                                workspace.reset_find_result_font_size(cx);
+                                            })
+                                            .ok();
+                                    },
+                                ),
                             )
                         });
-                        menu.item(PopupMenuItem::submenu("Text Size", size_menu))
+                        menu.item(PopupMenuItem::submenu(
+                            localization::t("Text Size"),
+                            size_menu,
+                        ))
                     })
                     .child(
                         DataTable::new(&self.table)
@@ -585,13 +600,13 @@ impl TableDelegate for FindResultTable {
             // Upstream's `TableColumn(..., value: \.range.location)` is the
             // only sortable column; the matched-text column carries no value
             // keypath and so does not sort.
-            0 => Column::new("line", "Line")
+            0 => Column::new("line", localization::t("Line"))
                 .width(px(LINE_COLUMN_WIDTH))
                 .min_width(px(LINE_COLUMN_WIDTH))
                 .max_width(px(LINE_COLUMN_MAX_WIDTH))
                 .text_right()
                 .sortable(),
-            _ => Column::new("matched-text", "Matched Text")
+            _ => Column::new("matched-text", localization::t("Matched Text"))
                 .width(self.matched_column_width)
                 .min_width(px(120.)),
         }
@@ -935,7 +950,7 @@ fn definition_list(
         div()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(cx.theme().secondary)
-            .child(title.to_string()),
+            .child(localization::t(title).to_string()),
     );
     for (term, description) in definitions {
         list = list.child(
@@ -946,7 +961,7 @@ fn definition_list(
                         .font_weight(FontWeight::MEDIUM)
                         .child(term.to_string()),
                 )
-                .child(div().child(description.to_string())),
+                .child(div().child(localization::t(description).to_string())),
         );
     }
     list
@@ -964,7 +979,7 @@ fn regular_expression_reference(cx: &App) -> gpui_kit::AnyElement {
             div()
                 .text_xl()
                 .font_weight(FontWeight::SEMIBOLD)
-                .child("Basic Regular Expression Syntax"),
+                .child(localization::t("Basic Regular Expression Syntax")),
         )
         .child(
             h_flex()
@@ -992,18 +1007,33 @@ fn regular_expression_reference(cx: &App) -> gpui_kit::AnyElement {
                         .child(definition_list("Back Reference", REGEX_BACK_REFERENCE, cx)),
                 ),
         )
-        .child(
+        .child({
+            // The sentence wraps a link, so it cannot be one `t()` call. English
+            // puts a space on either side of the link and Chinese puts none:
+            // the two fragments are translated separately and the spaces are
+            // added here, where the language is known.
+            let spaced = localization::language() == localization::Language::English;
+            let before = if spaced {
+                "The syntax conforms to "
+            } else {
+                localization::t("The syntax conforms to")
+            };
+            let after = if spaced {
+                " specifications."
+            } else {
+                localization::t("specifications.")
+            };
             h_flex()
                 .justify_end()
                 .text_color(secondary)
-                .child("The syntax conforms to the ")
+                .child(before)
                 .child(
                     gpui_kit::base::Link::new("regex-icu-link")
                         .href(icu_url)
-                        .child("ICU Regular Expressions"),
+                        .child(localization::t("ICU Regular Expressions")),
                 )
-                .child(" specifications."),
-        )
+                .child(after)
+        })
         .into_any_element()
 }
 
@@ -1049,8 +1079,14 @@ impl FindPanel {
             .unwrap_or_default();
         let workspace = self.workspace.clone();
         let (menu_title, clear_title) = match history {
-            FindField::Query => ("Recent Searches", "Clear Recent Searches"),
-            FindField::Replacement => ("Recent Replacements", "Clear Recent Replacements"),
+            FindField::Query => (
+                localization::t("Recent Searches"),
+                localization::t("Clear Recent Searches"),
+            ),
+            FindField::Replacement => (
+                localization::t("Recent Replacements"),
+                localization::t("Clear Recent Replacements"),
+            ),
         };
 
         div()
@@ -1095,8 +1131,8 @@ impl FindPanel {
                                             .ghost()
                                             .compact()
                                             .icon(gpui_kit::assets::IconName::CircleX)
-                                            .accessibility_label("Clear")
-                                            .tooltip("Clear the field.")
+                                            .accessibility_label(localization::t("Clear"))
+                                            .tooltip(localization::t("Clear the field."))
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 state.update(cx, |state, cx| {
                                                     state.set_value("", window, cx);
@@ -1196,8 +1232,8 @@ impl FindPanel {
                     .button(
                         Button::new("find-all")
                             .small()
-                            .label("Find All")
-                            .tooltip("Find and list all matches.")
+                            .label(localization::t("Find All"))
+                            .tooltip(localization::t("Find and list all matches."))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_document(cx, |workspace, _window, cx| {
                                     workspace.find_all(cx)
@@ -1210,31 +1246,35 @@ impl FindPanel {
                     .dropdown_menu(move |menu, _, _| {
                         let highlight = menu_workspace.clone();
                         menu.item(
-                            PopupMenuItem::new("Highlight All").on_click(move |_, _, cx| {
-                                highlight
-                                    .update(cx, |workspace, cx| workspace.highlight_all(cx))
-                                    .ok();
-                            }),
+                            PopupMenuItem::new(localization::t("Highlight All")).on_click(
+                                move |_, _, cx| {
+                                    highlight
+                                        .update(cx, |workspace, cx| workspace.highlight_all(cx))
+                                        .ok();
+                                },
+                            ),
                         )
                         .item({
                             // Upstream's `selectAllMatches`: every match becomes
                             // a selection, which the editor can hold several of.
                             let select = menu_workspace.clone();
-                            PopupMenuItem::new("Select All").on_click(move |_, _, cx| {
-                                select
-                                    .update(cx, |workspace, cx| {
-                                        workspace.select_all_find_matches(cx)
-                                    })
-                                    .ok();
-                            })
+                            PopupMenuItem::new(localization::t("Select All")).on_click(
+                                move |_, _, cx| {
+                                    select
+                                        .update(cx, |workspace, cx| {
+                                            workspace.select_all_find_matches(cx)
+                                        })
+                                        .ok();
+                                },
+                            )
                         })
                     }),
             )
             .child(
                 Button::new("replace-all")
                     .small()
-                    .label("Replace All")
-                    .tooltip("Replace all matches with the replacement text.")
+                    .label(localization::t("Replace All"))
+                    .tooltip(localization::t("Replace all matches with the replacement text."))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.on_document(cx, |workspace, window, cx| {
                             workspace.replace_all(window, cx)
@@ -1245,8 +1285,8 @@ impl FindPanel {
             .child(
                 Button::new("replace")
                     .small()
-                    .label("Replace")
-                    .tooltip("Replace the current selection with the replacement text, then find the next match.")
+                    .label(localization::t("Replace"))
+                    .tooltip(localization::t("Replace the current selection with the replacement text, then find the next match."))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.on_document(cx, |workspace, window, cx| {
                             workspace.replace_and_find_next(window, cx)
@@ -1262,8 +1302,8 @@ impl FindPanel {
                         Button::new("find-previous")
                             .small()
                             .icon(gpui_kit::assets::IconName::ChevronLeft)
-                            .accessibility_label("Find Previous")
-                            .tooltip("Find previous match.")
+                            .accessibility_label(localization::t("Find Previous"))
+                            .tooltip(localization::t("Find previous match."))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.on_document(cx, |workspace, _window, cx| {
                                     workspace.find_step(false, cx)
@@ -1274,8 +1314,8 @@ impl FindPanel {
                         Button::new("find-next")
                             .small()
                             .icon(gpui_kit::assets::IconName::ChevronRight)
-                            .accessibility_label("Find Next")
-                            .tooltip("Find next match.")
+                            .accessibility_label(localization::t("Find Next"))
+                            .tooltip(localization::t("Find next match."))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.on_document(cx, |workspace, _window, cx| {
                                     workspace.find_step(true, cx)
@@ -1319,7 +1359,7 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
             div()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(cx.theme().secondary)
-                .child("Advanced Find Options"),
+                .child(localization::t("Advanced Find Options")),
         )
         .child(
             v_flex()
@@ -1327,7 +1367,7 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
                 .child(
                     advanced_toggle(
                         "find-adv-wrap",
-                        "Wrap search around",
+                        localization::t("Wrap search around"),
                         wrap,
                         "",
                         weak.clone(),
@@ -1337,7 +1377,7 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
                 .child(
                     advanced_toggle(
                         "find-adv-incremental",
-                        "Search incrementally",
+                        localization::t("Search incrementally"),
                         incremental,
                         "",
                         weak.clone(),
@@ -1350,40 +1390,44 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
         .child(
             v_flex()
                 .gap_2()
-                .child(header("Textual Search"))
+                .child(header(localization::t("Textual Search")))
                 .child(advanced_toggle(
                     "find-adv-whole-word",
-                    "Match only whole words",
+                    localization::t("Match only whole words"),
                     whole_word,
-                    "Restrict search results to whole words.",
+                    localization::t("Restrict search results to whole words."),
                     weak.clone(),
                         |workspace, on| workspace.settings.find_whole_word = on,
                 ))
                 .child(disabled_toggle(
                     "find-adv-strict",
-                    "Distinguish characters strictly",
-                    "The regex engine has no strict character-equivalence mode.",
+                    localization::t("Distinguish characters strictly"),
+                    localization::t(
+                        "The regex engine has no strict character-equivalence mode.",
+                    ),
                 ))
                 .child(disabled_toggle(
                     "find-adv-diacritics",
-                    "Ignore diacritical marks",
-                    "The regex engine cannot ignore diacritical marks.",
+                    localization::t("Ignore diacritical marks"),
+                    localization::t("The regex engine cannot ignore diacritical marks."),
                 ))
                 .child(disabled_toggle(
                     "find-adv-width",
-                    "Ignore width differences",
-                    "The regex engine cannot ignore character width.",
+                    localization::t("Ignore width differences"),
+                    localization::t("The regex engine cannot ignore character width."),
                 )),
         )
         .child(
             v_flex()
                 .gap_2()
-                .child(header("Regular Expression Search"))
+                .child(header(localization::t("Regular Expression Search")))
                 .child(advanced_toggle(
                     "find-adv-singleline",
-                    "Dot matches line separators",
+                    localization::t("Dot matches line separators"),
                     singleline,
-                    "Allow . to match any character, including newline characters (singleline).",
+                    localization::t(
+                        "Allow . to match any character, including newline characters (singleline).",
+                    ),
                     weak.clone(),
                     |workspace, on| {
                         workspace.settings.find_regex_is_singleline = on
@@ -1391,9 +1435,9 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
                 ))
                 .child(advanced_toggle(
                     "find-adv-multiline",
-                    "Anchors match lines",
+                    localization::t("Anchors match lines"),
                     multiline,
-                    "Allow ^ and $ to match the start and end of lines (multiline).",
+                    localization::t("Allow ^ and $ to match the start and end of lines (multiline)."),
                     weak.clone(),
                     |workspace, on| {
                         workspace.settings.find_regex_is_multiline = on
@@ -1401,14 +1445,16 @@ fn advanced_find_options(workspace: &WeakEntity<Workspace>, cx: &App) -> gpui_ki
                 ))
                 .child(disabled_toggle(
                     "find-adv-boundaries",
-                    "Use Unicode word boundaries",
-                    "The engine's \\b is already Unicode-aware; TR#29 boundaries are not implemented.",
+                    localization::t("Use Unicode word boundaries"),
+                    localization::t(
+                        "The engine's \\b is already Unicode-aware; TR#29 boundaries are not implemented.",
+                    ),
                 ))
                 .child(advanced_toggle(
                     "find-adv-unescape",
-                    "Unescape replacement text",
+                    localization::t("Unescape replacement text"),
                     unescape,
-                    "Unescape metacharacters with backslash in replacement text.",
+                    localization::t("Unescape metacharacters with backslash in replacement text."),
                     weak.clone(),
                     |workspace, on| {
                         workspace.settings.find_regex_unescapes_replacement = on
@@ -1465,7 +1511,7 @@ fn result_message(count: usize, current: usize, error: Option<&str>) -> Option<(
     match error {
         Some(error) => Some((error.to_string(), true)),
         None if count > 0 && current > 0 => Some((format!("{current}/{count}"), false)),
-        None if count > 0 => Some((format!("{count} matches"), false)),
+        None if count > 0 => Some((localization::tf("{} matches", &[&count]), false)),
         None => None,
     }
 }
@@ -1506,7 +1552,7 @@ fn options_row(
         .items_center()
         .child(switch(
             "find-regex",
-            "Regular Expression",
+            localization::t("Regular Expression"),
             regex,
             |workspace, on| {
                 workspace.settings.find_regex = on;
@@ -1515,7 +1561,7 @@ fn options_row(
         .child(regex_reference)
         .child(switch(
             "find-case",
-            "Ignore Case",
+            localization::t("Ignore Case"),
             !case_sensitive,
             |workspace, on| {
                 workspace.settings.find_case_sensitive = !on;
@@ -1523,7 +1569,7 @@ fn options_row(
         ))
         .child(switch(
             "find-in-selection",
-            "In Selection",
+            localization::t("In Selection"),
             in_selection,
             |workspace, on| {
                 workspace.settings.find_in_selection = on;
@@ -1539,6 +1585,7 @@ mod tests {
         append_unique_history, apply_row_selection, highlighter_colors, hsb_components_to_hsl,
         result_message,
     };
+    use crate::localization;
     use crate::settings::FIND_HISTORY_LIMIT;
 
     #[test]
@@ -1691,6 +1738,9 @@ mod tests {
 
     #[test]
     fn a_count_with_no_current_match_is_a_plain_count() {
+        // The sentence is translated as a whole, so the language is pinned here
+        // rather than left to whatever ran before.
+        let _language = localization::pin(localization::Language::English);
         assert_eq!(
             result_message(3, 0, None),
             Some(("3 matches".to_string(), false))

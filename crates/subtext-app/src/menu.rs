@@ -31,18 +31,18 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
         Menu {
             name: "SubText".into(),
             items: vec![
-                MenuItem::action("About CotEditor", actions::app::ShowAboutPanel),
-                MenuItem::action("Donate to CotEditor…", actions::app::ShowDonationWindow),
+                MenuItem::action("About SubText", actions::app::ShowAboutPanel),
+                MenuItem::action("Donate to SubText…", actions::app::ShowDonationWindow),
                 MenuItem::separator(),
                 MenuItem::action("Settings…", actions::app::ShowSettingsWindow),
                 MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action("Hide CotEditor", actions::app::Hide),
+                MenuItem::action("Hide SubText", actions::app::Hide),
                 MenuItem::action("Hide Others", actions::app::HideOtherApplications),
                 MenuItem::action("Show All", actions::app::UnhideAllApplications),
                 MenuItem::separator(),
-                MenuItem::action("Quit CotEditor", actions::app::Terminate),
+                MenuItem::action("Quit SubText", actions::app::Terminate),
             ],
             disabled: false,
         },
@@ -551,9 +551,9 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
         Menu {
             name: "Help".into(),
             items: vec![
-                MenuItem::action("CotEditor Help", actions::help::ShowHelp),
+                MenuItem::action("SubText Help", actions::help::ShowHelp),
                 MenuItem::submenu(Menu {
-                    name: "CotEditor Scripting Guide".into(),
+                    name: "SubText Scripting Guide".into(),
                     items: vec![
                         MenuItem::action("About Scripting", actions::help::OpenHelpAnchor),
                         MenuItem::action(
@@ -564,12 +564,12 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                     disabled: false,
                 }),
                 MenuItem::separator(),
-                MenuItem::action("What’s New in CotEditor", actions::app::ShowWhatsNew),
+                MenuItem::action("What’s New in SubText", actions::app::ShowWhatsNew),
                 MenuItem::action("Release Notes", actions::help::OpenHelpAnchor),
                 MenuItem::separator(),
                 MenuItem::action("Create Issue Report", actions::help::CreateBugReport),
                 MenuItem::action("Report Issue", actions::help::ReportBug),
-                MenuItem::action("CotEditor Web Site", actions::help::OpenWebSite),
+                MenuItem::action("SubText Web Site", actions::help::OpenWebSite),
             ],
             disabled: false,
         },
@@ -601,9 +601,10 @@ pub struct Command {
 
 /// The name the application menu is shown under.
 ///
-/// A command's path is spelled with the source application's name so that
-/// it matches [`crate::keymap::SHORTCUTS`]; this is what a display has to
-/// substitute for it.
+/// The generator translates upstream's name to this one in every title
+/// and in every command path, so the menu bar, the Quick Actions bar and
+/// the Key Bindings pane all show the application the user is in rather
+/// than the one the storyboard was copied from.
 pub const APP_MENU_TITLE: &str = "SubText";
 
 /// Every command the storyboard names, in menu order.
@@ -615,31 +616,31 @@ pub const APP_MENU_TITLE: &str = "SubText";
 /// by a test.
 pub const COMMANDS: &[Command] = &[
     Command {
-        path: "CotEditor > About CotEditor",
+        path: "SubText > About SubText",
         action: "ShowAboutPanel",
     },
     Command {
-        path: "CotEditor > Donate to CotEditor…",
+        path: "SubText > Donate to SubText…",
         action: "ShowDonationWindow",
     },
     Command {
-        path: "CotEditor > Settings…",
+        path: "SubText > Settings…",
         action: "ShowSettingsWindow",
     },
     Command {
-        path: "CotEditor > Hide CotEditor",
+        path: "SubText > Hide SubText",
         action: "Hide",
     },
     Command {
-        path: "CotEditor > Hide Others",
+        path: "SubText > Hide Others",
         action: "HideOtherApplications",
     },
     Command {
-        path: "CotEditor > Show All",
+        path: "SubText > Show All",
         action: "UnhideAllApplications",
     },
     Command {
-        path: "CotEditor > Quit CotEditor",
+        path: "SubText > Quit SubText",
         action: "Terminate",
     },
     Command {
@@ -1255,19 +1256,19 @@ pub const COMMANDS: &[Command] = &[
         action: "ShowConsolePanel",
     },
     Command {
-        path: "Help > CotEditor Help",
+        path: "Help > SubText Help",
         action: "ShowHelp",
     },
     Command {
-        path: "Help > CotEditor Scripting Guide > About Scripting",
+        path: "Help > SubText Scripting Guide > About Scripting",
         action: "OpenHelpAnchor",
     },
     Command {
-        path: "Help > CotEditor Scripting Guide > AppleScript Dictionary",
+        path: "Help > SubText Scripting Guide > AppleScript Dictionary",
         action: "OpenAppleScriptDictionary",
     },
     Command {
-        path: "Help > What’s New in CotEditor",
+        path: "Help > What’s New in SubText",
         action: "ShowWhatsNew",
     },
     Command {
@@ -1283,7 +1284,7 @@ pub const COMMANDS: &[Command] = &[
         action: "ReportBug",
     },
     Command {
-        path: "Help > CotEditor Web Site",
+        path: "Help > SubText Web Site",
         action: "OpenWebSite",
     },
 ];

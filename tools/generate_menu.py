@@ -283,6 +283,19 @@ def modifier_words(mods: list[str], character: str) -> str:
     return " ".join(name for name in DISPLAY_ORDER if name in wanted)
 
 
+def rebrand(text: str) -> str:
+    """The name this application shows for itself in its own menu bar.
+
+    The table is a transcript of CotEditor's storyboard and stays one, but the
+    bar it renders into is ours: an item that says "Quit CotEditor" while it
+    quits SubText is simply wrong, and so is a Help item that opens SubText's
+    repository under CotEditor's name. Only display strings are translated —
+    the paths used to look up the storyboard's structure keep the source name,
+    so a regeneration still finds every row.
+    """
+    return text.replace(SOURCE_APP_MENU_TITLE, APP_MENU_TITLE)
+
+
 def item_key(path: str, title: str) -> str:
     """The chain an entry's own children would sit under."""
     if path == "":
@@ -313,7 +326,7 @@ class Renderer:
         inner = " " * (indent + 4)
         items = self.children.get(path_key, [])
         lines = [f"{pad}Menu {{"]
-        lines.append(f"{inner}name: {rust_string(name)}.into(),")
+        lines.append(f"{inner}name: {rust_string(rebrand(name))}.into(),")
         lines.append(f"{inner}items: vec![")
         for entry in items:
             lines.extend(self.render_item(entry, indent + 8))
@@ -335,7 +348,7 @@ class Renderer:
             key = item_key(entry["path"], title)
             lines = [f"{pad}MenuItem::submenu(Menu {{"]
             inner = " " * (indent + 4)
-            lines.append(f"{inner}name: {rust_string(title)}.into(),")
+            lines.append(f"{inner}name: {rust_string(rebrand(title))}.into(),")
             lines.append(f"{inner}items: vec![")
             for child in self.children.get(key, []):
                 lines.extend(self.render_item(child, indent + 8))
@@ -351,7 +364,7 @@ class Renderer:
             # runtime replaces. Not an action, so it is not counted as one.
             return [
                 f"{pad}MenuItem::submenu(Menu {{",
-                f"{pad}    name: {rust_string(title)}.into(),",
+                f"{pad}    name: {rust_string(rebrand(title))}.into(),",
                 f"{pad}    items: vec![],",
                 f"{pad}    disabled: true,",
                 f"{pad}}}),",
@@ -372,7 +385,7 @@ class Renderer:
             # greyed, exactly as they are in CotEditor when nothing supplies
             # them.
             return [
-                f"{pad}MenuItem::action({rust_string(title)}, actions::app::NoOp).disabled(true),"
+                f"{pad}MenuItem::action({rust_string(rebrand(title))}, actions::app::NoOp).disabled(true),"
             ]
 
         namespace = self.namespaces.get(name)
@@ -381,7 +394,7 @@ class Renderer:
         gate = GATED_ACTIONS.get(name)
         suffix = f".disabled({gate})" if gate else ""
         return [
-            f"{pad}MenuItem::action({rust_string(title)}, "
+            f"{pad}MenuItem::action({rust_string(rebrand(title))}, "
             f"actions::{namespace}::{name}){suffix},"
         ]
 
@@ -576,9 +589,10 @@ class Renderer:
             "",
             "/// The name the application menu is shown under.",
             "///",
-            "/// A command's path is spelled with the source application's name so that",
-            "/// it matches [`crate::keymap::SHORTCUTS`]; this is what a display has to",
-            "/// substitute for it.",
+            "/// The generator translates upstream's name to this one in every title",
+            "/// and in every command path, so the menu bar, the Quick Actions bar and",
+            "/// the Key Bindings pane all show the application the user is in rather",
+            "/// than the one the storyboard was copied from.",
             f"pub const APP_MENU_TITLE: &str = {rust_string(APP_MENU_TITLE)};",
             "",
             "/// Every command the storyboard names, in menu order.",
@@ -591,7 +605,7 @@ class Renderer:
             "pub const COMMANDS: &[Command] = &[",
         ]
         for entry in rows:
-            path = rust_string(item_key(entry["path"], entry["title"]))
+            path = rust_string(rebrand(item_key(entry["path"], entry["title"])))
             action = rust_string(action_for(entry))
             one_line = f"    Command {{ path: {path}, action: {action} }},"
             # Wrapped the way rustfmt would wrap it, so a regeneration does not
@@ -676,7 +690,7 @@ class Renderer:
             if namespace is None:
                 fail(f"no action named {name} for {entry['action']!r}")
             binding = binding_string(entry["mods"], entry["key"])
-            label = f"{entry['path']} > {entry['title']}"
+            label = rebrand(f"{entry['path']} > {entry['title']}")
             if binding in seen:
                 collisions.append((binding, seen[binding], label))
             else:
@@ -715,7 +729,7 @@ class Renderer:
         lines.append("/// would be a second thing to get wrong.")
         lines.append("pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[")
         for entry in rows:
-            label = f"{entry['path']} > {entry['title']}"
+            label = rebrand(f"{entry['path']} > {entry['title']}")
             lines.append(
                 "    ("
                 f"{rust_string(label)}, "

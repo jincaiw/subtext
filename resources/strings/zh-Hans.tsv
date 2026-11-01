@@ -1,0 +1,860 @@
+# SubText 简体中文界面字符串 / Simplified Chinese interface strings.
+#
+# One entry per line: the English string, a tab, the Chinese string.
+# The English side is the key: it is the string the source already
+# holds, so adding a translation never changes a call site. Lines
+# beginning with # are comments, and a blank line is ignored.
+#
+# Most of the interface half was taken from CotEditor's own Simplified
+# Chinese resources: its storyboard joined with `Main.strings` for the
+# menu bar, and the `.xcstrings` String Catalogs under
+# `CotEditor/Localizables/` for everything else (the document inspector,
+# the settings panes, the sheets). Either way the wording is upstream's
+# rather than a machine's. "CotEditor" is replaced by "SubText" throughout;
+# no other wording was changed.
+-	-
+2	2
+4	4
+8	8
+About Scripting	关于脚本
+About SubText	关于 SubText
+Add	添加
+Add a space to comment delimiters	在注释符号后追加空格
+Advanced Character Count…	高级字符计数…
+All	全部
+Allow editing the document	允许编辑文稿
+Always	总是
+Antialias	抗锯齿
+Antialias text	抗锯齿
+Appearance	外观
+Appearance:	外观：
+AppleScript Dictionary	AppleScript词典
+Ask how to update	询问如何更新
+Automatically	自动
+Automatically indent while typing	键入时自动缩进
+Automatically trim trailing whitespace	自动去除末尾空格
+Available syntaxes:	可用的语法：
+Bigger	调大
+Block Comment	块注释
+Braces	大括号
+Brackets	方括号
+Bring All to Front	前置全部窗口
+Cancel	取消
+Capitalize	首字母大写
+Change background color	改变背景颜色
+Change Font	更换字体
+Change syntax	改变语法
+Character count	字符数
+Characters	字符
+Check Document Now	立即检查文稿
+Check for updates automatically	自动检查更新
+Check grammar with spelling	检查拼写和语法
+Check Grammar With Spelling	检查拼写和语法
+Check spelling while typing	键入时检查拼写
+Check Spelling While Typing	键入时检查拼写
+Chinese	简体中文
+Clear Menu	清除菜单
+Close	关闭
+Close split editor	关闭分屏编辑器
+Close Split Editor	关闭分栏显示
+Close tab	关闭标签页
+Column	列
+Command	命令
+Comment	注释
+Comment-out or uncomment selection	将选中内容注释或取消注释
+Complete	联想
+Completion:	补全：
+Console	控制台
+Content parse	内容解析
+Convert Alphanumeric Text to Full Width	将字母数字转换为全角
+Convert Alphanumeric Text to Half Width	将字母数字转换为半角
+Convert Indentation to Spaces	将缩进转换为空格
+Convert Indentation to Tabs	将缩进转换为制表符
+Convert to Full Width	转换为全角
+Convert to Half Width	转换为半角
+Copy	拷贝
+Copy as Rich Text	以多信息文本拷贝
+Copy File Path	拷贝文件路径
+Copy Path	拷贝路径
+Correct spelling automatically	自动纠正拼写
+Correct Spelling Automatically	自动纠正拼写
+CR	CR
+Create Issue Report	创建问题报告
+Create New Document	创建新文稿
+CRLF	CRLF
+Current column	当前列
+Current line	当前行
+Current line:	当前行：
+Customize Encodings List…	自定编码列表…
+Customize Syntax Menu…	自定语法菜单…
+Customize Toolbar…	自定义工具栏…
+Customized Syntaxes	自定义语法
+Custom…	自定义…
+Cut	剪切
+Dark	深色
+Decrease text size	缩小文字大小
+Default line endings, encoding and syntax.	默认行尾、文本编码与语法。
+Default line endings:	默认行尾：
+Default syntax:	默认语法：
+Default text encoding:	默认文本编码：
+Delay:	延迟：
+Delete	删除
+Delete Duplicates	删除重复
+Delete Line	删除行
+Description	描述
+Detect indent style on document opening	在打开文稿时检测缩进格式
+Dialog warnings	对话框警告
+Direction	方向
+Do Nothing	不执行任何操作
+Document Inspector	文稿信息
+Document save	文稿保存
+Donate to SubText…	为 SubText 捐赠…
+Done	完成
+Don’t Save	不保存
+Double Quotes	双引号
+Duplicate Line	复制行
+Edit	编辑
+Edit Color Code…	编辑颜色代码…
+Edit List…	编辑列表…
+Edit Snippets…	编辑代码片段…
+Edited	已编辑
+Editor opacity:	编辑器透明度：
+Emoji & Symbols	表情与符号
+Enable Auto Save with Versions	开启带有版本的自动保存
+Encoding priorities:	编码优先级：
+English	English
+Enter Full Screen	进入全屏幕
+Every menu command's key equivalent.	每个菜单命令的等效按键。
+Every menu command’s key equivalent.	每个菜单命令的等效按键。
+Export…	导出…
+Extensions	扩展名
+File	文件
+File Browser	文件浏览器
+File Drop	文件拖拽
+File extensions of dropped file (comma-separated).	拖拽文件的文件扩展名（逗号分隔）。
+Find	查找
+Find All	全部查找
+Find Next	查找下一个
+Find Previous	查找上一个
+Find…	查找…
+Flexible Space	弹性间距
+Folder Find	文件夹查找
+Font	字体
+Font Type	字体类型
+Font:	字体：
+Fonts	字体
+Fonts, line height and editor opacity.	字体、行高与编辑器不透明度。
+Format	格式
+General	通用
+Go to Line…	跳转到行…
+Height	高度
+Help	帮助
+Hide indentation guides	隐藏缩进指示线
+Hide indent guide lines	隐藏缩进指示线
+Hide invisible characters	隐藏不可见元素
+Hide Others	隐藏其他
+Hide SubText	隐藏 SubText
+Hide the inspector	隐藏检查器
+Hide the navigation bar	隐藏导航栏
+Hide the sidebar	隐藏边栏
+Hide Toolbar	隐藏工具栏
+Highlight All	全部高亮
+Highlight instances of selected text	高亮选中文本
+Highlight matching braces	高亮配对括号
+Horizontal	横排
+Image File	图像文件
+Import…	导入…
+Including whitespace-only lines	包含只有空格的行
+Increase text size	增加文字大小
+Indent	缩进
+Indent Guides	缩进指示
+Indent guides	缩进指示
+Indent selection with Tab key	使用 Tab 键对选择进行缩进
+Indent width:	以
+Indent wrapped lines by	自动换行缩进字符数：
+Indentation	缩进
+Indentation, whitespace and content parsing.	缩进、空白字符与内容解析。
+Inline Comment	行注释
+Insert Backslash	输入反斜杠
+Insert by Unicode Code Point…	用Unicode输入…
+Insert comment delimiters after indent	在缩进后插入注释符号
+Insert from iPhone or iPad	从iPhone或iPad插入
+Insert Snippet	插入片段
+Insert Variable	插入变量
+Insert Yen Mark	输入日元符号
+Insertion format:	按格式插入：
+Inspect Character	检视文字
+Inspector	检查器
+Integration	集成
+Interface language	界面语言
+Invisible characters	不可见元素
+Invisibles	不可见元素
+Join Lines	连接行
+Jump to Selection	跳到所选内容
+Keep on Top	保留在顶部
+Keep the version in SubText	保留 SubText 的版本
+Keep the window always on top	保持窗口在最前
+Keep the window on top	保持窗口在最前
+Key	按键
+Language	语言
+Left to right	从左到右
+Left to Right	从左到右
+LF	LF
+Ligatures	连字
+Light	浅色
+Line	行
+Line count	行数
+Line ending	行尾
+Line Endings	行尾
+Line height:	行高：
+Line numbers	行号
+Line Wrapping	换行
+Line wrapping:	换行：
+Lines	行
+Link URLs in document	链接文稿中的 URL
+Location	位置
+Main Menu	主菜单
+Make Lower Case	变为小写
+Make Upper Case	变为大写
+Manage Multiple Replace…	管理多重替换…
+Manage Warnings…	管理警告…
+Match the system	匹配系统
+Minimize	最小化
+Mode	模式
+Monospaced	等宽
+Monospaced font:	等宽字体：
+Move Down	下移
+Move Focus to Next Editor	将焦点移至下一个编辑器
+Move Focus to Previous Editor	将焦点移至上一个编辑器
+Move Up	上移
+Multiple Replace	多重替换
+# Upstream spells this two ways: `SnippetsSettings.xcstrings` says 名字 for the
+# snippets table's column, while `Document.xcstrings` and `FileScopeEditor`
+# say 名称 for the inspector's row and the file scope's field. The English side
+# is the key, so one row has to answer for both; 名称 is macOS's own word for a
+# `Name` field, and it is the one three of the four call sites want.
+Name	名称
+Never	永不
+New	新建
+New Document	新建文稿
+New Tab	新建标签页
+New Window	新建窗口
+None	无
+Not found	未找到
+OK	好
+On startup	启动时
+Opaque	不透明
+Open documents in tabs:	在标签页中打开文稿：
+Open in New Tab	在新标签页中打开
+Open Outline Menu	打开大纲菜单
+Open Recent	打开最近使用
+Open…	打开…
+Options	选项
+Orientation	方位
+Other control characters	其他控制字符
+Other whitespace	其他空白字符
+Outline	大纲
+Page guide at column:	列位置页面指示：
+Page Setup…	页面设置…
+Parentheses	圆括号
+Paste	粘贴
+Paste Exactly	精确粘贴
+Per-syntax editing behaviour.	按语法区分的编辑行为。
+Prefer using:	偏好使用：
+Prevent Editing	防止编辑
+Prevent the document from being edited	防止文稿被编辑
+Print	打印
+Print the document	打印文稿
+Print…	打印…
+Quit SubText	退出 SubText
+Redo	重做
+Refer to encoding declaration in document	参考文稿中的编码声明
+Release Notes	发布说明
+Reload All Syntaxes	重载全部语法
+Remove Highlights	移除高亮标记
+Reopen windows from last session	重新打开上次会话的窗口
+Replace	替换
+Replace All	全部替换
+Replace and Find Next	替换并查找下一个
+Replace Dashes	替换破折号
+Replace Quotes	替换引号
+Replace Text	替换文本
+Report Issue	报告问题
+Reset Syntax Analysis	重置语法分析
+Reset to Default	重置
+Respect System Setting	使用系统设定
+Reverse	逆向排序
+Revert to Saved	复原到已存版本
+Right to left	从右到左
+Right to Left	从右到左
+Save	保存
+Save As…	保存为…
+Script	脚本
+Select	选择
+Select All	全选
+Separator	分隔线
+Select All Find Matches	选择全部查找到的匹配
+Select Column Down	选择下一列
+Select Column Up	选择上一列
+Select Enclosing Symbols	选择被括住的上下文区段
+Select Line	选择行
+Select Next Outline Item	选择下一个大纲项目
+Select Previous Outline Item	选择上一个大纲项目
+Select Word	选择单词
+Services	服务
+Settings	设置
+Settings import & export	设置导入与导出
+Settings…	设置…
+Share	共享
+Share document file	共享文稿文件
+Share…	共享…
+Shift Left	左移
+Shift lines to the left	将选中行左移
+Shift lines to the right	将选中行右移
+Shift Right	右移
+Shortcuts	快捷指令
+Show All	全部显示
+Show Emoji & Symbols	显示表情与符号
+Show File Mapping Conflicts	显示文件映射冲突
+Show Find & Replace	显示查找和替换
+Show Fonts	显示字体
+Show in Finder	在访达中显示
+Show Indent Guides	显示缩进指示
+Show indentation guides	显示缩进指示线
+Show indent guide lines	显示缩进指示线
+Show Inspector	显示检查器
+Show invisible characters	显示不可见元素
+Show Invisibles	显示不可见元素
+Show Line Numbers	显示行号
+Show Navigation Bar	显示导航栏
+Show Open Dialog	显示打开对话框
+Show options	显示选项
+Show Page Guide	显示页面指示
+Show Quick Actions…	显示快速操作…
+Show Sidebar	显示边栏
+Show spelling and grammar	显示拼写和语法
+Show Spelling and Grammar	显示拼写和语法
+Show Status Bar	显示状态栏
+Show Substitutions	显示替换
+Show Tab Bar	显示标签页栏
+Show the inspector	显示检查器
+Show the navigation bar	显示导航栏
+Show the sidebar	显示边栏
+Show the Unicode block name	显示 Unicode 区块名称
+Show:	显示：
+Shuffle	随机排列
+Sidebar	边栏
+Single Quotes	单引号
+Smaller	调小
+Smart copy/paste	智能拷贝/粘贴
+Smart Copy/Paste	智能拷贝/粘贴
+Smart dashes	智能破折号
+Smart Dashes	智能破折号
+Smart quotes	智能引号
+Smart Quotes	智能引号
+Snippets	代码片段
+Software update	软件更新
+Sort	排序
+Sort by Pattern…	按模式排序…
+Space	空格
+Spaces	空格
+Speech	语音
+Spell Check	拼写检查
+Spelling	拼写
+Spelling and Grammar	拼写和语法
+Spelling:	拼写：
+Split Editor	分栏显示
+Split Selection by Lines	按行分割选区
+Stack Editors Horizontally	横向分隔编辑器
+Stack Editors Vertically	纵向分栏显示
+Standard	标准
+Standard font:	标准字体：
+Standard words	标准单词
+Start Speaking	开始朗读
+Startup, saving and updates.	启动、保存与更新。
+Status bar shows:	状态栏显示：
+Status bar:	状态栏：
+Stop Speaking	停止朗读
+Stop Count	停止计数
+Straighten Quotes	直引号
+Substitution:	替换：
+Substitutions	替换
+SubText	SubText
+SubText Help	SubText 帮助
+SubText Scripting Guide	SubText 脚本指南
+SubText Web Site	SubText 网站
+Suggest completions while typing	键入时提供补齐建议
+Surround Selection With	将选择进行环绕
+Syntax	语法
+Syntax in which this file drop setting is used.	应用此文件拖放设置的语法。
+System monospaced	系统等宽字体
+Tab	制表符
+Tab Style	Tab 样式
+Tab width	制表符宽度
+Tab Width	制表符宽度
+Tabs	制表符
+Text	文本
+Text Encoding	文本编码
+Text File	文本文件
+Text inserted by commands and shortcuts.	由命令和快捷键插入的文本。
+Text Orientation	文字方向
+Text replacement	文本替换
+Text Replacement	文本替换
+Text Size	文字大小
+Text to be inserted by a command in the menu or by keyboard shortcut:	通过菜单命令或键盘快捷键插入的文本：
+Text to be inserted by dropping files to the editor:	通过将文件拖放到编辑器插入的文本：
+Text to insert when a file is dropped	拖放文件时要插入的文本
+Text to insert, with <<<SELECTION>>> and <<<CURSOR>>> in it	要插入的文本，可使用 <<<SELECTION>>> 和 <<<CURSOR>>>
+The command-line tool and remote editing.	命令行工具与远程编辑。
+Theme	主题
+This syntax does not exist	此语法不存在
+This syntax is customized.	该语法已被自定义。
+Tinted	色调
+To change a shortcut, click the key column, then type the new keys.	通过点击“键”列，并输入新的键来修改快捷键。
+Toggle Comment	切换注释
+Transformations	转换
+Trim Trailing Whitespace	移除行尾空白
+Uncomment	取消注释
+Undo	撤销
+Unicode Normalizations	Unicode 标准化
+Unknown	未知
+Unwrap lines	不换行
+Update to prereleases	包含预发布版本
+Update to the changed version	更新到被更改的版本
+URL Decode	URL解码
+URL Encode	URL编码
+Use custom settings	使用自定义设置
+Use ligatures	使用连字
+Use Selection for Find	用所选内容查找
+Use Selection for Replace	用所选内容替换
+Use spaces	使用空格缩进
+Use spaces for indentation	使用空格缩进
+Use Spaces for Indentation	使用空格缩进
+Use tabs	使用制表符缩进
+Use tabs for indentation	使用制表符缩进
+Vertical	竖排
+View	显示
+Warnings	警告
+What’s New in SubText	SubText 新功能
+When a file is modified by another application	当文稿被其他应用更改时：
+When nothing else is open:	当没有打开任何文稿时：
+Whitespace	空白字符
+Width	宽度
+Window	窗口
+Window size, tabs, and what the editor shows.	窗口大小、标签页以及编辑器显示的内容。
+Window size:	窗口大小：
+Word count	字数
+Words	字
+Words defined in syntax	语法中包含的单词
+Words in document	文稿中的单词
+Wrap lines	换行
+Wrap Lines	换行
+Wrap lines to editor width	换行以适合编辑器宽度
+Writing Direction	书写方向
+Writing direction:	书写方向：
+Zoom	缩放
+
+# Strings the settings window, the sheets and the inspectors draw.
+20% – 100%, as in CotEditor	20% – 100%，与 CotEditor 相同
+Accept rmate connections	接受 rmate 连接
+Add a text encoding or a separator	添加文本编码或分隔线
+Add encoding or separator	添加编码或分隔线
+Add new item	添加新项目
+Advanced	高级
+Advanced Character Count	高级字符计数
+Advanced Find Options	高级查找选项
+Advanced options	高级选项
+Allow . to match any character, including newline characters (singleline).	允许.匹配包括（单行）换行符在内的任意字符。
+Allow ^ and $ to match the start and end of lines (multiline).	允许^和$匹配（多行的）行首和行尾。
+Anchors match lines	使锚点匹配行
+Apply	应用
+Available:	可用：
+Basic Regular Expression Syntax	基本正则表达式语法
+Begin:	开头：
+Case Sensitive	区分大小写
+Choose Folder	选择文件夹
+Clear	清除
+Clear the field.	清空输入框。
+Close find result.	关闭查找结果。
+Code	代码
+Color Code	颜色码
+Color:	颜色：
+Command-line tool	命令行工具
+Completion list includes:	补全列表包括：
+Conditions	条件
+Convert	转换
+Custom Surround	自定义环绕
+Customize Toolbar	自定义工具栏…
+Decrease	减小
+Default Set	默认设置
+Default line endings	默认行尾
+Default syntax	默认语法
+Default text encoding	默认文本编码
+Delete selected entries	删除所选项
+Delete selected items	删除所选项
+Delimiter:	分界符：
+Donation	捐赠
+Drag encodings to change the order:	拖拽以改变编码顺序：
+Edit Color Code	编辑颜色代码…
+Edit Saved Scope	编辑已保存的范围
+Enable	启用
+Encoding List	编码列表
+Encoding priorities	编码优先级
+Encoding:	编码：
+End:	结尾：
+Every item is already in the toolbar.	每个项目都已在工具栏中。
+File Scope	文件范围
+Filter	过滤
+Find & Replace	查找和替换
+Find and list all matches.	列出所有匹配。
+Find next match.	查找后一个匹配。
+Find previous match.	查找前一个匹配。
+Full Path	完整路径
+General mode	通用模式
+Go	跳转
+Go to Line	跳转到行
+Highlight all matches of the replacement rules.	高亮显示所有符合替换规则的匹配项。
+IC	IC
+ICU Regular Expressions	ICU正则表达式
+Ignore case	忽略大小写
+In Selection	所选内容
+Incompatible Characters	不兼容字符
+Inconsistent Line Endings	换行符不一致
+Increase	增大
+Insert	插入
+Insert a variable into the insertion format.	在插入格式中插入变量。
+Insertion format	插入格式
+Invalid rules will be skipped.	无效的规则将被跳过。
+Jump to next outline item	下一个大纲项
+Jump to previous outline item	上一个大纲项
+Learn More…	了解更多…
+Line number	行号
+Locale-aware collation needs an ICU dependency SubText does not carry	按语言规则排序需要 ICU 依赖，SubText 未包含。
+Match	匹配
+New Saved Scope	新建已保存的范围
+Next Outline Item	下一个大纲项
+No conditions — every file is searched.	没有条件 — 将搜索每个文件。
+No item selected	未选择任何项目
+No recent files	无最近文件
+No saved scopes.	没有已保存的范围。
+Nonsense	无效
+Not implemented yet. The settings file can be edited directly, at the path below.	尚未实现。可直接编辑下方的设置文件。
+Notation	表示法
+Notation:	表示法：
+Nothing has been customised yet	尚未自定义任何内容
+Open CotEditor in App Store	在 App Store 中打开 CotEditor
+Open GitHub Sponsors	打开GitHub Sponsors
+Outline Menu	大纲菜单
+Pattern:	模式：
+Perform replacement using these rules in succession from the top down:	从上到下依次使用这些规则进行替换：
+Per-syntax modes arrive with the syntax editor	按语法模式将随语法编辑器一同提供
+Port:	端口：
+Position:	位置：
+Previous Outline Item	前一个大纲项
+Provided by the system text engine, which SubText does not use	由系统文本引擎提供，SubText 未使用该引擎
+Put the file-drop settings back to the ones CotEditor ships.	将文件拖拽设定恢复为 CotEditor 的默认值。
+RE	RE
+Refer to the encoding declaration in the document	参考文稿中的编码声明
+Regular Expression	正则表达式
+Reinterpret	再次解释
+Remote editing	远程编辑
+Remove	移除
+Remove this condition	移除此条件
+Rename	重新命名
+Replace With	替换为
+Replace all matches according to the replacement rules.	根据替换规则替换所有匹配项。
+Replace all matches with the replacement text.	将所有匹配用替换文本替换。
+Replace the current selection with the replacement text, then find the next match.	用替换文本替换当前选中内容，然后查找下一个匹配项目
+Replace with	替换
+Respect language rules	遵守语言规则
+Restore Defaults	恢复默认
+Review Incompatible Characters	检查不兼容字符
+Sample:	示例：
+Save Available Text	保存可用的文本
+Saved Scopes	已保存的范围
+Saved scopes:	已保存的范围：
+Search Limit Reached	已达搜索上限
+Search a folder for text, like CotEditor's Folder Find.	在文件夹中搜索文本，如同 CotEditor 的文件夹查找。
+Search in Folder	在文件夹中搜索
+Searching in folder…	正在文件夹中搜索…
+Select to ignore character case on search.	选中以忽略大小写。
+Select to replace text only in selection.	选中以仅在所选内容中替换。
+Select to search with regular expression.	选中以启用正则表达式查找。
+Select to use this replacement rule.	选中以使用此替换规则。
+Show advanced options	显示高级选项
+Show quick reference	显示快速参考
+Show quick reference for regular expression syntax.	显示正则表达式快速参考。
+Sort Lines by Pattern	按模式排序行
+Sort key:	排序键：
+Sort option:	排序选项：
+Split editor	分栏显示
+Start	开始
+Surround with:	进行环绕：
+Syntax in which this snippet is offered.	提供此片段的语法。
+Tags	标签
+Text encoding change	文本编码更改
+The highlighted part is what the lines are compared on.	高亮部分即为行比较的内容。
+The syntax conforms to	语法遵守
+specifications.	规范。
+Toolbar:	工具栏：
+Type a find string and press Return.	输入查找字符串并按 Return。
+Unit:	单位：
+Use captured group:	使用捕获组：
+Use the document's folder	使用文稿所在的文件夹
+deprecated	已弃用
+of the following conditions:	以下条件：
+seconds	秒
+spaces	个空格
+times	倍
+“Auto” means the window sizes itself to its content.	“自动”表示窗口根据内容自动调整大小。
+Keep SubText's version	保留 SubText 的版本
+Ask how to resolve	询问如何解决
+Update to modified version	更新为已修改的版本
+System	系统
+Manually	手动
+In Full Screen Only	仅在全屏幕中
+Not editable	不可编辑
+Not selected	未选中
+The document is not editable.	文稿不可编辑。
+Add Condition	添加条件
+Add period with double-space	连按两下空格键插入句号
+Automatically insert closing brackets and quotes	自动补全括号和引号
+Distinguish characters strictly	严格区分字符
+No output yet. A script's standard error appears here.	暂无输出。脚本的标准错误信息将显示在此处。
+Entire line	整行
+Regular expression	正则表达式
+bytes	字节
+Documents are saved automatically while you work, and earlier versions stay reachable from File ▸ Revert To.	文档会自动保存，之前的版本仍可从「文件」▸「复原到」访问。
+Dot matches line separators	使点匹配换行
+Ignore Case	忽略大小写
+Ignore diacritical marks	忽略变音符号
+Ignore width differences	忽略字符宽度
+Match only whole words	仅全字匹配
+Needs the ICU collation SubText does not carry	需要 ICU 排序规则，SubText 未包含
+Regular Expression Search	正则表达式查找
+Restrict search results to whole words.	将查找结果限定于全字。
+Search incrementally	增量搜索
+SubText's search compares characters exactly, which is what this asks for.	SubText 的查找按字符精确比较，正合此选项之意。
+SubText's word boundaries are Unicode-aware by definition.	SubText 的字词边界按定义即为 Unicode 感知。
+Textual Search	文本查找
+The engine's \b is already Unicode-aware; TR#29 boundaries are not implemented.	引擎的 \b 本身即识别 Unicode；尚未实现 TR#29 字词边界。
+The regex engine cannot ignore character width.	正则表达式引擎无法忽略字符宽度。
+The regex engine cannot ignore diacritical marks.	正则表达式引擎无法忽略变音符号。
+The regex engine has no strict character-equivalence mode.	正则表达式引擎没有严格字符等价模式。
+Unescape metacharacters with backslash in replacement text.	取消在替换文本中带有反斜杠元字符的转义。
+Unescape replacement text	取消替换文本转义
+Use Unicode word boundaries	使用Unicode字词边界
+Wrap search around	循环查找
+
+# Count options, sort options, and the notices the sheets and the window draw.
+Ignore line endings	忽略行尾
+Ignore whitespace	忽略空格
+Treat consecutive whitespace as one space	将连续空格视作一个空格
+Treat numbers as numeric values	将数字视为数值
+Keep the first line at the top	首行置顶
+In descending order	降序
+No issues found.	没有发现问题。
+failed	失败
+Grapheme cluster	字位簇
+Unicode scalar	Unicode标量
+Byte	字节
+UTF-16	UTF-16
+Normalization:	标准化：
+character(s)	个字符
+Count in the intuitive way defined in Unicode. A character consisting of multiple Unicode code points, such as emojis, is counted as one character.	以Unicode定义的直观方式计数。由多个Unicode码点组成的字符（例如表情符号）计为一个字符。
+Count Unicode code points. Same as counting UTF-32.	计算Unicode码点，同UTF-32。
+Count Unicode code points but a surrogate pair as two characters.	计算Unicode码点，但将一个代理对计算为两个字符。
+Count bytes of the text encoded with the specified encoding.	计算文本按照指定编码方式后得到的字节数。
+The folder cannot be found.	找不到该文件夹。
+No folder — open a document	没有文件夹 — 请打开一个文稿
+Expand this file's matches	展开此文件的匹配项
+Collapse this file's matches	折叠此文件的匹配项
+The name cannot be empty.	名称不能为空。
+The name cannot contain a line break.	名称不能包含换行符。
+Press the key combination to record.	按下要记录的按键组合。
+Click, then press a key combination.	点按后按下按键组合。
+Remove from the toolbar	从工具栏中移除
+This item cannot be removed	此项目无法移除
+New document	新建文稿
+Select something to copy	请先选中要复制的内容
+Copied with syntax colours	已复制，包含语法颜色
+Copied as plain text — no RTF pasteboard here	已复制为纯文本 — 此处没有 RTF 剪贴板
+Bug report template created — fill it in and post it	已创建错误报告模板 — 请填写后发布
+Not implemented yet. CotEditor lets you switch off each dialog it can show; SubText shows no such dialogs.	尚未实现。CotEditor 可以关闭它所能显示的每个对话框；SubText 不显示此类对话框。
+UTF-8 without a mark	不含 BOM 的 UTF-8
+Share is not implemented yet	共享尚未实现
+Printing needs AppKit's print panel, which GPUI does not expose	打印需要 AppKit 的打印面板，而 GPUI 未提供
+System spelling and speech services are macOS-only	系统拼写与语音服务仅在 macOS 上可用
+System text substitution services are macOS-only	系统文本替换服务仅在 macOS 上可用
+Syntax analysis reset	已重置语法分析
+GPUI's text engine has no paragraph writing direction; CotEditor gets it from NSTextView	GPUI 的文本引擎没有段落书写方向；CotEditor 从 NSTextView 获取该功能
+GPUI's text engine cannot lay out vertical text	GPUI 的文本引擎无法排版竖排文本
+AppleScript support does not exist on GPUI	GPUI 上不存在 AppleScript 支持
+The text contains U+FFFD, which usually means the file was decoded with the wrong encoding	文本中包含 U+FFFD，通常意味着文件解码时使用了错误的编码
+No snippets yet. Add one to insert its text from the Insert Snippet submenu or from a key equivalent.	尚无代码片段。添加一个即可从「插入片段」子菜单或通过快捷键插入其文本。
+No file-drop settings yet. Add one to describe what dropping a file onto the editor inserts.	尚无文件拖放设置。添加一条即可描述将文件拖到编辑器上时要插入的内容。
+To change a shortcut, use the menu bar's own key equivalents. ⌘ maps to Control on Windows and Linux, where Command does not exist.	要更改快捷键，请使用菜单栏自带的键盘等效键。⌘ 在 Windows 和 Linux 上对应 Control，这些平台上没有 Command。
+The setting is stored, but the rmate listener is not implemented yet: no socket is opened and no remote file can be received.	该设置已存储，但 rmate 监听器尚未实现：不会打开套接字，也无法接收远程文件。
+With the “cot” command-line tool you can open files in CotEditor from a terminal. SubText installs “subtext” for the same purpose: put it on your PATH and run “subtext FILE”.	借助「cot」命令行工具，你可以在终端中用 CotEditor 打开文件。SubText 为此安装了「subtext」：将它放到 PATH 中，然后运行「subtext FILE」。
+is already in use.	已被使用。
+
+# The status bar's own words. `{}` is where a value goes, so the translation
+# is of the whole sentence and the values are filled in afterwards.
+Use Format ▸ Font to change the font	请使用「格式 ▸ 字体」更改字体
+This document has never been saved	此文稿尚未保存
+Reverted to the saved version	已复原到已存版本
+Cleared the recent documents	已清除最近使用的文稿
+Select something first	请先选中内容
+No matches	没有匹配项
+Highlights removed	已移除高亮
+Select a single character to inspect	请选中一个字符以检查
+No completions for this word	此单词没有补全项
+The console is not available	控制台不可用
+An editor can be split into four at most	编辑器最多只能分为四个
+Script output copied to the clipboard	脚本输出已复制到剪贴板
+The script produced no output	脚本没有产生输出
+Script output opened in a new document	脚本输出已在新文稿中打开
+There is no document to put the script's output into	没有可以放入脚本输出的文稿
+{} is not a color code	{} 不是颜色代码
+{} is not implemented yet	{} 尚未实现
+Could not open a window: {}	无法打开窗口：{}
+Open failed: {}	打开失败：{}
+The clipboard refused the text: {}	剪贴板拒绝了此文本：{}
+Opened {}	已打开 {}
+Saved {}	已保存 {}
+Copied {}	已复制 {}
+Inserted {}	已插入 {}
+Replaced {} occurrence(s)	已替换 {} 处
+{} match(es) selected	已选中 {} 处匹配项
+{} match(es)	{} 处匹配项
+Find: {}	查找：{}
+Replace: {}	替换：{}
+Line endings: {}	换行符：{}
+Encoding: {}	编码：{}
+Reinterpreted as {}	已重新解释为 {}
+There is no script at {}	{} 处没有脚本
+The script “{}” failed — see the console	脚本「{}」运行失败 — 请查看控制台
+Ran {}	已运行 {}
+Syntax: {}	语法：{}
+Font size: {} pt	字号：{} pt
+on	开
+off	关
+Antialiasing {}	抗锯齿 {}
+Ligatures {}	连字 {}
+Tab width: {}	制表符宽度：{}
+Theme: {}	主题：{}
+Found {} incompatible characters.	发现 {} 处不兼容字符。
+Found {} line endings other than {}.	发现 {} 处不是 {} 的换行符。
+Character	字符
+Converted	转换后
+Line Ending	换行符
+# The find result view and its quick reference.
+Find {1} matches in “{2}.”	在“{2}”中找到{1}个匹配项。
+Find text: {}	搜索文本：{}
+{} matches	{}个匹配项
+{} replaced	{}处被替换
+# The folder find pane's counts, worded the way upstream words them.
+{1} matches in {2} files	{2}个文件中的{1}个匹配项
+{1}+ matches in {2} files	{2}个文件中的{1}个以上匹配项
+Only the first match was found.	仅找到第一个匹配项。
+Only the first {} matches were found.	仅找到前{}个匹配项。
+Matched Text	匹配文本
+Recent Searches	最近搜索
+Clear Recent Searches	清除最近搜索
+Recent Replacements	最近的替换
+Clear Recent Replacements	清除最近替换
+Anchors	锚点
+Quantifiers	数量
+Extended Groups	扩展分组
+Back Reference	回溯引用
+any character	任意字符
+new line character	换行符
+tab character	制表符
+word character	单词字符
+whitespace character	空格字符
+non-whitespace character	非空格字符
+decimal number	数字
+any character in range A to Z	A到Z范围内的任意字符
+any character not in range A to Z	不在A到Z范围内的任意字符
+beginning of the line	行首
+end of the line	行末
+word boundary	单词边界
+1 or 0 times	1次或0次
+0 or more times	0次或更多
+1 or more times	1次或更多
+at least n but not more than m times	至少n次但不超过m次
+at least n times	至少n次
+at least 0 but not more than n times	至少0次但不超过n次
+n times	n次
+look-ahead	前向
+look-behind	后向
+first match	首字匹配
+# The file-scope editor's rule labels. These are also the values the pane's
+# menus draw, so they are looked up the way any other label is.
+any	任一
+all	所有
+File name	文件名
+File path	文件路径
+File extension	文件扩展名
+contains	包含
+does not contain	不包含
+is	是
+is not	不是
+begins with	开头是
+ends with	结尾是
+matches regular expression	匹配正则表达式
+The scope contains a rule without a value.	文件范围中包含未设置值的规则。
+The scope contains an invalid regular expression.	文件范围中包含无效的正则表达式。
+# A snippet's key equivalent, refused. Upstream spells the combination into
+# the sentence, so the whole sentence is translated and the key filled in.
+The combination “{}” is not supported for the shortcut customization.	组合键“{}”无法被用作自定义绑定键。
+The Shift key can be used only with another modifier key.	Shift键只能配合其他修饰键使用。
+Single type is invalid for a shortcut.	单独的按键类型不能被用作快捷键。
+# The two failures a find pattern can have, in upstream's own words.
+Empty find text	查找内容为空
+Invalid regular expression	无效的正则表达式
+# The replace sheet composes the two the way upstream's tooltip does: the
+# description in brackets, then the suggestion. An empty find text has a
+# suggestion of its own; a broken pattern's suggestion is the reason.
+[Invalid regular expression] {}	[无效的正则表达式] {}
+[Empty find text] {}	[查找内容为空] {}
+Enter text to find.	输入文本以查找。
+# The sort sheet's pattern errors.
+Empty pattern	空白的表达式
+Invalid pattern	无效的表达式
+# The encoding list's two refusals.
+{} can’t be removed.	{}无法被移除。
+The encoding set as default can’t be removed.	设置为默认的编码无法被移除。
+# The folder find pane's two overlays.
+Search Failed	搜索失败
+No Results	无结果
+No matches for “{}” were found.	未找到“{}”的匹配项。
+
+# The Document inspector's row labels and section headings, and the inspector's
+# own three pane names. All of these are taken verbatim from CotEditor's
+# `Localizables/Document Window/Document.xcstrings` String Catalog — the same
+# catalog the warnings pane's two headings above come from. The pane names are
+# its `InspectorPane.document.label` / `.outline.label` / `.warnings.label`,
+# whose English defaults are `Document Inspector`, `Outline` and `Warnings`.
+# `Text Settings` is 文本设定 there, not 文本设置.
+Created	创建于
+Modified	最后编辑
+Size	大小
+Permissions	权限
+Owner	拥有者
+Encoding	编码
+Code Point	码位
+Code Points	码点
+Block	字区
+Category	分类
+Text Settings	文本设定
+Count	计数
+# A snippet's key equivalent, refused because a menu command already answers to
+# it. Upstream's `Shortcut.CustomizationError.alreadyTaken.description`, with
+# its two `%@` values as the two placeholders.
+“{}” is already taken by the “{}” command.	“{}”已被“{}”命令使用。
+# The outline pane's two empty states. `No Filter Results` is upstream's
+# (`Document.xcstrings`); the other has no counterpart there — it is SubText's
+# own placeholder — so it follows the same shape.
+No Filter Results	无过滤结果
+No outline items	无大纲项目
