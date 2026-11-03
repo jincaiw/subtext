@@ -205,7 +205,34 @@ GATED_ACTIONS = {
     # is nothing to go back to, and below the last one nothing to go forward to.
     "SelectPrevItemOfOutlineMenu": "!state.can_previous_outline",
     "SelectNextItemOfOutlineMenu": "!state.can_next_outline",
+    # `EditorTextView.validateUserInterfaceItem`: the comment commands need an
+    # editable buffer, and each needs the delimiter its command uses.
+    "ToggleComment": "!state.can_comment",
+    "InlineCommentOut": "!state.can_inline_comment",
+    "BlockCommentOut": "!state.can_block_comment",
+    # Upstream's `canUncomment(partly: true)`: a partly commented selection
+    # still has something to remove.
+    "Uncomment": "!state.can_uncomment",
 }
+
+
+# The commands whose *title* depends on the editor, as a Rust expression over
+# the gates.
+#
+# `EditorTextView.validateUserInterfaceItem` retitles the comment command every
+# time the menu opens: it both comments out and uncomments, so the item says
+# which it will do — "Uncomment" when the whole selection is commented,
+# "Comment Out" otherwise. The storyboard's static "Toggle Comment" is never
+# what the user sees. A GPUI menu is a tree set once, so the title is baked in
+# the same way the disabled state is, and the bar is rebuilt when the answer
+# flips (`Workspace::sync_menu_gates`).
+TITLE_EXPRESSIONS = {
+    "ToggleComment": 'if state.can_uncomment_whole { "Uncomment" } else { "Comment Out" }',
+}
+
+# A title expression yields a `&str`; `MenuItem::action` takes
+# `impl Into<SharedString>`, so a rebound title is translated by the same
+# runtime pass as every literal title (`localize_menus`).
 
 
 def action_for_selector(selector: str) -> str:
@@ -393,8 +420,12 @@ class Renderer:
             fail(f"no action named {name} for {title!r}")
         gate = GATED_ACTIONS.get(name)
         suffix = f".disabled({gate})" if gate else ""
+        title_expression = TITLE_EXPRESSIONS.get(name)
+        rendered_title = (
+            title_expression if title_expression else rust_string(rebrand(title))
+        )
         return [
-            f"{pad}MenuItem::action({rust_string(rebrand(title))}, "
+            f"{pad}MenuItem::action({rendered_title}, "
             f"actions::{namespace}::{name}){suffix},"
         ]
 

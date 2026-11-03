@@ -96,6 +96,7 @@ use subtext_core::encoding::EncodingList;
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
 use subtext_core::scripts::Item as ScriptItem;
 use subtext_core::snippets::{Shortcut, Snippet};
+use subtext_core::textops::{self, CommentDelimiters};
 use subtext_core::{FileEncoding, LineEnding, Normalization, Sections};
 
 use crate::actions;
@@ -202,26 +203,93 @@ pub struct MenuGates {
     pub can_previous_outline: bool,
     /// Nothing after the caret to jump forward to: *Select Next Outline Item*.
     pub can_next_outline: bool,
+    /// The document is editable and its syntax has a comment delimiter:
+    /// *Toggle Comment* and *Comment Out*.
+    ///
+    /// Upstream's `toggleComment` / `commentOut` cases in
+    /// `validateUserInterfaceItem`, which read `isEditable` plus whether
+    /// `commentDelimiters` has anything in it.
+    pub can_comment: bool,
+    /// ...and that delimiter is an inline one: *Inline Comment*.
+    pub can_inline_comment: bool,
+    /// ...and that delimiter is a block pair: *Block Comment*.
+    pub can_block_comment: bool,
+    /// Uncommenting would remove something: *Uncomment*.
+    ///
+    /// Upstream's `canUncomment(partly: true)`, so a partly commented
+    /// selection is enough. The stricter question *Toggle Comment* asks is
+    /// [`Self::can_uncomment_whole`], which picks that item's title.
+    pub can_uncomment: bool,
+    /// The whole selection is commented out, so *Toggle Comment* would remove
+    /// the delimiters rather than add them — upstream's
+    /// `canUncomment(partly: false)`.
+    ///
+    /// `EditorTextView.validateUserInterfaceItem` retitles the comment item to
+    /// *Uncomment* while this holds and to *Comment Out* otherwise, so the
+    /// generated table reads the title from this gate. It is deliberately not
+    /// combined with `isEditable`: upstream retitles the item even when it is
+    /// greyed, and a read-only document still shows *Comment Out*.
+    pub can_uncomment_whole: bool,
 }
 
 impl MenuGates {
-    /// The gates for a caret at `selection` in a document with `entries` as its
-    /// outline.
+    /// The gates for a caret at `selection` in `text`, a document with `entries`
+    /// as its outline, `delimiters` as its syntax's comment delimiters, and
+    /// `editable` as the setting that decides whether it can be typed into.
     ///
     /// The two outline answers are upstream's `canSelectPreviousItem` /
     /// `canSelectNextItem`, asked of the same walk the commands themselves use
     /// — so a greyed item and a command that would do nothing cannot disagree.
     /// The walk is a scan of the entries, not a parse: the outline itself is
     /// the document's cached extraction.
+    ///
+    /// The comment answers come from [`textops::can_uncomment`] and from the
+    /// delimiter shape, which is what `validateUserInterfaceItem` does.
+    /// `text` is read for them, so this costs a scan of the selected lines and
+    /// not a parse of the document. `can_uncomment` is asked twice — partly
+    /// for *Uncomment*, strictly for the title *Toggle Comment* picks — which
+    /// is two walks of the same lines, not two scans of the document.
     pub fn for_editor(
-        selection_empty: bool,
-        entries: &[crate::outline::OutlineEntry],
+        text: &str,
         selection: &Range<usize>,
+        entries: &[crate::outline::OutlineEntry],
+        delimiters: &CommentDelimiters,
+        editable: bool,
     ) -> Self {
+        Self::for_editor_contents(
+            &text[textops::line_contents_range(text, selection)],
+            selection,
+            entries,
+            delimiters,
+            editable,
+        )
+    }
+
+    /// [`MenuGates::for_editor`] for a caller that already holds the selected
+    /// lines.
+    ///
+    /// `contents` is exactly what `textops::line_contents_range` would cut out
+    /// of the document, newline excluded. The workspace reads it from the
+    /// editor's rope so a caret move in a large document copies a few lines
+    /// instead of the whole buffer.
+    pub fn for_editor_contents(
+        contents: &str,
+        selection: &Range<usize>,
+        entries: &[crate::outline::OutlineEntry],
+        delimiters: &CommentDelimiters,
+        editable: bool,
+    ) -> Self {
+        let has_inline = delimiters.inline.is_some();
+        let has_block = delimiters.block.is_some();
         Self {
-            selection_empty,
+            selection_empty: selection.is_empty(),
             can_previous_outline: crate::outline::previous_item(entries, selection).is_some(),
             can_next_outline: crate::outline::next_item(entries, selection).is_some(),
+            can_comment: editable && (has_inline || has_block),
+            can_inline_comment: editable && has_inline,
+            can_block_comment: editable && has_block,
+            can_uncomment: editable && textops::can_uncomment_contents(contents, delimiters, true),
+            can_uncomment_whole: textops::can_uncomment_contents(contents, delimiters, false),
         }
     }
 }
@@ -279,9 +347,10 @@ pub struct MenuSignature {
     recent_documents: Vec<PathBuf>,
     /// The editor conditions the bar was built against.
     ///
-    /// All of them, not just the one that changes most often: two of the three
-    /// flip with the caret, and the third with the selection, so a signature
-    /// that carried only the selection would leave a stale outline item live.
+    /// All of them, not just the one that changes most often: the outline pair
+    /// flips with the caret, *Straighten Quotes* with the selection, and the
+    /// comment gates with the lines the selection touches, so a signature that
+    /// carried only the selection would leave a stale outline item live.
     gates: MenuGates,
 }
 
@@ -566,7 +635,19 @@ fn shortcut(state: &MenuState, path: &str, action: &dyn Action) -> Option<String
             .map(Shortcut::symbol);
     }
 
-    let row = keymap::SHORTCUTS.iter().find(|row| row.0 == path)?;
+    if let Some(row) = keymap::SHORTCUTS.iter().find(|row| row.0 == path)
+        && let Some(symbol) = row_shortcut(row.2, row.3).map(Shortcut::symbol)
+    {
+        return Some(symbol);
+    }
+
+    // A title that depends on the editor (*Uncomment* / *Comment Out*) moves
+    // the live path away from the one the generated key map holds, which was
+    // written from the storyboard's static title. The command is the same
+    // command, so the key is found by the action it carries.
+    let name = crate::bridge::name_of(action);
+    let static_path = menu::COMMANDS.iter().find(|row| row.action == name)?.path;
+    let row = keymap::SHORTCUTS.iter().find(|row| row.0 == static_path)?;
     row_shortcut(row.2, row.3).map(Shortcut::symbol)
 }
 
@@ -1930,6 +2011,11 @@ mod tests {
             selection_empty: false,
             can_previous_outline: true,
             can_next_outline: true,
+            can_comment: true,
+            can_inline_comment: true,
+            can_block_comment: true,
+            can_uncomment: true,
+            can_uncomment_whole: true,
         };
 
         let live: Vec<(String, &'static str)> = commands(&state)
@@ -1947,9 +2033,15 @@ mod tests {
             if entry.path == "View > Show Quick Actions…" {
                 continue;
             }
+            // The comment item's title depends on the editor — "Uncomment" or
+            // "Comment Out" — so its live path is not the storyboard's. Every
+            // other entry has to match on both; the retitled one is recognised
+            // by the action it runs, which is the identity that does not move.
+            let retitled = entry.action == "ToggleComment";
             assert!(
                 live.iter()
-                    .any(|(path, action)| path == entry.path && *action == entry.action),
+                    .any(|(path, action)| *action == entry.action
+                        && (retitled || path == entry.path)),
                 "{} is in the table but not in the bar",
                 entry.path
             );
@@ -1973,27 +2065,97 @@ mod tests {
             kind: None,
         };
         let entries = vec![entry(0), entry(100), entry(200)];
+        let none = CommentDelimiters::default();
 
         // In the first heading: nothing behind, the second ahead.
-        let gates = MenuGates::for_editor(false, &entries, &(0..0));
+        let gates = MenuGates::for_editor("", &(0..0), &entries, &none, false);
         assert!(!gates.can_previous_outline);
         assert!(gates.can_next_outline);
 
         // Between the first and the second: both ways.
-        let gates = MenuGates::for_editor(false, &entries, &(150..150));
+        let gates = MenuGates::for_editor("", &(150..150), &entries, &none, false);
         assert!(gates.can_previous_outline);
         assert!(gates.can_next_outline);
 
         // Past the last one: back only.
-        let gates = MenuGates::for_editor(false, &entries, &(300..300));
+        let gates = MenuGates::for_editor("", &(300..300), &entries, &none, false);
         assert!(gates.can_previous_outline);
         assert!(!gates.can_next_outline);
 
         // A document whose syntax has no outline rules: neither.
-        let gates = MenuGates::for_editor(true, &[], &(0..0));
+        let gates = MenuGates::for_editor("", &(0..0), &[], &none, false);
         assert!(!gates.can_previous_outline);
         assert!(!gates.can_next_outline);
         assert!(gates.selection_empty);
+    }
+
+    /// The comment gates follow the delimiter shape, the editable flag and the
+    /// lines the selection touches — upstream's `validateUserInterfaceItem`.
+    #[test]
+    fn the_comment_gates_follow_the_delimiters_and_the_selection() {
+        let both = CommentDelimiters {
+            inline: Some("//".into()),
+            block: Some(("/*".into(), "*/".into())),
+        };
+        let inline_only = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        let block_only = CommentDelimiters {
+            inline: None,
+            block: Some(("/*".into(), "*/".into())),
+        };
+        let plain = CommentDelimiters::default();
+
+        let gates = MenuGates::for_editor("// one\n// two", &(0..0), &[], &both, true);
+        assert!(gates.can_comment);
+        assert!(gates.can_inline_comment);
+        assert!(gates.can_block_comment);
+        assert!(gates.can_uncomment, "the line under the caret is commented");
+        assert!(
+            gates.can_uncomment_whole,
+            "and nothing else is there, so Toggle Comment would uncomment"
+        );
+
+        let gates = MenuGates::for_editor("plain", &(0..0), &[], &inline_only, true);
+        assert!(gates.can_comment);
+        assert!(gates.can_inline_comment);
+        assert!(!gates.can_block_comment);
+        assert!(!gates.can_uncomment);
+        assert!(!gates.can_uncomment_whole);
+
+        // A selection that is only partly commented still has something to
+        // remove — *Uncomment* is live — but *Toggle Comment* would comment
+        // out rather than uncomment, so its title stays "Comment Out".
+        let gates = MenuGates::for_editor("// one\nplain", &(0..10), &[], &inline_only, true);
+        assert!(gates.can_comment);
+        assert!(gates.can_uncomment);
+        assert!(!gates.can_uncomment_whole);
+
+        let gates = MenuGates::for_editor("", &(0..0), &[], &block_only, true);
+        assert!(gates.can_comment);
+        assert!(!gates.can_inline_comment);
+        assert!(gates.can_block_comment);
+        assert!(!gates.can_uncomment);
+        assert!(!gates.can_uncomment_whole);
+
+        let gates = MenuGates::for_editor("// one", &(0..0), &[], &plain, true);
+        assert!(!gates.can_comment);
+        assert!(!gates.can_inline_comment);
+        assert!(!gates.can_block_comment);
+        assert!(!gates.can_uncomment);
+        assert!(!gates.can_uncomment_whole);
+
+        // Not editable: nothing that would edit the buffer is live.
+        let gates = MenuGates::for_editor("// one", &(0..0), &[], &both, false);
+        assert!(!gates.can_comment);
+        assert!(!gates.can_inline_comment);
+        assert!(!gates.can_block_comment);
+        assert!(!gates.can_uncomment);
+        assert!(
+            gates.can_uncomment_whole,
+            "the title ignores the editable flag, upstream retitles a greyed item too"
+        );
     }
 
     /// Every command carries an action rather than a name, which is the only

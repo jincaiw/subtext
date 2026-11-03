@@ -3,7 +3,8 @@
 一款跨平台纯文本编辑器，基于 [GPUI Kit](https://github.com/longbridge/gpui-kit) 构建，
 是 [CotEditor](https://github.com/coteditor/CotEditor) 的忠实重实现。
 
-支持 **macOS / Windows / Linux**，菜单、快捷键、语法定义、主题与 CotEditor 保持一致。
+macOS（`aarch64-apple-darwin`）是验证平台；Linux / Windows 提供构建产物，但尚未实际运行验证。
+菜单、快捷键、语法定义、主题与 CotEditor 保持一致。
 
 [![CI](https://github.com/jincaiw/subtext/actions/workflows/ci.yml/badge.svg)](https://github.com/jincaiw/subtext/actions/workflows/ci.yml)
 
@@ -32,7 +33,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 
 | 维度 | 状态 |
 | --- | --- |
-| 菜单项 | 258 / 258 一致（28 个顶层菜单） |
+| 菜单项 | 258 / 258 一致（10 个顶层菜单、28 条路径） |
 | 快捷键 | 75 / 75 一致 |
 | 语法定义 | 70 个 `.cotsyntax` 全部可解析 |
 | 主题 | 14 个 `.cottheme` 全部可解析 |
@@ -58,7 +59,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 759 项测试
+cargo test --workspace # 791 项测试
 ```
 
 要求 Rust 1.99.1（edition 2024；`rust-toolchain.toml` 已钉住，`rustup` 会自己装）。
@@ -116,7 +117,7 @@ subtext/
 │   ├── menu.json         # 258 项菜单表（从 CotEditor storyboard 提取）
 │   ├── syntaxes/         # 70 个 .cotsyntax
 │   ├── themes/           # 14 个 .cottheme
-│   └── queries/          # 22 个 .scm 查询
+│   └── queries/          # 22 个语言的 tree-sitter 查询（47 个 .scm）
 ├── tools/
 │   ├── generate_menu.py  # 从 menu.json 生成 menu.rs 与 keymap.rs
 │   ├── make_icon.py      # 绘制应用图标，产出 .icns

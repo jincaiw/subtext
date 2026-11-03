@@ -29,18 +29,19 @@ use std::hash::{Hash as _, Hasher as _};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::AnyWindowHandle;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt as _;
-use gpui_kit::base::input::InputEvent;
+use gpui_kit::base::input::{InputEvent, RopeExt};
 use gpui_kit::base::{AccordionPanel, AccordionTrigger, MotionReveal, spring};
 use gpui_kit::base::{Placement, Positioner};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeStyled as _,
     TitleBar, WindowExt as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     dialog::DialogFooter,
     h_flex, h_resizable,
     input::{Editor, Input, InputState},
@@ -50,16 +51,18 @@ use gpui_kit::component::{
     resizable_panel,
     tab::{Tab, TabBar},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
+    tooltip::Tooltip,
     tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex, v_resizable,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, AnyElement, App, AppContext as _, Context, ElementId, Entity, ExternalPaths,
-    Focusable as _, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
-    WindowOptions, div, hsla, percentage, px, rems,
+    Anchor, AnyElement, App, AppContext as _, Context, DefiniteLength, Div, ElementId, Entity,
+    ExternalPaths, Focusable as _, Font, FontFeatures, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, TextRun,
+    Transformation, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
+    WindowOptions, div, hsla, percentage, px, rems, size,
 };
 
 use subtext_core::completion;
@@ -79,22 +82,26 @@ use crate::count_panel::{CountOptionsView, CountSheet};
 use crate::dialogs::{AboutView, DonationView};
 use crate::find_panel::{FindPanel, apply_row_selection};
 use crate::folder_find::FolderFindPane;
+use crate::fonts;
 use crate::highlighter;
 use crate::localization;
 use crate::menus;
 use crate::multiple_replace_sheet::MultipleReplaceSheet;
-use crate::outline::{FilteredNode, OutlineEntry, OutlineKind, OutlineRow};
+use crate::outline::{FilteredNode, Indent, OutlineEntry, OutlineKind, OutlineRow};
 use crate::resources;
 use crate::scripts;
 use crate::settings::{
-    DEFAULT_FIND_RESULT_FONT_SIZE, DEFAULT_OUTLINE_FONT_SIZE, INSPECTOR_MAX_WIDTH,
+    DEFAULT_FIND_RESULT_FONT_SIZE, DEFAULT_OUTLINE_FONT_SIZE, FontType, INSPECTOR_MAX_WIDTH,
     INSPECTOR_MIN_WIDTH, InspectorPane, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, Settings,
     SettingsPane, SidebarPane, WritingDirection,
 };
 use crate::settings_window::SettingsWindow;
 use crate::sort_sheet::SortSheet;
 use crate::surround_sheet::SurroundSheet;
-use crate::toolbar::{ToolbarItemId, ToolbarSheet};
+use crate::toolbar::{
+    PALETTE_WIDTH, ToolbarDisplayMode, ToolbarDrag, ToolbarItemId, ToolbarSheet, fonts_glyph,
+    sheet_fill, spell_check_glyph, symbol_glyph,
+};
 
 /// How long a status message stays on screen.
 const STATUS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(4);
@@ -124,12 +131,39 @@ const MAXIMUM_SPLIT_EDITORS: usize = 4;
 /// seconds.
 const SCRIPT_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long a window size change has to be still before it is written down.
+///
+/// A resize drag delivers a bounds change on every frame. Upstream saves the
+/// frame straight into `UserDefaults`, which is free; SubText writes a JSON
+/// file, so it waits for the drag to end and writes once. A quarter of a
+/// second is longer than the gap between two frames of a drag and shorter than
+/// the time it takes to resize a window and quit.
+const WINDOW_SIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// How far one outline level is indented, in rem.
 ///
 /// Three quarters of the base font. It is also the width of the disclosure
 /// lane, so an indent step and a disclosure triangle occupy the same column and
 /// a label's leading edge lands on a consistent spine at every depth.
 const OUTLINE_INDENT: f32 = 0.75;
+
+/// How wide each button in the navigation bar is, in points.
+///
+/// Upstream's `NavigationBar` gives the close button, both outline chevrons
+/// and the split button `frame(width: 18)` and puts no spacing between them;
+/// the divider between the close button and the chevrons is a 1-pt line with
+/// 3 pt of padding on each side, so it occupies 7 pt. The picker therefore
+/// begins at 4 + 18 + 7 + 18 + 18 = 65 pt from the bar's leading edge, which
+/// is where the reference screenshot puts it.
+const NAV_BUTTON_WIDTH: f32 = 18.;
+
+/// The alpha of the tint behind an outline kind's glyph.
+///
+/// Upstream renders the kind symbol with `.hierarchical`, which fills the
+/// square of a `*square.fill` symbol with a tint of the symbol's own colour.
+/// Measured off the reference: the tile under the indigo heading symbol reads
+/// rgb(204, 201, 251), which is the glyph's #5A4EF3 at about 0.31.
+const OUTLINE_TILE_ALPHA: f32 = 0.31;
 
 /// The Document inspector's four sections, in CotEditor's order.
 ///
@@ -280,6 +314,22 @@ pub struct OpenDocument {
     outline: Option<Rc<Vec<OutlineEntry>>>,
     /// A parse of this document is in flight.
     outline_pending: bool,
+    /// The font this window draws with, when it is not the mode's choice.
+    ///
+    /// CotEditor's `Format ▸ Make Standard Font` / `Make Monospaced Font` hand
+    /// only the text views of the front window the other face; the setting is
+    /// not saved, and the next syntax application (`applyMode`) puts the window
+    /// back on the mode's font type. `None` is that "follow the mode" state —
+    /// so this is an override, and [`Workspace::set_syntax`] clears it.
+    font_type: Option<FontType>,
+    /// This window's font magnification, `1.0` for the sizes in Appearance.
+    ///
+    /// Upstream's scaling lives on the scroll view, per window and outside the
+    /// font: bigger multiplies by 1.1, smaller divides by 1.1, and the scale is
+    /// clamped to the magnification range AppKit allows (0.25…4.0). It is
+    /// serialized with the window in upstream but restored only when it is not
+    /// 1 — so a fresh document starts at 1 here too.
+    font_scale: f32,
 }
 
 impl OpenDocument {
@@ -314,6 +364,29 @@ impl OpenDocument {
             title.push_str(" (modified on disk)");
         }
         title
+    }
+
+    /// Which of the two Appearance fonts this window draws with.
+    fn type_in_use(&self, settings: &Settings) -> FontType {
+        self.font_type.unwrap_or(settings.mode.font_type)
+    }
+
+    /// The Appearance pane's family, size and ligature flag for the font type
+    /// in use — the saved values, before the window's zoom.
+    fn font_spec<'a>(&self, settings: &'a Settings) -> (&'a Option<String>, f32, bool) {
+        let appearance = &settings.appearance;
+        match self.type_in_use(settings) {
+            FontType::Standard => (
+                &appearance.standard_font_family,
+                appearance.standard_font_size,
+                appearance.standard_ligature,
+            ),
+            FontType::Monospaced => (
+                &appearance.monospaced_font_family,
+                appearance.monospaced_font_size,
+                appearance.monospaced_ligature,
+            ),
+        }
     }
 }
 
@@ -601,6 +674,13 @@ pub struct Workspace {
     /// The Quick Actions bar, while it is up. It is a panel over this window
     /// rather than part of it, so it is tracked the way the settings window is.
     quick_actions_window: Option<AnyWindowHandle>,
+    /// The *Customize Toolbar* palette, while it is open.
+    ///
+    /// It is an overlay the workspace draws over the window, not a dialog, so
+    /// that the real toolbar underneath stays visible and live — the palette's
+    /// whole gesture is dragging items between the grid and that toolbar. See
+    /// [`Workspace::customize_toolbar`].
+    toolbar_sheet: Option<Entity<ToolbarSheet>>,
     /// The colour the *Edit Color Code* panel opens on when the caret is not on
     /// a colour code.
     ///
@@ -790,6 +870,32 @@ pub struct Workspace {
     /// the run has to remember which lines it has already reached. Cleared by
     /// an edit and ignored once the caret no longer sits on one of its ends.
     column_walk: Option<ColumnWalk>,
+    /// Watches this window's size, so the next one opens at the same size.
+    ///
+    /// Upstream autosaves the frame under "Document"; this is the same
+    /// observation point, `windowDidResize`.
+    _window_bounds: Option<Subscription>,
+    /// Whether a debounced write of the window size is already scheduled.
+    window_size_save_pending: bool,
+    /// The window this workspace is the root view of.
+    ///
+    /// Kept because a workspace can be reached from another window — the
+    /// settings window edits it through a weak handle — and there is no
+    /// reliable way to ask GPUI which window an entity belongs to at that
+    /// moment: `WeakEntity::update_in` answers with the last window that
+    /// *read* the entity, which is the window doing the asking, and that
+    /// window is on the update stack while its event handler runs, so the
+    /// update is refused. See [`Workspace::window_handle`].
+    window_handle: AnyWindowHandle,
+    /// The editor opacity this window is actually painting at.
+    ///
+    /// Settings hold what the slider says; this is what the page, the editor
+    /// and the bars were last built for. The two differ only between a slider
+    /// drag and the frame that follows it, but the value is kept rather than
+    /// read from `settings` in `render` because the component theme — which is
+    /// application-wide — is re-projected whenever it changes, and the panes
+    /// have to be rebuilt from the same number.
+    applied_window_alpha: f32,
 }
 
 /// One run of *Select Column Up* / *Select Column Down*.
@@ -981,6 +1087,24 @@ impl Workspace {
             },
         );
 
+        // The opacity the window opens at. Read before `settings` moves into
+        // the struct below, and put into force now: the first frame is drawn
+        // before `apply_settings` ever runs, and an opaque frame of a
+        // translucent window is a flash of white.
+        let applied_window_alpha =
+            crate::settings::clamp_window_alpha(settings.appearance.window_alpha);
+        window.set_background_appearance(Self::window_appearance(applied_window_alpha));
+        // The root surface is the layer the component library fills with the
+        // opaque page colour, so at any alpha below 1 it has to be told the
+        // translucent paper instead. The root entity does not exist yet —
+        // `open_window` builds it after this constructor returns — so the
+        // change waits for the next effect pass, which still runs before the
+        // first frame is presented.
+        window.defer(cx, move |window, cx| {
+            Self::apply_root_paper(window, applied_window_alpha, cx);
+        });
+        let window_handle = window.window_handle();
+
         let mut this = Self {
             settings,
             syntaxes,
@@ -1007,6 +1131,7 @@ impl Workspace {
             matching_bracket: None,
             matching_bracket_selection: None,
             quick_actions_window: None,
+            toolbar_sheet: None,
             last_color_code_color: colorcode::Color::BLACK,
             outline_tree,
             outline_filter,
@@ -1050,6 +1175,10 @@ impl Workspace {
             _find_panel_closed: None,
             _window_activation: None,
             column_walk: None,
+            _window_bounds: None,
+            window_size_save_pending: false,
+            applied_window_alpha,
+            window_handle,
         };
         // The incremental search's grey marks belong to the panel's lifetime,
         // not to the document's.
@@ -1098,7 +1227,59 @@ impl Workspace {
             },
         ));
 
+        // CotEditor autosaves a document window's frame under the name
+        // "Document" (`windowFrameAutosaveName`) and reopens the next window at
+        // the last size. GPUI has no frame autosave, so the size is recorded
+        // here — the same moment upstream's `windowDidResize` fires — and
+        // folded back in by [`resize_window_to_saved_size`] when a window
+        // opens.
+        this._window_bounds = Some(cx.observe_window_bounds(window, |this, window, cx| {
+            this.remember_window_size(window, cx);
+        }));
+
         this
+    }
+
+    /// Record this window's size as the one the next document window opens at.
+    ///
+    /// Full screen and zoom are not sizes to bring back: upstream's frame
+    /// autosave likewise only covers the windowed frame, and `windowWidth` in
+    /// the Window pane means the windowed width.
+    fn remember_window_size(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if window.is_fullscreen() || window.is_simple_fullscreen() {
+            return;
+        }
+        let size = window.viewport_size();
+        let size = [f32::from(size.width), f32::from(size.height)];
+        // A window that has not been laid out yet reports nothing usable, and
+        // an unlaid-out 0 × 0 would otherwise become the size of every window
+        // opened after it.
+        if size[0] <= 0. || size[1] <= 0. || self.settings.document_window_size == Some(size) {
+            return;
+        }
+        self.settings.document_window_size = Some(size);
+        self.save_window_size_when_settled(cx);
+    }
+
+    /// Write the settings once the window has stopped being resized.
+    ///
+    /// The timer is started by the first change and not restarted by the rest,
+    /// so a drag writes one file, a quarter of a second after it ends.
+    fn save_window_size_when_settled(&mut self, cx: &mut Context<Self>) {
+        if self.window_size_save_pending {
+            return;
+        }
+        self.window_size_save_pending = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(WINDOW_SIZE_SETTLE).await;
+            let _ = this.update(cx, |this, _cx| {
+                this.window_size_save_pending = false;
+                if let Err(error) = this.settings.save() {
+                    log::warn!("could not save the window size: {error}");
+                }
+            });
+        })
+        .detach();
     }
 
     // ---- document management --------------------------------------------
@@ -1135,10 +1316,16 @@ impl Workspace {
         let syntaxes = self.syntaxes.clone();
         let themes = self.themes.clone();
         let settings = self.settings.clone();
+        let saved_size = settings.window;
+        let last_size = settings.document_window_size;
+        // The new window opens at the opacity the settings name, so its very
+        // first frame is already the right one.
+        let background = Self::window_appearance(self.applied_window_alpha);
 
         let opened = gpui_kit::open_window(
             WindowOptions {
-                window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
+                window_min_size: Some(document_window_min_size()),
+                window_background: background,
                 ..Default::default()
             },
             cx,
@@ -1151,7 +1338,10 @@ impl Workspace {
 
         match opened {
             Ok((handle, _)) => {
-                let _ = handle.update(cx, |_, window, _| window.activate_window());
+                let _ = handle.update(cx, |_, window, _| {
+                    resize_window_to_saved_size(window, &saved_size, last_size);
+                    window.activate_window();
+                });
             }
             Err(error) => self.notice(
                 localization::tf("Could not open a window: {}", &[&error]),
@@ -1247,12 +1437,11 @@ impl Workspace {
             });
         }
 
-        let font = self
-            .settings
-            .font_family
-            .clone()
-            .unwrap_or_else(|| cx.theme().mono_font_family.to_string());
-        let rtf = subtext_core::richtext::rtf(&segments, &font, self.settings.font_size);
+        // The font the window is drawn with, at the Appearance pane's own size:
+        // upstream's magnification is a view transform, so the attributed
+        // string carries the unscaled point size.
+        let (font, font_size, _) = self.document_font(document, cx);
+        let rtf = subtext_core::richtext::rtf(&segments, &font, font_size);
 
         let plain = text[selection].to_string();
         match put_rich_text_on_the_pasteboard(&rtf, &plain, cx) {
@@ -1315,6 +1504,9 @@ impl Workspace {
             // for it, not while the window is still being put together.
             outline: None,
             outline_pending: false,
+            // A new window follows the mode's font type at its natural size.
+            font_type: None,
+            font_scale: 1.0,
         });
         self.active = self.documents.len() - 1;
         self.refresh_menus(cx);
@@ -1322,6 +1514,7 @@ impl Workspace {
         // keystrokes go to the window and stop there (§22.36). Every path that
         // makes a document active ends here or at `focus_pane`.
         self.focus_active_editor(window, cx);
+        self.apply_overscroll_when_settled(window, cx);
         cx.notify();
     }
 
@@ -1371,8 +1564,65 @@ impl Workspace {
             state.set_show_whitespaces(options.show_invisibles, window, cx);
             state.set_indent_guides(options.show_indent_guides, window, cx);
             state.set_readonly(!options.editable, cx);
+            // Upstream leaves no blank space below the last line unless the
+            // Window pane's overscroll rate asks for some. GPUI's `None`
+            // default means half a viewport, so the flush default has to be
+            // stated — and a rate above zero is applied once the pane has
+            // been laid out, because the viewport's row count is not known
+            // before then. See `apply_overscroll_when_settled`.
+            state = state.scroll_beyond_last_line(Some(0));
             state
         })
+    }
+
+    /// Blank rows the editor keeps below its last line, from the overscroll
+    /// rate in the Window settings pane.
+    ///
+    /// CotEditor's `overscrollRate` is a fraction of the *scrollable* height,
+    /// which is the viewport minus one line: at 50%, a viewport showing 40
+    /// rows ends up with 20 blank rows below the text. GPUI's editor takes the
+    /// same quantity in rows (`scroll_beyond_last_line`), so the viewport's
+    /// row count stands in for its height and the line height cancels out.
+    ///
+    /// A pane that has not been laid out yet gets `Some(0)` rather than
+    /// `None`: `None` would mean half a viewport, and the deferred pass that
+    /// follows the first frame supplies the real count.
+    fn overscroll_rows(state: &gpui_kit::base::input::EditorState, rate: f64) -> Option<usize> {
+        let Some(visible) = state.visible_row_range() else {
+            return Some(0);
+        };
+        if rate <= 0.0 {
+            return Some(0);
+        }
+        let rows = (rate * visible.len().saturating_sub(1) as f64).round();
+        Some(rows as usize)
+    }
+
+    /// Apply the overscroll rate once every pane has been laid out.
+    ///
+    /// `visible_row_range` is `None` until a frame has been prepared, and a
+    /// frame's prepaint runs before the `on_next_frame` callbacks registered
+    /// for it — so this waits two frames, the same way
+    /// [`center_selection_when_settled`](Self::center_selection_when_settled)
+    /// does. See §22.10 in `docs/PLAN.md`.
+    ///
+    /// The row count is a snapshot of the viewport at this moment: resizing
+    /// the window afterwards keeps it until the rate or the layout changes
+    /// again. Upstream recomputes on every layout; GPUI's editor has no
+    /// per-layout callback, and a wrong blank margin is a smaller cost than
+    /// asking for a frame every frame to fix it.
+    fn apply_overscroll_when_settled(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.on_next_frame(window, |_this, window, cx| {
+            cx.on_next_frame(window, |this, window, cx| {
+                let rate = this.settings.window.overscroll_rate;
+                for editor in this.all_panes() {
+                    editor.update(cx, |state, cx| {
+                        let rows = Self::overscroll_rows(state, rate);
+                        state.set_scroll_beyond_last_line(rows, window, cx);
+                    });
+                }
+            });
+        });
     }
 
     /// One pane: its editor, the subscription that mirrors it into the
@@ -2072,11 +2322,33 @@ impl Workspace {
     }
 
     fn set_status(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
+        let at = std::time::Instant::now();
         self.status = Some(Status {
             message: message.into(),
-            at: std::time::Instant::now(),
+            at,
         });
         cx.notify();
+
+        // `render_status_bar` only hides the notice once `STATUS_LIFETIME` has
+        // passed, and that filter runs on a repaint. An idle window with no
+        // caret blink or focus change would keep the notice up indefinitely, so
+        // wake once at expiry. A newer notice has a later `at` and is left for
+        // its own wake-up, which is why this compares the timestamp rather than
+        // clearing whatever is current.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(STATUS_LIFETIME).await;
+            let _ = this.update(cx, |workspace, cx| {
+                if workspace
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.at <= at)
+                {
+                    workspace.status = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// Say something in the status bar.
@@ -2180,11 +2452,10 @@ impl Workspace {
     /// Upstream greys this item out while the selection is empty, even though
     /// its command would work on the word under the cursor, and it says why in
     /// its own source: to keep the item's state the same as *Replace Quotes*,
-    /// which does need a selection. A GPUI menu item carries one fixed disabled
-    /// flag and no way to be re-asked per selection, and rebuilding the whole
-    /// bar on every caret move to keep one item in step is not a trade worth
-    /// making — so the item stays live and says what it needs instead. The text
-    /// is not touched either way.
+    /// which does need a selection. The gate carries that same answer into the
+    /// menu bar (`MenuGates::selection_empty`), so the item is greyed exactly
+    /// while upstream greys it; the command still checks the selection itself,
+    /// because a shortcut reaches it whether the item is live or not.
     pub fn straighten_quotes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_selection(cx).is_empty() {
             self.set_status(localization::t("Select something first"), cx);
@@ -2873,14 +3144,54 @@ impl Workspace {
 
     /// Keep the menu bar's editor-dependent items in step with the caret.
     ///
-    /// The bar is a tree that is set once, so `Straighten Quotes` and the two
-    /// outline items are built already greyed or already live. Rebuilding
-    /// re-reads the script folder, so this compares first: one `MenuGates` per
-    /// editor repaint, and a rebuild only when one of the three flips.
+    /// The bar is a tree that is set once, so `Straighten Quotes`, the two
+    /// outline items and the four comment items are built already greyed or
+    /// already live. Rebuilding re-reads the script folder, so this compares
+    /// first: one `MenuGates` per editor repaint, and a rebuild only when one
+    /// of the conditions flips.
     fn sync_menu_gates(&mut self, cx: &mut Context<Self>) {
         let selection = self.active_selection(cx);
         let entries = self.ensure_outline(cx);
-        let gates = menus::MenuGates::for_editor(selection.is_empty(), &entries, &selection);
+        let editable = self.settings.editor.editable;
+
+        // Only the comment gates look at text, and `EditorState::value()`
+        // materializes the whole buffer on every call. Read the rope instead
+        // and copy just the lines the selection touches: a caret blink in a
+        // 10 MB document must not copy 10 MB. A syntax without comment
+        // delimiters cannot pass those gates, so Plain Text copies nothing.
+        let document = self.documents.get(self.active);
+        let delimiters = document
+            .and_then(|document| self.syntaxes.by_name(&document.syntax))
+            .map(Syntax::comment_delimiters)
+            .unwrap_or_default();
+        let contents = if delimiters.inline.is_some() || delimiters.block.is_some() {
+            document
+                .map(|document| {
+                    let editor = document.editor().read(cx);
+                    let rope = editor.text();
+                    let start = selection.start.min(rope.len());
+                    let end = selection.end.min(rope.len());
+                    // The same probe `textops::line_contents_range` uses: a
+                    // selection that stops just after a newline keeps the
+                    // previous line, and the range ends before that newline.
+                    let probe = if end > start { end - 1 } else { start };
+                    let first = RopeExt::offset_to_point(rope, start).row;
+                    let last = RopeExt::offset_to_point(rope, probe).row;
+                    let range = RopeExt::line_start_offset(rope, first)
+                        ..RopeExt::line_start_offset(rope, last) + RopeExt::line_len(rope, last);
+                    rope.slice(range).to_string()
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let gates = menus::MenuGates::for_editor_contents(
+            &contents,
+            &selection,
+            &entries,
+            &delimiters,
+            editable,
+        );
         if gates == self.menu_gates {
             return;
         }
@@ -3194,6 +3505,47 @@ impl Workspace {
     /// The document window, for the views that live in a window of their own.
     pub fn document_window(&self) -> Option<AnyWindowHandle> {
         self.find_window_owner
+    }
+
+    /// The window this workspace is the root view of.
+    ///
+    /// This is the address other windows use to run something here: a sheet in
+    /// another window can `update` the entity, but only a `&mut Window` can
+    /// paint or re-apply editor options, and the window has to be the one the
+    /// workspace is drawn in — see the field's comment for why `update_in`
+    /// cannot supply it.
+    pub fn window_handle(&self) -> AnyWindowHandle {
+        self.window_handle
+    }
+
+    /// Run `f` on this workspace in the window it is drawn in.
+    ///
+    /// The way a view in *another* window — the settings window and the sheets
+    /// it presents — changes something that needs a `&mut Window`: the
+    /// document window has to be addressed by handle, because an entity's
+    /// "current window" is the last one that read it, which is the window
+    /// making the request, and that window is on the update stack while it
+    /// handles the event that led here. `WeakEntity::update_in` resolves to
+    /// exactly that window and is therefore refused; the failure is silent.
+    ///
+    /// Returns whether the update ran, so callers can skip refreshing a view
+    /// that already has the new state.
+    pub fn update_in_own_window(
+        workspace: &WeakEntity<Self>,
+        cx: &mut App,
+        update: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> bool {
+        let Ok(handle) = workspace.read_with(cx, |workspace, _| workspace.window_handle()) else {
+            return false;
+        };
+        let workspace = workspace.clone();
+        handle
+            .update(cx, move |_, window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| update(workspace, window, cx))
+                    .is_ok()
+            })
+            .unwrap_or(false)
     }
 
     /// `Edit ▸ Find ▸ Find…` (⌘F) and *Find and Replace…* (⌥⌘F).
@@ -4222,13 +4574,159 @@ impl Workspace {
         self.apply_settings(window, cx);
     }
 
+    /// The window state an editor opacity calls for.
+    ///
+    /// Upstream sets `isOpaque = backgroundAlpha == 1` on the `NSWindow` and
+    /// clears the window's own background colour at any alpha below it, which
+    /// is what lets the desktop show through the text view. GPUI has the same
+    /// switch as `WindowBackgroundAppearance`.
+    pub(crate) fn window_appearance(alpha: f32) -> WindowBackgroundAppearance {
+        if alpha >= 1.0 {
+            WindowBackgroundAppearance::Opaque
+        } else {
+            WindowBackgroundAppearance::Transparent
+        }
+    }
+
+    /// The page colour at this window's opacity.
+    ///
+    /// Every region that is page rather than chrome paints this — the editor's
+    /// paper, the sidebar, the inspector, the tinted status bar — and nothing
+    /// else does. Upstream reaches the same end by clearing `drawsBackground`
+    /// on the text view and giving the window a translucent background colour;
+    /// painting once per region is that, spelled out.
+    fn paper(&self, cx: &App) -> Hsla {
+        cx.theme().background.opacity(self.applied_window_alpha)
+    }
+
+    /// Whether the desktop is meant to show through this window.
+    fn is_translucent(&self) -> bool {
+        self.applied_window_alpha < 1.0
+    }
+
+    /// The fill a page region paints when the root is the one carrying the
+    /// paper.
+    ///
+    /// At an opacity below 1 the root surface already paints the translucent
+    /// page (see [`Self::apply_root_paper`]), so a region that painted the same
+    /// colour a second time would composite two 0.6 layers into 0.84 — a
+    /// window visibly less transparent than the slider says. Those regions go
+    /// clear and let the window layer show through, which is exactly what
+    /// upstream does by clearing `drawsBackground` on the text view. At 1.0
+    /// nothing changes: each region still paints its own opaque paper.
+    fn page_fill(&self, cx: &App) -> Hsla {
+        if self.is_translucent() {
+            cx.theme().background.opacity(0.0)
+        } else {
+            self.paper(cx)
+        }
+    }
+
+    /// Give the window's root surface the translucent page colour.
+    ///
+    /// The component layer fills the root with `tokens.background` — the
+    /// opaque page — from `WindowState`'s `RootPlugin::style`, which is why a
+    /// window whose `WindowBackgroundAppearance` is `Transparent` still drew an
+    /// opaque rectangle. A root's own instance style refines *after* every
+    /// plugin's, so assigning the background there is the one place that fill
+    /// can be replaced. Upstream's equivalent is the window's own translucent
+    /// `backgroundColor` with the text view's `drawsBackground` cleared.
+    ///
+    /// Only document windows call this; the settings window and the sheets keep
+    /// the opaque page the plugin gives them.
+    fn apply_root_paper(window: &Window, alpha: f32, cx: &mut App) {
+        let Some(Some(root)) = window.root::<gpui_kit::base::Root>() else {
+            return;
+        };
+        let paper = if alpha >= 1.0 {
+            None
+        } else {
+            Some(cx.theme().background.opacity(alpha).into())
+        };
+        root.update(cx, |root, cx| {
+            root.style().background = paper;
+            cx.notify();
+        });
+    }
+
+    /// Take `alpha` into force in every document window.
+    ///
+    /// The component theme is application-wide, so the new paper colour is
+    /// projected once and every other workspace is told the value — upstream
+    /// does the same from the appearance preference change notification. Each
+    /// window also has to leave or enter the opaque state; that is the half
+    /// that keeps a translucent window from drawing an opaque backing store.
+    fn adopt_window_alpha(&mut self, alpha: f32, window: &mut Window, cx: &mut Context<Self>) {
+        self.applied_window_alpha = alpha;
+        let appearance = Self::window_appearance(alpha);
+        // The colours are application-wide, so they are projected once here
+        // rather than per window.
+        highlighter::project_theme(&self.theme, alpha, cx);
+
+        // The window handed in is this workspace's own — `apply_settings` is
+        // only ever called with a document window — and it is off
+        // `cx.windows()` for as long as its update runs, so it is done first,
+        // directly, rather than through the loop below.
+        window.set_background_appearance(appearance);
+        Self::apply_root_paper(window, alpha, cx);
+
+        // Every other document window follows. A window handle cannot be
+        // downcast to `Workspace`: `gpui_kit::open_window` mounts the view
+        // inside `gpui_kit::base::Root`, so `AnyWindowHandle::downcast` only
+        // ever succeeds for `Root`. The root's own view is what says whether
+        // the window is a document window.
+        let here = window.window_handle().window_id();
+        let this = cx.entity().entity_id();
+        for handle in cx.windows() {
+            if handle.window_id() == here {
+                continue;
+            }
+            let found = handle.update(cx, |root, window, cx| {
+                // `root` is the window's root view, and `open_window` mounts
+                // `base::Root` there; downcasting it to `Workspace` directly
+                // can never succeed. Ask the root for the view it wraps.
+                let root = root.downcast::<gpui_kit::base::Root>().ok()?;
+                let workspace = root.read(cx).view().clone().downcast::<Workspace>().ok()?;
+                window.set_background_appearance(appearance);
+                Self::apply_root_paper(window, alpha, cx);
+                Some(workspace)
+            });
+            let Ok(Some(workspace)) = found else {
+                continue;
+            };
+            // The settings are per workspace, so the others have to be told
+            // the new value; they would otherwise keep painting the old one if
+            // the user went back to them.
+            if workspace.entity_id() != this {
+                workspace.update(cx, |workspace, _cx| {
+                    workspace.applied_window_alpha = alpha;
+                    workspace.settings.appearance.window_alpha = alpha;
+                });
+            }
+        }
+
+        for editor in self.all_panes() {
+            editor.update(cx, |_, cx| cx.notify());
+        }
+        cx.refresh_windows();
+    }
+
     /// Re-apply every editor setting to every open document, and persist.
     ///
     /// Called after the settings window changes anything: the settings window
     /// edits the same `Settings` the workspace holds, so one pass here is what
     /// makes the change visible without a restart.
     pub fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The Appearance pane's slider is live: every open document window
+        // follows it as it moves, which is what upstream's preference-change
+        // notification makes happen.
+        let alpha = crate::settings::clamp_window_alpha(self.settings.appearance.window_alpha);
+        if alpha != self.applied_window_alpha {
+            self.adopt_window_alpha(alpha, window, cx);
+        }
+
         let options = self.settings.editor;
+        let rate = self.settings.window.overscroll_rate;
         let editors = self.all_panes();
         for editor in editors {
             editor.update(cx, |state, cx| {
@@ -4237,6 +4735,11 @@ impl Workspace {
                 state.set_show_whitespaces(options.show_invisibles, window, cx);
                 state.set_indent_guides(options.show_indent_guides, window, cx);
                 state.set_readonly(!options.editable, cx);
+                // Every pane here has been laid out at least once, so the
+                // viewport's row count is known and the new rate applies
+                // immediately.
+                let rows = Self::overscroll_rows(state, rate);
+                state.set_scroll_beyond_last_line(rows, window, cx);
                 cx.notify();
             });
         }
@@ -4271,14 +4774,33 @@ impl Workspace {
         cx.notify();
     }
 
+    /// How the toolbar draws its items.
+    pub fn toolbar_display_mode(&self) -> ToolbarDisplayMode {
+        self.settings.window.toolbar_display_mode
+    }
+
+    /// Change how the toolbar draws its items.
+    ///
+    /// The palette's 显示 pop-up and the height of the title bar both read this,
+    /// so it saves immediately the way a toolbar edit does.
+    pub fn set_toolbar_display_mode(&mut self, mode: ToolbarDisplayMode, cx: &mut Context<Self>) {
+        self.update_window_options(cx, |window| window.toolbar_display_mode = mode);
+    }
+
     /// *View ▸ Customize Toolbar…*
     ///
     /// Upstream runs `NSToolbar.runCustomizationPalette(_:)`, which shows the
     /// toolbar if it was hidden and opens a sheet over the window. This does the
-    /// same as a modal dialog: the toolbar behind is updated on every edit, so
-    /// the user sees the result while the palette is open, and *Done* closes it.
-    /// There is no Cancel — AppKit's palette has none either.
-    pub fn customize_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// same, with one difference that matters: the palette is drawn by the
+    /// workspace as an overlay rather than by `Dialog`. AppKit's palette leaves
+    /// the *real* toolbar live — items are dragged from the grid straight into
+    /// it — and a `Dialog` here occludes the whole window, so nothing behind it
+    /// can be a drop target. See `docs/PLAN.md` §22.52.
+    ///
+    /// The toolbar behind is updated on every edit, so the user sees the result
+    /// while the palette is open, and *Done* closes it. There is no Cancel —
+    /// AppKit's palette has none either.
+    pub fn customize_toolbar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.settings.window.show_toolbar {
             self.settings.window.show_toolbar = true;
             let _ = self.settings.save();
@@ -4286,20 +4808,27 @@ impl Workspace {
         }
 
         let items = self.toolbar_items();
+        // The strip draws the syntax item the way the real toolbar does — name
+        // and chevron — so it needs the window's document name and syntax.
+        let (name, syntax) = self
+            .active_document()
+            .map(|open| (open.document.display_name(), open.syntax.to_string()))
+            .unwrap_or_default();
+        let display_mode = self.toolbar_display_mode();
         let workspace = cx.entity().downgrade();
-        let sheet = cx.new(|_| ToolbarSheet::new(workspace, items));
-        window.open_dialog(cx, move |dialog, window, _| {
-            dialog
-                .title(localization::t("Customize Toolbar"))
-                // `Dialog::w` takes pixels, not a `Length`, so the interface
-                // scale is applied by hand. Two 18 rem lists plus the gap and
-                // the dialog's padding.
-                .w(window.rem_size() * 42.)
-                .child(sheet.clone())
-                // Enter confirms the palette the way Done does. Escape is
-                // handled by the sheet's `dismiss_on_escape`.
-                .on_ok(|_, _, _| true)
-        });
+        self.toolbar_sheet =
+            Some(cx.new(|_| ToolbarSheet::new(workspace, items, name, syntax, display_mode)));
+        cx.notify();
+    }
+
+    /// Close the customization palette, keeping everything the user dragged.
+    ///
+    /// Upstream's Done button dismisses the sheet; there is no rollback, because
+    /// every edit was already written to the toolbar and `UserDefaults`.
+    pub fn close_toolbar_sheet(&mut self, cx: &mut Context<Self>) {
+        if self.toolbar_sheet.take().is_some() {
+            cx.notify();
+        }
     }
 
     pub fn show_sidebar(&mut self, pane: SidebarPane, cx: &mut Context<Self>) {
@@ -4384,6 +4913,9 @@ impl Workspace {
         let document = &mut self.documents[index];
         document.panes.insert(pane + 1, split);
         document.active_pane = pane + 1;
+        // The new pane has not been laid out, so its overscroll is flush until
+        // the first frame — which is also when its viewport becomes readable.
+        self.apply_overscroll_when_settled(window, cx);
         cx.notify();
     }
 
@@ -4759,6 +5291,9 @@ impl Workspace {
             return;
         };
         document.syntax = SharedString::from(name.to_string());
+        // Upstream's `applyMode` re-applies the font, which discards a
+        // `Make Standard/Monospaced Font` override from this window.
+        document.font_type = None;
         // A different syntax means different outline rules, so the cached
         // extraction belongs to the old one.
         document.outline = None;
@@ -4789,32 +5324,106 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn set_font(&mut self, family: Option<String>, cx: &mut Context<Self>) {
-        self.settings.font_family = family;
-        let _ = self.settings.save();
+    /// The family, point size and ligature flag a document is drawn at.
+    ///
+    /// The saved family is only a name; it goes through `fonts::resolve` here
+    /// because GPUI panics at layout time on a family it cannot find, and a
+    /// settings file written on another machine may name one this machine does
+    /// not have.
+    fn document_font(&self, document: &OpenDocument, cx: &App) -> (String, f32, bool) {
+        let (family, size, ligature) = document.font_spec(&self.settings);
+        let fallback = match document.type_in_use(&self.settings) {
+            FontType::Standard => cx.theme().font_family.to_string(),
+            FontType::Monospaced => cx.theme().mono_font_family.to_string(),
+        };
+        (
+            fonts::resolve(cx, family.as_deref(), &fallback),
+            size,
+            ligature,
+        )
+    }
+
+    /// `Format ▸ Make Standard Font`: draw this window in the standard font.
+    pub fn set_font_standard(&mut self, cx: &mut Context<Self>) {
+        self.set_font_type(FontType::Standard, cx);
+    }
+
+    /// `Format ▸ Make Monospaced Font`.
+    pub fn set_font_monospaced(&mut self, cx: &mut Context<Self>) {
+        self.set_font_type(FontType::Monospaced, cx);
+    }
+
+    /// Switch this window's font type without saving it.
+    ///
+    /// Upstream's `makeFontStandard` / `makeFontMonospaced` loop the front
+    /// window's split text views and hand them the other face; nothing is
+    /// written to the defaults, and the next `applyMode` — a syntax change —
+    /// puts the window back on the mode's font type. That is what
+    /// [`Self::set_syntax`] clearing the override reproduces.
+    fn set_font_type(&mut self, font_type: FontType, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        document.font_type = Some(font_type);
+        let label = match font_type {
+            FontType::Standard => localization::t("Standard"),
+            FontType::Monospaced => localization::t("Monospaced"),
+        };
+        self.set_status(localization::tf("Font: {}", &[&label]), cx);
+    }
+
+    /// `Format ▸ Bigger Font` / `Smaller Font`, as upstream's
+    /// `EditorTextView+Scaling` applies them: ×1.1 or ÷1.1 on this window's
+    /// scale, clamped to the magnification range AppKit's scroll view allows.
+    pub fn scale_font(&mut self, factor: f32, cx: &mut Context<Self>) {
+        let Some(base) = self
+            .documents
+            .get(self.active)
+            .map(|document| document.font_spec(&self.settings).1)
+        else {
+            return;
+        };
+        let Some(document) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        document.font_scale = (document.font_scale * factor).clamp(0.25, 4.0);
+        // The status bar reports the size actually drawn, which is what the
+        // user is looking at — not the multiple the scale is stored as.
+        let effective = base * document.font_scale;
+        self.set_status(
+            localization::tf("Font size: {} pt", &[&format!("{:.0}", effective)]),
+            cx,
+        );
         cx.notify();
     }
 
-    pub fn bump_font(&mut self, delta: f32, cx: &mut Context<Self>) {
-        let size = (self.settings.font_size + delta).clamp(6.0, 96.0);
-        self.set_font_size(size, cx);
+    /// `Format ▸ Reset Font`: back to the Appearance pane's sizes.
+    ///
+    /// Upstream resets the magnification only — the font type in use is left
+    /// alone — so this does not touch [`OpenDocument::font_type`].
+    pub fn reset_font(&mut self, cx: &mut Context<Self>) {
+        let Some(document) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        document.font_scale = 1.0;
+        cx.notify();
     }
 
-    pub fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
-        self.settings.font_size = size.clamp(6.0, 96.0);
+    pub fn toggle_antialias(&mut self, cx: &mut Context<Self>) {
+        let on = {
+            let Some(document) = self.documents.get(self.active) else {
+                return;
+            };
+            let font_type = document.type_in_use(&self.settings);
+            let appearance = &mut self.settings.appearance;
+            let flag = match font_type {
+                FontType::Standard => &mut appearance.standard_antialias,
+                FontType::Monospaced => &mut appearance.monospaced_antialias,
+            };
+            *flag = !*flag;
+            *flag
+        };
         let _ = self.settings.save();
-        self.set_status(
-            localization::tf(
-                "Font size: {} pt",
-                &[&format!("{:.0}", self.settings.font_size)],
-            ),
-            cx,
-        );
-    }
-
-    pub fn toggle_antialias(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.update_editor_options(window, cx, |options| options.antialias = !options.antialias);
-        let on = self.settings.editor.antialias;
         self.set_status(
             localization::tf(
                 "Antialiasing {}",
@@ -4822,11 +5431,25 @@ impl Workspace {
             ),
             cx,
         );
+        self.refresh_menus(cx);
+        cx.notify();
     }
 
-    pub fn toggle_ligatures(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.update_editor_options(window, cx, |options| options.ligatures = !options.ligatures);
-        let on = self.settings.editor.ligatures;
+    pub fn toggle_ligatures(&mut self, cx: &mut Context<Self>) {
+        let on = {
+            let Some(document) = self.documents.get(self.active) else {
+                return;
+            };
+            let font_type = document.type_in_use(&self.settings);
+            let appearance = &mut self.settings.appearance;
+            let flag = match font_type {
+                FontType::Standard => &mut appearance.standard_ligature,
+                FontType::Monospaced => &mut appearance.monospaced_ligature,
+            };
+            *flag = !*flag;
+            *flag
+        };
+        let _ = self.settings.save();
         self.set_status(
             localization::tf(
                 "Ligatures {}",
@@ -4834,6 +5457,8 @@ impl Workspace {
             ),
             cx,
         );
+        self.refresh_menus(cx);
+        cx.notify();
     }
 
     /// Step through the tab widths CotEditor offers: 2, 4, 8.
@@ -4853,7 +5478,7 @@ impl Workspace {
     /// does until there is a custom-width sheet.
     pub fn set_tab_width(&mut self, width: usize, cx: &mut Context<Self>) {
         let uses_spaces = self.settings.uses_spaces_for_indentation;
-        self.settings.set_indentation(uses_spaces, width);
+        self.settings.set_effective_indentation(uses_spaces, width);
         let _ = self.settings.save();
         self.set_status(
             localization::tf("Tab width: {}", &[&self.settings.tab_width]),
@@ -4864,7 +5489,7 @@ impl Workspace {
     pub fn toggle_auto_expand_tabs(&mut self, cx: &mut Context<Self>) {
         let uses_spaces = !self.settings.uses_spaces_for_indentation;
         let width = self.settings.tab_width;
-        self.settings.set_indentation(uses_spaces, width);
+        self.settings.set_effective_indentation(uses_spaces, width);
         let _ = self.settings.save();
         self.set_status(
             if uses_spaces {
@@ -4891,7 +5516,7 @@ impl Workspace {
         // The document pane is a component `Editor`, which re-applies its own
         // style from the component theme every frame — so the colours have to
         // go there, not onto the editor state.
-        highlighter::project_theme(&theme, cx);
+        highlighter::project_theme(&theme, self.applied_window_alpha, cx);
 
         // The panes pick the new colours up from the component theme — see
         // `highlighter::project_theme` for why they cannot be set on the state.
@@ -5924,17 +6549,28 @@ impl Workspace {
         let options = WindowOptions {
             // A settings sheet is a column of labelled controls, not a document:
             // without an explicit size the window opened at the main window's
-            // width and left two thirds of itself empty. 760 × 580 holds the
-            // widest pane (Format's encoding list) with its sidebar.
+            // width and left two thirds of itself empty. 620 × 540 is upstream's
+            // window, which the toolbar of nine panes and the widest pane
+            // (Format's encoding list) both fit inside.
             //
             // Platform window geometry, not design scale: a window size is a
             // constraint on the OS window, so it stays in pixels.
             window_bounds: Some(WindowBounds::centered(
-                gpui_kit::size(px(760.), px(580.)),
+                gpui_kit::size(px(620.), px(540.)),
                 cx,
             )),
-            window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
-            ..Default::default()
+            window_min_size: Some(gpui_kit::size(px(620.), px(480.))),
+            // Upstream's style mask is `[.closable, .titled]`: there is no
+            // resize grip, because the window takes the selected pane's height
+            // itself (see `SettingsWindow::on_pane_measured`).
+            is_resizable: false,
+            // The pane paints its own titlebar — the pane name centred over
+            // the nine-cell toolbar, which is the arrangement upstream's
+            // toolbar-style window has and AppKit's titlebar cannot produce.
+            // These options make the content view full size and hide the
+            // native title, and let the app own the drag so a click on a
+            // toolbar cell does not become a window move.
+            ..gpui_kit::component::TitleBar::window_options()
         };
 
         // The settings window reads the settings and the syntax list *through*
@@ -5977,8 +6613,16 @@ impl Workspace {
             self.about_window = None;
         }
         let options = WindowOptions {
+            // Upstream's About panel is 200 points of identity column beside a
+            // 350-point description pane, 320 points tall. Without an explicit
+            // bound the window opens at the default document size, which turns
+            // a small panel into a mostly-empty sheet.
+            window_bounds: Some(WindowBounds::centered(
+                gpui_kit::size(px(551.), px(320.)),
+                cx,
+            )),
             // As above: an OS window constraint, not a design measurement.
-            window_min_size: Some(gpui_kit::size(px(420.), px(300.))),
+            window_min_size: Some(gpui_kit::size(px(551.), px(320.))),
             is_resizable: false,
             ..Default::default()
         };
@@ -6144,12 +6788,13 @@ impl Workspace {
 
     // ---- rendering -------------------------------------------------------
 
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let syntax = self
             .active_document()
             .map(|document| document.syntax.to_string())
             .unwrap_or_default();
         let has_document = self.active_document().is_some();
+        let mode = self.settings.window.toolbar_display_mode;
 
         // The items and their order are the user's, from the customization
         // palette. The default is upstream's text-document toolbar — syntax, a
@@ -6158,40 +6803,387 @@ impl Workspace {
         //
         // The bar has no width, background or border of its own: it is drawn
         // inside the title bar (see `render`), which supplies all three, and
-        // which is also why it needs no left padding — the title bar reserves
-        // the traffic lights' corner before its children begin.
+        // which is also why it needs no left padding for the traffic lights —
+        // the title bar reserves their corner before its children begin.
+        // It does need a small one for the title itself: the title is the
+        // bar's first child, and an item dropped to the left of a flexible
+        // space would otherwise sit flush against it.
         //
         // It takes the room the title leaves and aligns its items to the right
-        // edge, which is where upstream's toolbar sits: the flexible space is
-        // what pushes the trailing items there, and with no flexible space the
-        // whole set stays together at the right. The mouse handler is the other
-        // half of that: the title bar drags the window from its background, and
-        // a drag that starts on a toolbar item has to stay a drag of that item.
+        // edge, which is where upstream's toolbar sits. The mouse handler is
+        // the other half of that: the title bar drags the window from its
+        // background, and a drag that starts on a toolbar item has to stay a
+        // drag of that item.
+        //
+        // The right edge is not always the window's, though. The inspector
+        // tracking separator splits the bar in two: the items before it belong
+        // to the content view and end at the content/inspector divider, and the
+        // ones after it are laid out over the inspector's header. AppKit's own
+        // placement is visible in the reference window — with the tracked item
+        // set, everything from 格式 to 查找 ends at 849.5 of a 960-point window
+        // while the inspector is closed, and the toggle sits at 910–946.5 — so
+        // the content side is trailing-aligned, not leading-aligned as a
+        // flexible space alone would make it. That is what `split` below
+        // reproduces: a head row that fills whatever is left of the divider and
+        // justifies its items against it, then the separator's empty 4-point
+        // slot, then a tail row sized to the inspector. The slot is all the
+        // reference draws in a running window — see
+        // `render_tracking_separator` for the colors and the customization-mode
+        // outline.
         let mut bar = h_flex()
             .flex_1()
             .min_w_0()
-            .justify_end()
-            .pr_3()
-            .gap_1()
+            // The full strip, so that an item can be pinned to the top inset
+            // in the two-line mode instead of being centred with its caption.
+            .h_full()
+            .pl_2()
+            .pr(rems(TOOLBAR_TRAILING_PADDING_REMS))
+            .gap(px(TOOLBAR_ITEM_GAP))
             .items_center()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        for item in self.settings.toolbar_items.iter().copied() {
-            bar = bar.child(self.render_toolbar_item(item, &syntax, has_document, cx));
+
+        // While the palette is open this bar is the surface AppKit edits: a row
+        // can be dragged along it to reorder, a tile or strip item can be
+        // dragged down into it, and the default set can be dropped anywhere on
+        // it. Outside customization it is inert, exactly as upstream's is.
+        let sheet = self.toolbar_sheet.as_ref().map(Entity::downgrade);
+        if let Some(sheet) = sheet.clone() {
+            let dropped = move |drag: &ToolbarDrag, _window: &mut Window, cx: &mut App| {
+                sheet
+                    .update(cx, |sheet, cx| {
+                        match drag {
+                            ToolbarDrag::Palette { item, .. } => sheet.add(*item),
+                            // A row dropped on the bar's empty part keeps its
+                            // place: reordering happens by dropping *on* a row.
+                            ToolbarDrag::Row { .. } => return,
+                            ToolbarDrag::DefaultSet => sheet.reset(),
+                        }
+                        sheet.write(cx);
+                    })
+                    .ok();
+            };
+            bar = bar.on_drop::<ToolbarDrag>(dropped);
+        }
+
+        // Upstream's `.inspectorTrackingSeparator` is in the toolbar's immovable
+        // set, not in the palette, so a saved list can never hold it. Where it
+        // goes is therefore derived: AppKit inserts it just before the run of
+        // spaces that precedes the inspector toggle — syntax ▸ separator ▸
+        // flexible space ▸ toggle in upstream's default set, and find ▸
+        // separator ▸ flexible space ▸ toggle in the reference window's
+        // customized one.
+        let split = self
+            .settings
+            .toolbar_items
+            .iter()
+            .rposition(|item| *item == ToolbarItemId::ToggleInspector)
+            .map(|toggle| {
+                let mut at = toggle;
+                while at > 0
+                    && matches!(
+                        self.settings.toolbar_items[at - 1],
+                        ToolbarItemId::Space | ToolbarItemId::FlexibleSpace
+                    )
+                {
+                    at -= 1;
+                }
+                at
+            });
+        let inspector_shown = self.settings.window.show_inspector;
+        let rem = window.rem_size().as_f32();
+        let inspector_width = self.settings.window.inspector_width * rem;
+        let mut head: Vec<AnyElement> = Vec::new();
+        let mut tail: Vec<AnyElement> = Vec::new();
+
+        let target = cx.theme().accent.opacity(0.15);
+        for (index, item) in self.settings.toolbar_items.iter().copied().enumerate() {
+            let in_tail = split.is_some_and(|split| index >= split);
+            if split == Some(index) {
+                tail.push(self.render_tracking_separator(sheet.is_some(), cx));
+            }
+            let drawn = self.render_toolbar_item(item, &syntax, has_document, mode, window, cx);
+            // The flexible space stays a direct child: its `flex_1` is what
+            // holds the trailing items against the right edge, and wrapping it
+            // in a `flex_none` slot would collapse the gap it exists to make.
+            if sheet.is_none() || item == ToolbarItemId::FlexibleSpace {
+                if in_tail {
+                    // With the inspector closed the tail is only as wide as its
+                    // items, so a flexible space there has no room to expand and
+                    // AppKit gives it no width at all — not even the two item
+                    // gaps a zero-width child would cost. Leaving it out is the
+                    // same picture with the reference's spacing.
+                    if inspector_shown || item != ToolbarItemId::FlexibleSpace {
+                        tail.push(drawn);
+                    }
+                } else {
+                    head.push(drawn);
+                }
+                continue;
+            }
+            let drag = ToolbarDrag::Row {
+                from: index,
+                item,
+                label: localization::t(item.palette_label()).into(),
+            };
+            let drop_sheet = sheet.clone();
+            let dropped = move |drag: &ToolbarDrag, _window: &mut Window, cx: &mut App| {
+                let Some(sheet) = drop_sheet.clone() else {
+                    return;
+                };
+                sheet
+                    .update(cx, |sheet, cx| {
+                        match drag {
+                            ToolbarDrag::Palette { item, .. } => sheet.insert_at(*item, index),
+                            ToolbarDrag::Row { from, .. } => sheet.move_row(*from, index),
+                            ToolbarDrag::DefaultSet => sheet.reset(),
+                        }
+                        sheet.write(cx);
+                    })
+                    .ok();
+            };
+            let slot = div()
+                // The wrapper is full height so a rounded capsule and a caption
+                // stay stacked the way `render_toolbar_item` drew them.
+                .id(("toolbar-slot", index))
+                .relative()
+                .flex_none()
+                .h_full()
+                .flex()
+                .items_center()
+                .cursor_grab()
+                .on_drag(drag.clone(), |drag: &ToolbarDrag, _, _, cx| {
+                    drag.preview(cx)
+                })
+                .on_drop::<ToolbarDrag>(dropped)
+                .drag_over::<ToolbarDrag>(move |style, _, _, _| style.bg(target))
+                .child(drawn)
+                // The item's own control is a `Button`, and a *disabled* one
+                // stops the mouse-down it consumes (base/src/button.rs). A
+                // Plain Text document disables Comment and a read-only one
+                // disables the indent pair, so those items would never start
+                // a drag from their body. AppKit's toolbar is inert while its
+                // customization palette is open — an item there can only be
+                // dragged, not clicked — so a transparent handle is laid over
+                // the control. It is drawn last, which puts its hitbox above
+                // the button's, so the press reaches the drag source first and
+                // the button never is the one that sees it.
+                .child(
+                    div()
+                        .id(("toolbar-drag-handle", index))
+                        .absolute()
+                        .inset_0()
+                        .cursor_grab()
+                        .on_drag(drag, |drag: &ToolbarDrag, _, _, cx| drag.preview(cx)),
+                )
+                // The drag targets are the only part of the bar the UI test
+                // can point at: a bare `div` with an id stays out of the
+                // observation registry.
+                .test_support();
+            if in_tail {
+                tail.push(slot.into_any_element());
+            } else {
+                head.push(slot.into_any_element());
+            }
+        }
+
+        let head_row = h_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .justify_end()
+            .items_center()
+            .gap(px(TOOLBAR_ITEM_GAP))
+            .children(head);
+        bar = bar.child(head_row);
+        if split.is_some() {
+            let mut tail_row = h_flex()
+                .flex_none()
+                .h_full()
+                .items_center()
+                .gap(px(TOOLBAR_ITEM_GAP))
+                .children(tail);
+            if inspector_shown {
+                // The divider is at `window - inspector`; the bar's trailing
+                // padding is already outside this row, so the row covers the
+                // inspector's width minus that padding and the separator lands
+                // on the divider itself.
+                tail_row = tail_row.w(px(
+                    (inspector_width - TOOLBAR_TRAILING_PADDING_REMS * rem).max(0.)
+                ));
+            }
+            bar = bar.child(tail_row);
         }
         bar
     }
 
+    /// AppKit's inspector tracking separator — an empty slot in the bar.
+    ///
+    /// The item takes 4 points whether or not the inspector is open, and that
+    /// slot is why the reference leaves 17.5 points between the last content
+    /// item and the toggle (6.75 + 4 + 6.75) while two neighbouring items are
+    /// 6.5 apart: find ends at 1785 and the toggle starts at 1821 in a
+    /// 1920-pixel-wide 2× capture.
+    ///
+    /// It draws no ink in a running window. Four reference windows captured
+    /// with the inspector closed — cot-ref.md, 未命名, a.md and the plain-text
+    /// 临时记录-AI编程.txt — all have the bar's white background running
+    /// straight through that gap, with nothing darker than 252 anywhere
+    /// between the two items. An earlier version of this comment claimed the
+    /// opposite and drew a permanent outline.
+    ///
+    /// The hollow 4 × 36-point box — a 1-point RGB 197 stroke, nothing filled —
+    /// belongs to *customization*: AppKit outlines the toolbar's immovable
+    /// items (this one and the flexible spaces) while the bar can be edited.
+    /// The only captured window that shows it is 未命名2 with the customization
+    /// sheet open, where it measures 8 × 72 pixels at 2× with its vertical
+    /// strokes at x = 1798..1799 and 1804..1805, and the customization fill
+    /// (242) behind them. So the box is drawn only while `customizing`; the
+    /// slot is invisible the rest of the time.
+    fn render_tracking_separator(&self, customizing: bool, cx: &mut Context<Self>) -> AnyElement {
+        let slot = div().flex_none().w(px(4.)).h(px(36.));
+        if customizing {
+            slot.border(px(1.))
+                .border_color(toolbar_ink(cx).opacity(TOOLBAR_TRACKING_STROKE))
+                .into_any_element()
+        } else {
+            slot.into_any_element()
+        }
+    }
+
+    /// Whether `item` is available for `syntax`, following the validation
+    /// CotEditor installs on its text view.
+    ///
+    /// `EditorTextView.validateUserInterfaceItem(_:)` (`:1155-1269`) answers
+    /// the two document-bound items, and it does not answer them alike:
+    ///
+    /// * `toggleComment` returns `self.isEditable && (!self.commentDelimiters
+    ///   .inlines.isEmpty || !self.commentDelimiters.blocks.isEmpty)` — a
+    ///   Plain Text document has no delimiters, so its Comment item greys out.
+    /// * `shiftRight`, `shiftLeft`, `convertIndentationToSpaces`,
+    ///   `convertIndentationToTabs`, `moveLineUp`, `moveLineDown`, … return
+    ///   `self.isEditable` alone, so the Indent pair greys out only for a
+    ///   read-only document and stays live in Plain Text.
+    ///
+    /// That asymmetry is upstream's, not a rendering choice here — and it is
+    /// why Plain Text changes exactly one toolbar item. The three remaining
+    /// pairs act on the window or the view rather than the document, so their
+    /// halves never validate.
+    fn toolbar_item_enabled(&self, item: ToolbarItemId, syntax: &str) -> bool {
+        match item {
+            ToolbarItemId::Comment => {
+                let delimiters = self
+                    .syntaxes
+                    .by_name(syntax)
+                    .map(Syntax::comment_delimiters)
+                    .unwrap_or_default();
+                self.settings.editor.editable
+                    && (delimiters.inline.is_some() || delimiters.block.is_some())
+            }
+            ToolbarItemId::Indent => self.settings.editor.editable,
+            _ => true,
+        }
+    }
+
     /// One toolbar item, drawn the way its `NSToolbarItem` is.
     ///
-    /// Groups are two buttons rather than one segmented control: the component
-    /// library has no `NSToolbarItemGroup`, and two adjacent buttons with the
-    /// same glyphs read the same. Every item that changes a setting shows it
-    /// pressed, which is upstream's `StatableToolbarItem`.
+    /// AppKit puts the label of a text-mode item *under* its control, centred,
+    /// in the bar's secondary colour, and makes the bar taller to hold it. The
+    /// control keeps its own representation either way, so this wrapper draws
+    /// the control in its icon form and adds the caption beneath it. The spaces
+    /// have no caption: AppKit draws them as blanks.
+    ///
+    /// The bar has two shapes, not three: a side-by-side capture of AppKit's
+    /// `.labelOnly` and `.iconAndLabel` with CotEditor's item shapes produced
+    /// identical windows, glyphs and captions included, while `.iconOnly` was
+    /// the shorter bar without captions. So both text modes take the caption
+    /// branch here and only `IconOnly` skips it — see
+    /// `ToolbarDisplayMode::title_bar_height`.
+    ///
+    /// The four pairs are `NSToolbarItemGroup`s — one bordered capsule around
+    /// both halves, not two loose buttons. Upstream draws the halves as a
+    /// `selectOne` group: a 78 × 37 pill with a 5 % fill, and the chosen half
+    /// as a 32 × 28 stadium inset inside it, not as one tall filled button
+    /// butted against another. The momentary groups (text size, indent) never
+    /// look pressed. A single item that changes a setting shows the change by
+    /// swapping its picture, which is upstream's `StatableToolbarItem` — the
+    /// fill stays put, so these report their state to assistive technology
+    /// with `toggled` rather than painting it.
     fn render_toolbar_item(
         &self,
         item: ToolbarItemId,
         syntax: &str,
         has_document: bool,
+        mode: ToolbarDisplayMode,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let spacer = matches!(
+            item,
+            ToolbarItemId::Space | ToolbarItemId::FlexibleSpace | ToolbarItemId::Unknown
+        );
+        if mode == ToolbarDisplayMode::IconOnly || spacer {
+            return self.render_toolbar_control(item, syntax, has_document, mode, window, cx);
+        }
+        // The control itself is always the glyph in the caption modes: the
+        // caption is the text, and drawing the words twice — once in the
+        // capsule and once under it — would differ from AppKit, whose
+        // label-only bar is the icon-and-label bar.
+        let control = self.render_toolbar_control(
+            item,
+            syntax,
+            has_document,
+            ToolbarDisplayMode::IconOnly,
+            window,
+            cx,
+        );
+        // AppKit dims the caption along with the item instead of dropping it:
+        // the probe's disabled caption read 197 over the bar's 255 (≈23 %) and
+        // the enabled one 125 (≈51 %). That is not `TOOLBAR_CAPTION_INK` scaled
+        // down — the dimmed caption is ink in its own right — so a disabled
+        // caption takes `TOOLBAR_DISABLED_INK` outright, and the one constant
+        // also covers the glyph's 27 %.
+        let caption_ink = if self.toolbar_item_enabled(item, syntax) {
+            TOOLBAR_CAPTION_INK
+        } else {
+            TOOLBAR_DISABLED_INK
+        };
+        v_flex()
+            .flex_none()
+            .h_full()
+            .items_center()
+            // AppKit hangs the capsule from the same 7.5-point inset the
+            // icon-only bar uses and lets the caption take the room the taller
+            // strip adds. Centring the pair instead would lift the capsule and
+            // push the caption into the strip's bottom edge.
+            .pt(px(TOOLBAR_TOP_INSET))
+            .gap(px(TOOLBAR_CAPTION_GAP))
+            .child(control)
+            .child(
+                div()
+                    .truncate()
+                    .text_size(px(TOOLBAR_CAPTION_SIZE))
+                    .whitespace_nowrap()
+                    // AppKit sets a toolbar label in the system's secondary
+                    // label ink, not in the document theme's text colour:
+                    // an enabled caption measures 125 over the bar's 255
+                    // (see `TOOLBAR_CAPTION_INK`). The theme's `#2b2b2b` at
+                    // 25 %, which an earlier pass used, reads 196 and is all
+                    // but invisible.
+                    .text_color(toolbar_ink(cx).opacity(caption_ink))
+                    .child(localization::t(item.label())),
+            )
+            .into_any_element()
+    }
+
+    /// The control itself, without the caption `render_toolbar_item` may stack
+    /// under it.
+    fn render_toolbar_control(
+        &self,
+        item: ToolbarItemId,
+        syntax: &str,
+        has_document: bool,
+        mode: ToolbarDisplayMode,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match item {
@@ -6208,11 +7200,32 @@ impl Workspace {
                 // `bezelStyle = .toolbar`: a bordered capsule holding just the
                 // syntax name and a ⇕ indicator, no icon. A ghost button with
                 // a language glyph is a different control in the same place.
-                Button::new("toolbar-syntax")
-                    .outline()
-                    .small()
-                    .label(label)
-                    .dropdown_caret(true)
+                //
+                // An `NSPopUpButton` reports the width of its *widest item* as
+                // its intrinsic width, and CotEditor pins the control to it
+                // (`updateSyntaxPopUpButtonWidth`), so the pop-up keeps one
+                // width while the document's syntax changes — 147 points in
+                // the reference, even though "Markdown" is much shorter than
+                // "reStructuredText". Sizing it from the current title instead
+                // makes the bar reflow every time a document opens.
+                let popup_width = toolbar_popup_width(names.iter().map(String::as_str), window, cx);
+                toolbar_bezel("toolbar-syntax", toolbar_ink(cx), cx)
+                    .w(px(popup_width))
+                    .px_3()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_1()
+                            .text_size(px(TOOLBAR_POPUP_TEXT_SIZE))
+                            .child(div().min_w_0().truncate().child(label))
+                            .child(
+                                Icon::new(IconName::ChevronsUpDown)
+                                    .size(px(TOOLBAR_POPUP_CHEVRON_SIZE))
+                                    .text_color(toolbar_ink(cx)),
+                            ),
+                    )
                     .disabled(!has_document)
                     .accessibility_label(localization::t("Syntax"))
                     .tooltip(localization::t("Change syntax"))
@@ -6244,213 +7257,291 @@ impl Workspace {
                                     }),
                             );
                         }
-                        menu
+                        // Seventy syntaxes are taller than the screen, and
+                        // AppKit's pop-up menu scrolls once its list outgrows
+                        // the screen — an unscrolled menu would cut off the
+                        // syntaxes past the bottom with no way to reach them.
+                        // The widget only applies `max_h` to a scrollable
+                        // menu, so this is also what caps the height.
+                        menu.scrollable(true)
                     })
                     .into_any_element()
             }
-            ToolbarItemId::TextSize => h_flex()
-                .gap_0p5()
-                .items_center()
-                .child(
-                    Button::new("toolbar-smaller")
-                        .ghost()
-                        .small()
-                        .icon(IconName::AArrowDown)
-                        .accessibility_label(localization::t("Smaller"))
-                        .tooltip(localization::t("Decrease text size"))
-                        .on_click(cx.listener(|this, _, _, cx| this.bump_font(-1.0, cx))),
+            ToolbarItemId::TextSize => toolbar_group(
+                "toolbar-text-size",
+                toolbar_ink(cx),
+                ToolbarGroupKind::Momentary,
+                toolbar_segment(
+                    "toolbar-smaller",
+                    toolbar_ink(cx),
+                    false,
+                    ToolbarGroupKind::Momentary,
+                    cx,
                 )
-                .child(
-                    Button::new("toolbar-bigger")
-                        .ghost()
-                        .small()
-                        .icon(IconName::AArrowUp)
-                        .accessibility_label(localization::t("Bigger"))
-                        .tooltip(localization::t("Increase text size"))
-                        .on_click(cx.listener(|this, _, _, cx| this.bump_font(1.0, cx))),
+                .child(crate::toolbar::text_size_glyph(true))
+                .accessibility_label(localization::t("Smaller"))
+                .tooltip(localization::t("Decrease text size"))
+                .on_click(cx.listener(|this, _, _, cx| this.scale_font(1.0 / 1.1, cx))),
+                toolbar_segment(
+                    "toolbar-bigger",
+                    toolbar_ink(cx),
+                    false,
+                    ToolbarGroupKind::Momentary,
+                    cx,
                 )
-                .into_any_element(),
+                .child(crate::toolbar::text_size_glyph(false))
+                .accessibility_label(localization::t("Bigger"))
+                .tooltip(localization::t("Increase text size"))
+                .on_click(cx.listener(|this, _, _, cx| this.scale_font(1.1, cx))),
+            )
+            .into_any_element(),
             ToolbarItemId::WritingDirection => {
                 let rtl = self.settings.window.writing_direction == WritingDirection::RightToLeft;
-                h_flex()
-                    .gap_0p5()
-                    .items_center()
-                    .child(
-                        Button::new("toolbar-ltr")
-                            .ghost()
-                            .small()
-                            .icon(IconName::TextAlignStart)
-                            .selected(!rtl)
-                            .accessibility_label(localization::t("Left to Right"))
-                            .tooltip(localization::t("Left to right"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.dispatch("MakeWritingDirectionLeftToRight", window, cx);
-                            })),
+                toolbar_group(
+                    "toolbar-writing-direction",
+                    toolbar_ink(cx),
+                    ToolbarGroupKind::SelectOne,
+                    toolbar_segment(
+                        "toolbar-ltr",
+                        toolbar_ink(cx),
+                        !rtl,
+                        ToolbarGroupKind::SelectOne,
+                        cx,
                     )
-                    .child(
-                        Button::new("toolbar-rtl")
-                            .ghost()
-                            .small()
-                            .icon(IconName::TextAlignEnd)
-                            .selected(rtl)
-                            .accessibility_label(localization::t("Right to Left"))
-                            .tooltip(localization::t("Right to left"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.dispatch("MakeWritingDirectionRightToLeft", window, cx);
-                            })),
+                    .child(crate::toolbar::writing_direction_glyph(
+                        false,
+                        toolbar_ink(cx),
+                    ))
+                    .accessibility_label(localization::t("Left to Right"))
+                    .tooltip(localization::t("Left to right"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("MakeWritingDirectionLeftToRight", window, cx);
+                    })),
+                    toolbar_segment(
+                        "toolbar-rtl",
+                        toolbar_ink(cx),
+                        rtl,
+                        ToolbarGroupKind::SelectOne,
+                        cx,
                     )
+                    .child(crate::toolbar::writing_direction_glyph(
+                        true,
+                        toolbar_ink(cx),
+                    ))
+                    .accessibility_label(localization::t("Right to Left"))
+                    .tooltip(localization::t("Right to left"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("MakeWritingDirectionRightToLeft", window, cx);
+                    })),
+                )
+                .into_any_element()
+            }
+            // Upstream's group is `selectOne` with Horizontal selected. It stays
+            // on Horizontal because the layout cannot change: the vertical arm
+            // only reports why (see `dispatch.rs`), so a press that moved the
+            // selection would be a state the editor does not have.
+            ToolbarItemId::TextOrientation => toolbar_group(
+                "toolbar-text-orientation",
+                toolbar_ink(cx),
+                ToolbarGroupKind::SelectOne,
+                toolbar_segment(
+                    "toolbar-horizontal",
+                    toolbar_ink(cx),
+                    true,
+                    ToolbarGroupKind::SelectOne,
+                    cx,
+                )
+                .child(crate::toolbar::text_orientation_glyph(
+                    false,
+                    toolbar_ink(cx),
+                ))
+                .accessibility_label(localization::t("Horizontal"))
+                .tooltip(localization::t("Horizontal"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("MakeLayoutOrientationHorizontal", window, cx);
+                })),
+                toolbar_segment(
+                    "toolbar-vertical",
+                    toolbar_ink(cx),
+                    false,
+                    ToolbarGroupKind::SelectOne,
+                    cx,
+                )
+                .child(crate::toolbar::text_orientation_glyph(
+                    true,
+                    toolbar_ink(cx),
+                ))
+                .accessibility_label(localization::t("Vertical"))
+                .tooltip(localization::t("Vertical"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("MakeLayoutOrientationVertical", window, cx);
+                })),
+            )
+            .into_any_element(),
+            // Upstream flips this pair only when the *window's* titlebar layout
+            // direction is right-to-left, which is the system language's
+            // direction and not the document's writing direction. SubText has
+            // no right-to-left window chrome, so the order is always Shift
+            // Left then Shift Right.
+            ToolbarItemId::Indent => {
+                // Both halves validate on `isEditable` alone, so the pair greys
+                // out for a read-only document and stays live in Plain Text —
+                // see `toolbar_item_enabled`. The glyphs are drawn from the ink
+                // rather than being symbols, so the dim has to be passed down:
+                // a disabled `Button` only replaces the colour its children
+                // inherit, and this art paints its own.
+                let enabled = self.toolbar_item_enabled(item, syntax);
+                let glyph_ink = if enabled {
+                    toolbar_ink(cx)
+                } else {
+                    toolbar_ink(cx).opacity(TOOLBAR_DISABLED_INK)
+                };
+                toolbar_group(
+                    "toolbar-indent",
+                    toolbar_ink(cx),
+                    ToolbarGroupKind::Momentary,
+                    toolbar_segment(
+                        "toolbar-shift-left",
+                        toolbar_ink(cx),
+                        false,
+                        ToolbarGroupKind::Momentary,
+                        cx,
+                    )
+                    .disabled(!enabled)
+                    .child(crate::toolbar::indent_glyph(true, glyph_ink))
+                    .accessibility_label(localization::t("Shift Left"))
+                    .tooltip(localization::t("Shift lines to the left"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ShiftLeft", window, cx);
+                    })),
+                    toolbar_segment(
+                        "toolbar-shift-right",
+                        toolbar_ink(cx),
+                        false,
+                        ToolbarGroupKind::Momentary,
+                        cx,
+                    )
+                    .disabled(!enabled)
+                    .child(crate::toolbar::indent_glyph(false, glyph_ink))
+                    .accessibility_label(localization::t("Shift Right"))
+                    .tooltip(localization::t("Shift lines to the right"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ShiftRight", window, cx);
+                    })),
+                )
+                .into_any_element()
+            }
+            ToolbarItemId::Comment => {
+                // The one item Plain Text visibly changes: upstream validates
+                // `toggleComment` against the syntax's comment delimiters, and
+                // Plain Text has none. The picture is a symbol, which paints its
+                // own colour and so ignores the colour a disabled `Button` hands
+                // its children — hence the explicit dimmed ink.
+                let enabled = self.toolbar_item_enabled(item, syntax);
+                let ink = if enabled {
+                    toolbar_ink(cx)
+                } else {
+                    toolbar_ink(cx).opacity(TOOLBAR_DISABLED_INK)
+                };
+                let picture = Icon::new(IconName::TextQuote)
+                    .with_size(px(TOOLBAR_GLYPH_SIZE))
+                    .text_color(ink)
+                    .into_any_element();
+                toolbar_picture_button("toolbar-comment", item, picture, mode, cx)
+                    .disabled(!enabled)
+                    .tooltip(localization::t("Comment-out or uncomment selection"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch("ToggleComment", window, cx);
+                    }))
                     .into_any_element()
             }
-            ToolbarItemId::TextOrientation => h_flex()
-                .gap_0p5()
-                .items_center()
-                .child(
-                    Button::new("toolbar-horizontal")
-                        .ghost()
-                        .small()
-                        .icon(IconName::RectangleHorizontal)
-                        .accessibility_label(localization::t("Horizontal"))
-                        .tooltip(localization::t("Horizontal"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.dispatch("MakeLayoutOrientationHorizontal", window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("toolbar-vertical")
-                        .ghost()
-                        .small()
-                        .icon(IconName::RectangleVertical)
-                        .accessibility_label(localization::t("Vertical"))
-                        .tooltip(localization::t("Vertical"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.dispatch("MakeLayoutOrientationVertical", window, cx);
-                        })),
-                )
-                .into_any_element(),
-            ToolbarItemId::Indent => h_flex()
-                .gap_0p5()
-                .items_center()
-                .child(
-                    Button::new("toolbar-shift-left")
-                        .ghost()
-                        .small()
-                        .icon(IconName::ListIndentDecrease)
-                        .accessibility_label(localization::t("Shift Left"))
-                        .tooltip(localization::t("Shift lines to the left"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.dispatch("ShiftLeft", window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("toolbar-shift-right")
-                        .ghost()
-                        .small()
-                        .icon(IconName::ListIndentIncrease)
-                        .accessibility_label(localization::t("Shift Right"))
-                        .tooltip(localization::t("Shift lines to the right"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.dispatch("ShiftRight", window, cx);
-                        })),
-                )
-                .into_any_element(),
-            ToolbarItemId::Comment => Button::new("toolbar-comment")
-                .ghost()
-                .small()
-                .icon(IconName::MessageSquare)
-                .accessibility_label(localization::t("Comment"))
-                .tooltip(localization::t("Comment-out or uncomment selection"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.dispatch("ToggleComment", window, cx);
-                }))
-                .into_any_element(),
             ToolbarItemId::TabStyle => {
                 let uses_spaces = self.settings.uses_spaces_for_indentation;
                 let tab_width = self.settings.tab_width;
                 let workspace = cx.entity().downgrade();
-                h_flex()
-                    .gap_0p5()
-                    .items_center()
+                // Upstream's `.tabStyle` is a `StatableMenuToolbarItem`: one
+                // bordered capsule whose left half toggles the indentation and
+                // whose right half opens the "Tab Width" menu. Its state is
+                // shown by swapping the image, not by filling the item
+                // (`StatableMenuToolbarItem.swift:55-60`), so the glyph does
+                // that job here. `DropdownButton` is the split in principle,
+                // but its caret half takes neither a height nor rounding of
+                // its own, so the halves are built from `toolbar_bezel`: the
+                // left keeps its left corners and its right edge, the right
+                // keeps its right corners and drops its left edge — so the
+                // seam is one hairline between two fills.
+                let action = toolbar_bezel("toolbar-tab-style-action", toolbar_ink(cx), cx)
+                    .w(px(TOOLBAR_SPLIT_ACTION_WIDTH))
+                    .px_0()
+                    .rounded_tr_none()
+                    .rounded_br_none()
+                    .child(toolbar_glyph(if uses_spaces {
+                        IconName::Space
+                    } else {
+                        IconName::ArrowRightToLine
+                    }))
+                    .accessibility_label(localization::t("Tab Style"))
+                    .tooltip(if uses_spaces {
+                        localization::t("Use tabs for indentation")
+                    } else {
+                        localization::t("Use spaces for indentation")
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_auto_expand_tabs(cx);
+                    }));
+                let menu = toolbar_bezel("toolbar-tab-style-menu", toolbar_ink(cx), cx)
+                    .w(px(TOOLBAR_SPLIT_MENU_WIDTH))
+                    .px_0()
+                    .rounded_tl_none()
+                    .rounded_bl_none()
+                    .border_l_0()
                     .child(
-                        Button::new("toolbar-tab-style")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Braces)
-                            .selected(uses_spaces)
-                            .accessibility_label(localization::t("Tab Style"))
-                            .tooltip(if uses_spaces {
-                                localization::t("Use tabs for indentation")
-                            } else {
-                                localization::t("Use spaces for indentation")
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_auto_expand_tabs(cx);
-                            })),
+                        Icon::new(IconName::ChevronDown)
+                            .with_size(px(TOOLBAR_CARET_SIZE))
+                            .into_any_element(),
                     )
-                    .child(
-                        Button::new("toolbar-tab-style-menu")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ChevronDown)
-                            .accessibility_label(localization::t("Tab Width"))
-                            .tooltip(localization::t("Tab width"))
-                            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
-                                // Upstream's menu is one section header, the
-                                // three widths, Custom…, a separator, and the
-                                // spaces/tabs toggle — in that order
-                                // (`DocumentWindowController.swift:895-915`).
-                                let mut menu = menu.separator().label(localization::t("Tab Width"));
-                                for width in [2usize, 4, 8] {
-                                    let workspace = workspace.clone();
-                                    menu = menu.item(
-                                        PopupMenuItem::new(width.to_string())
-                                            .checked(tab_width == width)
-                                            .on_click(move |_, _, cx| {
-                                                workspace
-                                                    .update(cx, |this, cx| {
-                                                        this.set_tab_width(width, cx)
-                                                    })
-                                                    .ok();
-                                            }),
-                                    );
-                                }
-                                let custom = workspace.clone();
-                                menu = menu.item(
-                                    PopupMenuItem::new(localization::t("Custom…")).on_click(
-                                        move |_, _, cx| {
-                                            custom
-                                                .update(cx, |this, cx| this.cycle_tab_width(cx))
-                                                .ok();
-                                        },
-                                    ),
-                                );
-                                let toggle = workspace.clone();
-                                menu.separator().item(
-                                    PopupMenuItem::new(localization::t(
-                                        "Use Spaces for Indentation",
-                                    ))
-                                    .checked(uses_spaces)
-                                    .on_click(
-                                        move |_, _, cx| {
-                                            toggle
-                                                .update(cx, |this, cx| {
-                                                    this.toggle_auto_expand_tabs(cx)
-                                                })
-                                                .ok();
-                                        },
-                                    ),
-                                )
-                            }),
-                    )
-                    .into_any_element()
+                    .accessibility_label(localization::t("Tab Width"))
+                    .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                        // Upstream's menu is one section header, the
+                        // three widths, Custom…, a separator, and the
+                        // spaces/tabs toggle — in that order
+                        // (`DocumentWindowController.swift:895-915`).
+                        let mut menu = menu.separator().label(localization::t("Tab Width"));
+                        for width in [2usize, 4, 8] {
+                            let workspace = workspace.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(width.to_string())
+                                    .checked(tab_width == width)
+                                    .on_click(move |_, _, cx| {
+                                        workspace
+                                            .update(cx, |this, cx| this.set_tab_width(width, cx))
+                                            .ok();
+                                    }),
+                            );
+                        }
+                        let custom = workspace.clone();
+                        menu = menu.item(PopupMenuItem::new(localization::t("Custom…")).on_click(
+                            move |_, _, cx| {
+                                custom.update(cx, |this, cx| this.cycle_tab_width(cx)).ok();
+                            },
+                        ));
+                        let toggle = workspace.clone();
+                        menu.separator().item(
+                            PopupMenuItem::new(localization::t("Use Spaces for Indentation"))
+                                .checked(uses_spaces)
+                                .on_click(move |_, _, cx| {
+                                    toggle
+                                        .update(cx, |this, cx| this.toggle_auto_expand_tabs(cx))
+                                        .ok();
+                                }),
+                        )
+                    });
+                h_flex().child(action).child(menu).into_any_element()
             }
             ToolbarItemId::WrapLines => {
                 let on = self.settings.editor.wrap_lines;
-                Button::new("toolbar-wrap-lines")
-                    .ghost()
-                    .small()
-                    .icon(IconName::TextWrap)
-                    .selected(on)
-                    .accessibility_label(localization::t("Line Wrapping"))
+                toolbar_symbol_button("toolbar-wrap-lines", ToolbarItemId::WrapLines, on, mode, cx)
+                    .toggled(on)
                     .tooltip(if on {
                         localization::t("Unwrap lines")
                     } else {
@@ -6463,70 +7554,81 @@ impl Workspace {
             }
             ToolbarItemId::Invisibles => {
                 let on = self.settings.editor.show_invisibles;
-                Button::new("toolbar-invisibles")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Pilcrow)
-                    .selected(on)
-                    .accessibility_label(localization::t("Invisibles"))
-                    .tooltip(if on {
-                        localization::t("Hide invisible characters")
-                    } else {
-                        localization::t("Show invisible characters")
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.dispatch("ToggleInvisibleChars", window, cx);
-                    }))
-                    .into_any_element()
+                // Upstream's `validateUserInterfaceItem` disables the item when
+                // no kind of invisible character is switched on, because the
+                // toggle would then show nothing. The five booleans here are the
+                // same five keys `Invisible+UserDefaults.swift` reads, so the
+                // condition is the same one.
+                let configured = self.settings.editor.show_invisible_new_line
+                    || self.settings.editor.show_invisible_tab
+                    || self.settings.editor.show_invisible_space
+                    || self.settings.editor.show_invisible_whitespaces
+                    || self.settings.editor.show_invisible_control;
+                toolbar_symbol_button(
+                    "toolbar-invisibles",
+                    ToolbarItemId::Invisibles,
+                    on,
+                    mode,
+                    cx,
+                )
+                .toggled(on)
+                .disabled(!configured)
+                .tooltip(if !configured {
+                    localization::t("To show invisible characters, set them in Window settings")
+                } else if on {
+                    localization::t("Hide invisible characters")
+                } else {
+                    localization::t("Show invisible characters")
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ToggleInvisibleChars", window, cx);
+                }))
+                .into_any_element()
             }
             ToolbarItemId::IndentGuides => {
                 let on = self.settings.editor.show_indent_guides;
-                Button::new("toolbar-indent-guides")
-                    .ghost()
-                    .small()
-                    .icon(IconName::ListTree)
-                    .selected(on)
-                    .accessibility_label(localization::t("Indent Guides"))
-                    .tooltip(if on {
-                        localization::t("Hide indent guide lines")
-                    } else {
-                        localization::t("Show indent guide lines")
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.dispatch("ToggleIndentGuides", window, cx);
-                    }))
-                    .into_any_element()
+                toolbar_symbol_button(
+                    "toolbar-indent-guides",
+                    ToolbarItemId::IndentGuides,
+                    on,
+                    mode,
+                    cx,
+                )
+                .toggled(on)
+                .tooltip(if on {
+                    localization::t("Hide indent guide lines")
+                } else {
+                    localization::t("Show indent guide lines")
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.dispatch("ToggleIndentGuides", window, cx);
+                }))
+                .into_any_element()
             }
             ToolbarItemId::KeepOnTop => {
                 let on = self.settings.window.keep_on_top;
-                Button::new("toolbar-keep-on-top")
-                    .ghost()
-                    .small()
-                    .icon(if on { IconName::PinOff } else { IconName::Pin })
-                    .selected(on)
-                    .accessibility_label(localization::t("Keep on Top"))
-                    // One tooltip either way: upstream defines only
-                    // `Toolbar.keepOnTop.tooltip`, with no state variants.
-                    .tooltip(localization::t("Keep the window always on top"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.update_window_options(cx, |window| {
-                            window.keep_on_top = !window.keep_on_top
-                        })
-                    }))
-                    .into_any_element()
+                toolbar_symbol_button(
+                    "toolbar-keep-on-top",
+                    ToolbarItemId::KeepOnTop,
+                    on,
+                    mode,
+                    cx,
+                )
+                .toggled(on)
+                // One tooltip either way: upstream defines only
+                // `Toolbar.keepOnTop.tooltip`, with no state variants.
+                .tooltip(localization::t("Keep the window always on top"))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.update_window_options(cx, |window| {
+                        window.keep_on_top = !window.keep_on_top
+                    })
+                }))
+                .into_any_element()
             }
             ToolbarItemId::Editable => {
                 let on = self.settings.editor.editable;
-                Button::new("toolbar-editable")
-                    .ghost()
-                    .small()
-                    .icon(if on {
-                        IconName::Pencil
-                    } else {
-                        IconName::PencilOff
-                    })
-                    .selected(on)
-                    .accessibility_label(localization::t("Edit"))
+                toolbar_symbol_button("toolbar-editable", ToolbarItemId::Editable, on, mode, cx)
+                    .toggled(on)
                     .tooltip(if on {
                         localization::t("Prevent the document from being edited")
                     } else {
@@ -6537,135 +7639,169 @@ impl Workspace {
                     }))
                     .into_any_element()
             }
-            ToolbarItemId::SpellCheck => Button::new("toolbar-spell-check")
-                .ghost()
-                .small()
-                .icon(IconName::SpellCheck)
-                .accessibility_label(localization::t("Spell Check"))
-                .tooltip(localization::t("Show spelling and grammar"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.dispatch("ShowGuessPanel", window, cx);
-                }))
-                .into_any_element(),
-            ToolbarItemId::EmojiAndSymbols => Button::new("toolbar-emoji")
-                .ghost()
-                .small()
-                .icon(IconName::FaceSlightlySmiling)
-                .accessibility_label(localization::t("Emoji & Symbols"))
-                .tooltip(localization::t("Show Emoji & Symbols"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.dispatch("ShowUnicodeInputPanel", window, cx);
-                }))
-                .into_any_element(),
+            ToolbarItemId::SpellCheck => toolbar_picture_button(
+                "toolbar-spell-check",
+                ToolbarItemId::SpellCheck,
+                spell_check_glyph(toolbar_ink(cx)),
+                mode,
+                cx,
+            )
+            .tooltip(localization::t("Show spelling and grammar"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.dispatch("ShowGuessPanel", window, cx);
+            }))
+            .into_any_element(),
+            ToolbarItemId::EmojiAndSymbols => toolbar_picture_button(
+                "toolbar-emoji",
+                ToolbarItemId::EmojiAndSymbols,
+                crate::toolbar::face_smiling_glyph(TOOLBAR_GLYPH_SIZE, toolbar_ink(cx)),
+                mode,
+                cx,
+            )
+            .tooltip(localization::t("Show Emoji & Symbols"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.dispatch("ShowUnicodeInputPanel", window, cx);
+            }))
+            .into_any_element(),
             ToolbarItemId::Fonts => {
                 let workspace = cx.entity().downgrade();
-                Button::new("toolbar-fonts")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Type)
-                    .accessibility_label(localization::t("Fonts"))
-                    .tooltip(localization::t("Change Font"))
-                    .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
-                        let standard = workspace.clone();
-                        let monospaced = workspace.clone();
-                        let panel = workspace.clone();
-                        // Upstream leads with a "Font Type" section header
-                        // (`DocumentWindowController.swift:1002-1014`).
-                        menu.separator()
-                            .label(localization::t("Font Type"))
-                            .item(PopupMenuItem::new(localization::t("Standard")).on_click(
-                                move |_, window, cx| {
-                                    standard
-                                        .update(cx, |this, cx| {
-                                            this.dispatch("MakeFontStandard", window, cx);
-                                        })
-                                        .ok();
-                                },
-                            ))
-                            .item(PopupMenuItem::new(localization::t("Monospaced")).on_click(
-                                move |_, window, cx| {
-                                    monospaced
-                                        .update(cx, |this, cx| {
-                                            this.dispatch("MakeFontMonospaced", window, cx);
-                                        })
-                                        .ok();
-                                },
-                            ))
-                            .separator()
-                            .item(PopupMenuItem::new(localization::t("Show Fonts")).on_click(
-                                move |_, window, cx| {
-                                    panel
-                                        .update(cx, |this, cx| {
-                                            this.dispatch("OrderFrontFontPanel", window, cx);
-                                        })
-                                        .ok();
-                                },
-                            ))
-                    })
-                    .into_any_element()
+                toolbar_picture_button(
+                    "toolbar-fonts",
+                    ToolbarItemId::Fonts,
+                    fonts_glyph(),
+                    mode,
+                    cx,
+                )
+                // Upstream's `.fonts` is an `NSMenuToolbarItem` whose image is
+                // the `textformat` symbol — the word 格式 / "Aa", not a square
+                // glyph — so its capsule takes the picture's own width: 43
+                // points for the two CJK characters at 14 points plus 7.5
+                // points either side, which is what the reference measures.
+                // The 37-point floor keeps the Latin form a circle. A fixed
+                // 37-point circle would squeeze the word. This holds in every
+                // display mode: a text-mode item's caption sits under the
+                // capsule, so the capsule itself is always the picture's width.
+                .w_auto()
+                .min_w(px(TOOLBAR_ICON_WIDTH))
+                .px(px(TOOLBAR_PICTURE_PADDING))
+                .tooltip(localization::t("Change Font"))
+                .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                    let standard = workspace.clone();
+                    let monospaced = workspace.clone();
+                    let panel = workspace.clone();
+                    // Upstream leads with a "Font Type" section header
+                    // (`DocumentWindowController.swift:1002-1014`).
+                    menu.separator()
+                        .label(localization::t("Font Type"))
+                        .item(PopupMenuItem::new(localization::t("Standard")).on_click(
+                            move |_, window, cx| {
+                                standard
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("MakeFontStandard", window, cx);
+                                    })
+                                    .ok();
+                            },
+                        ))
+                        .item(PopupMenuItem::new(localization::t("Monospaced")).on_click(
+                            move |_, window, cx| {
+                                monospaced
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("MakeFontMonospaced", window, cx);
+                                    })
+                                    .ok();
+                            },
+                        ))
+                        .separator()
+                        .item(PopupMenuItem::new(localization::t("Show Fonts")).on_click(
+                            move |_, window, cx| {
+                                panel
+                                    .update(cx, |this, cx| {
+                                        this.dispatch("OrderFrontFontPanel", window, cx);
+                                    })
+                                    .ok();
+                            },
+                        ))
+                })
+                .into_any_element()
             }
-            ToolbarItemId::Find => Button::new("toolbar-find")
-                .ghost()
-                .small()
-                .icon(IconName::Search)
-                .accessibility_label(localization::t("Find"))
-                .tooltip(localization::t("Show Find & Replace"))
-                .on_click(cx.listener(|this, _, window, cx| this.show_find(false, window, cx)))
-                .into_any_element(),
-            ToolbarItemId::Print => Button::new("toolbar-print")
-                .ghost()
-                .small()
-                .icon(IconName::Printer)
-                .accessibility_label(localization::t("Print"))
-                .tooltip(localization::t("Print the document"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.dispatch("PrintDocument", window, cx);
-                }))
-                .into_any_element(),
-            ToolbarItemId::Share => Button::new("toolbar-share")
-                .ghost()
-                .small()
-                .icon(IconName::Share2)
-                .accessibility_label(localization::t("Share"))
-                .tooltip(localization::t("Share document file"))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.dispatch("ShareDocument", window, cx);
-                }))
-                .into_any_element(),
-            ToolbarItemId::ToggleSidebar => Button::new("toolbar-sidebar")
-                .ghost()
-                .small()
-                .icon(IconName::PanelLeft)
-                .selected(self.settings.window.show_sidebar)
-                .accessibility_label(localization::t("Sidebar"))
-                .tooltip(if self.settings.window.show_sidebar {
-                    "Hide sidebar"
+            ToolbarItemId::Find => toolbar_command_button(
+                "toolbar-find",
+                ToolbarItemId::Find,
+                IconName::Search,
+                mode,
+                cx,
+            )
+            .tooltip(localization::t("Show Find & Replace"))
+            .on_click(cx.listener(|this, _, window, cx| this.show_find(false, window, cx)))
+            .into_any_element(),
+            ToolbarItemId::Print => toolbar_command_button(
+                "toolbar-print",
+                ToolbarItemId::Print,
+                IconName::Printer,
+                mode,
+                cx,
+            )
+            .tooltip(localization::t("Print the document"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.dispatch("PrintDocument", window, cx);
+            }))
+            .into_any_element(),
+            ToolbarItemId::Share => toolbar_command_button(
+                "toolbar-share",
+                ToolbarItemId::Share,
+                IconName::Share,
+                mode,
+                cx,
+            )
+            .tooltip(localization::t("Share document file"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.dispatch("ShareDocument", window, cx);
+            }))
+            .into_any_element(),
+            ToolbarItemId::ToggleSidebar => {
+                let on = self.settings.window.show_sidebar;
+                toolbar_command_button(
+                    "toolbar-sidebar",
+                    ToolbarItemId::ToggleSidebar,
+                    IconName::PanelLeft,
+                    mode,
+                    cx,
+                )
+                .toggled(on)
+                .tooltip(if on {
+                    localization::t("Hide Sidebar")
                 } else {
-                    "Show sidebar"
+                    localization::t("Show Sidebar")
                 })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.update_window_options(cx, |window| {
                         window.show_sidebar = !window.show_sidebar
                     })
                 }))
-                .into_any_element(),
-            ToolbarItemId::ToggleInspector => Button::new("toolbar-inspector")
-                .ghost()
-                .small()
-                .icon(IconName::PanelRight)
-                .selected(self.settings.window.show_inspector)
-                .accessibility_label(localization::t("Inspector"))
-                .tooltip(if self.settings.window.show_inspector {
-                    "Hide inspector"
+                .into_any_element()
+            }
+            ToolbarItemId::ToggleInspector => {
+                let on = self.settings.window.show_inspector;
+                toolbar_symbol_button(
+                    "toolbar-inspector",
+                    ToolbarItemId::ToggleInspector,
+                    on,
+                    mode,
+                    cx,
+                )
+                .toggled(on)
+                .tooltip(if on {
+                    localization::t("Hide Inspector")
                 } else {
-                    "Show inspector"
+                    localization::t("Show Inspector")
                 })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.update_window_options(cx, |window| {
                         window.show_inspector = !window.show_inspector
                     })
                 }))
-                .into_any_element(),
+                .into_any_element()
+            }
             ToolbarItemId::Space => crate::toolbar::fixed_space(),
             ToolbarItemId::FlexibleSpace => crate::toolbar::flexible_space(),
             // `sanitize` drops these before they reach the setting, so this arm
@@ -6766,6 +7902,9 @@ impl Workspace {
             .min_w(rems(11.))
             .max_w(rems(24.))
             .h_full()
+            // Page, not chrome: upstream's split-view items have no background
+            // of their own, so the window colour shows through them.
+            .bg(self.page_fill(cx))
             .gap_2()
             .p_2()
             .border_r_1()
@@ -6878,6 +8017,7 @@ impl Workspace {
             .min_w(rems(12.))
             .max_w(rems(26.))
             .h_full()
+            .bg(self.page_fill(cx))
             .gap_2()
             .p_2()
             .border_l_1()
@@ -8160,7 +9300,11 @@ impl Workspace {
                             }),
                     );
                 }
-                menu
+                // The list is every encoding the platform knows, and recent
+                // encodings are pushed on top of it. AppKit's menu scrolls
+                // when it outgrows the screen; the widget caps and scrolls
+                // only when asked.
+                menu.scrollable(true)
             })
             .into_any_element()
     }
@@ -8187,6 +9331,11 @@ impl Workspace {
             .ghost()
             .xsmall()
             .label(current.abbreviation())
+            // Upstream pins this picker to 48pt so the caret does not travel
+            // when the abbreviation changes length. A *minimum* says the same
+            // for `LF` and still lets `CRLF` grow, where a hard 48pt would
+            // clip it — the button's own padding eats the margin.
+            .min_w(px(48.))
             .disabled(!editable)
             // Same ⇕ as the encoding picker beside it: both are popup buttons
             // upstream.
@@ -8356,16 +9505,24 @@ impl Workspace {
             .w_full()
             .h(rems(1.5))
             .flex_shrink_0()
-            .gap_1()
+            // Upstream's bar is an `HStack(spacing: 0)`; every gap in it is a
+            // fixed-width frame or a padding, never stack spacing.
+            .gap_0()
             .px_1()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            // The navigator is chrome, not page: upstream's `EditorViewController`
+            // sits in the window's content view background, which is white below
+            // the toolbar and stops at the editor's paper.
+            .bg(cx.theme().title_bar)
             .child(
                 Button::new("nav-close-split")
                     .ghost()
                     .xsmall()
                     .icon(IconName::Close)
+                    // `frame(width: 18)` upstream, so the divider and the
+                    // chevrons land on the same points whatever the icon.
+                    .size(px(NAV_BUTTON_WIDTH))
                     // Upstream does not grey this button out when there is no
                     // split to close — it fades it to nothing
                     // (`opacity(canClose ? 1 : 0)`) and leaves it in place, so
@@ -8390,13 +9547,29 @@ impl Workspace {
                             .ok();
                     }),
             )
-            .when(can_close && !entries.is_empty(), |this| {
-                this.child(div().w(px(1.)).h(rems(1.)).bg(cx.theme().border))
-            })
+            // Upstream lays the divider out whether or not it is visible —
+            // `Divider()…opacity(canClose && !items.isEmpty ? 1 : 0)` — so the
+            // outline chevrons do not jump when a split opens. Its 7 pt is the
+            // 1-pt line plus SwiftUI's 3-pt horizontal padding on each side.
+            .child(
+                div()
+                    .w(px(7.))
+                    .h_full()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(if can_close && !entries.is_empty() {
+                        1.
+                    } else {
+                        0.
+                    })
+                    .child(div().w(px(1.)).h(rems(1.)).bg(cx.theme().border)),
+            )
             .when(!entries.is_empty(), |this| {
                 this.child(
                     h_flex()
-                        .gap_0p5()
+                        .gap_0()
                         .child(
                             // Upstream turns these chevrons sideways only when the
                             // *text* is laid out vertically — `OutlineNavigator`
@@ -8407,6 +9580,7 @@ impl Workspace {
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::ChevronUp)
+                                .size(px(NAV_BUTTON_WIDTH))
                                 .disabled(!can_previous)
                                 .accessibility_label(localization::t("Previous Outline Item"))
                                 .tooltip(localization::t("Jump to previous outline item"))
@@ -8419,6 +9593,7 @@ impl Workspace {
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::ChevronDown)
+                                .size(px(NAV_BUTTON_WIDTH))
                                 .disabled(!can_next)
                                 .accessibility_label(localization::t("Next Outline Item"))
                                 .tooltip(localization::t("Jump to next outline item"))
@@ -8437,9 +9612,12 @@ impl Workspace {
                     .icon(
                         // Upstream draws one symbol and turns it a quarter turn
                         // when the split is vertical. `Icon::rotate` takes a
-                        // fraction of a full turn, so this is that same -90°.
+                        // fraction of a full turn, so this is that same -90° —
+                        // as 3/4, because `percentage` refuses a negative value
+                        // (and panicked the window open every time the saved
+                        // split was vertical).
                         Icon::new(IconName::SquareSplitHorizontal)
-                            .rotate(percentage(if is_vertical { -0.25 } else { 0. })),
+                            .rotate(percentage(if is_vertical { 0.75 } else { 0. })),
                     )
                     .accessibility_label(localization::t("Split Editor"))
                     .tooltip(localization::t("Split editor"))
@@ -8474,11 +9652,134 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// The outline menu in the navigation bar: every entry, jump on choose.
+    /// The symbol of an outline kind, drawn the way upstream's SF Symbol is.
     ///
-    /// Upstream's `OutlinePicker`, an AppKit popup it opens programmatically.
-    /// The label carries the entry's own indentation, which is what the picker
-    /// shows — the outline's titles are pre-indented by the extractor.
+    /// Upstream renders every kind with `.symbolRenderingMode(.hierarchical)`,
+    /// so the square of a `*square.fill` symbol gets a tint of the symbol's own
+    /// colour behind a full-strength glyph. Lucide only has outline squares, so
+    /// the tint is painted behind the glyph instead of into it. `flag.fill` and
+    /// `minus` have no square to tint and stay bare.
+    fn outline_kind_icon(kind: OutlineKind) -> Icon {
+        let icon = Icon::new(kind.icon())
+            .xsmall()
+            .text_color(kind.color())
+            .transform(Transformation::scale(size(
+                Self::outline_kind_glyph_scale(kind),
+                Self::outline_kind_glyph_scale(kind),
+            )));
+        if kind.has_tile() {
+            icon.bg(kind.color().opacity(OUTLINE_TILE_ALPHA))
+                .rounded(px(2.))
+        } else {
+            icon
+        }
+    }
+
+    /// How much a kind's glyph shrinks inside its tile.
+    ///
+    /// An SF Symbol's `*square.fill` glyph is inset from the square by the
+    /// symbol's own design: `list.bullet.square.fill` inks about 6.5 × 4.5 pt
+    /// inside a 12 pt square, measured from CotEditor's picker at 2×. Lucide
+    /// draws at its full 24-unit box, so the same `list` inks 10 × 8 pt — half
+    /// again the size of the square it is meant to sit in. The scale is applied
+    /// at paint time, so the tile keeps its 12 pt layout size.
+    ///
+    /// One factor cannot serve every kind because the Lucide glyphs have very
+    /// different margins: `dot` inks 2 pt at full size while `tag` and `box`
+    /// fill 10 pt. Kinds without a tile — upstream's bare `flag.fill` and
+    /// `minus` — keep their full size.
+    fn outline_kind_glyph_scale(kind: OutlineKind) -> f32 {
+        match kind {
+            OutlineKind::Container => 0.65,
+            // Lucide's dot is a 2 pt circle; SF's has about a 2.6 pt one.
+            OutlineKind::Value => 1.3,
+            OutlineKind::Function => 0.7,
+            OutlineKind::Title => 0.58,
+            OutlineKind::Heading(Some(_)) => 0.65,
+            OutlineKind::Heading(None) => 0.62,
+            OutlineKind::Mark | OutlineKind::Separator => 1.0,
+        }
+    }
+
+    /// One row of the outline picker's dropdown.
+    ///
+    /// Upstream builds each row's `attributedTitle` — the captured whitespace
+    /// of a `.string` indent, the kind attachment, a space, then the title —
+    /// leaves `.level` nesting to `NSMenuItem.indentationLevel`, and lets
+    /// AppKit draw the state column at the row's leading edge. The component's
+    /// `PopupMenuItem` draws a check *instead of* an icon and reserves the icon
+    /// slot for the whole menu, so the row is an `element` that draws its own
+    /// state column. Distances from CotEditor's picker at 2×: 9 pt check ink,
+    /// 6 pt from check to tile, 12 pt kind tile, 9 pt per nesting level, 6 pt
+    /// from tile to title, 11 pt type. The row pitch cannot follow: every
+    /// component menu row is at least 26 pt tall with a 2 pt gap, upstream's
+    /// is 24 pt.
+    ///
+    /// The text inherits the row's `foreground`/`accent_foreground` so it
+    /// brightens on hover like every other menu; the kind tile keeps its
+    /// colour, which is what the attachment does upstream.
+    fn outline_menu_row(entry: OutlineEntry, checked: bool) -> impl IntoElement {
+        let level = match &entry.indent {
+            Indent::Level(level) => *level,
+            // A `.string` indent is whitespace in the title, laid out before
+            // the attachment rather than added to it.
+            Indent::String(_) => 0,
+        };
+        let string_indent = match &entry.indent {
+            Indent::Level(_) => None,
+            Indent::String(string) => Some(string.clone()),
+        };
+
+        h_flex()
+            .flex_1()
+            .items_center()
+            // The item's own padding is 8 pt; upstream hangs the check in the
+            // menu's leading margin and starts the tile at 24 pt, so the check
+            // is pulled left out of the padding by the width it adds to the row.
+            .ml(px(-3.))
+            .child(
+                // The state column is on every row so a check never shifts the
+                // tile or the title.
+                div().flex_shrink_0().w(px(14.6)).when(checked, |this| {
+                    this.child(Icon::new(IconName::Check).with_size(px(9.)))
+                }),
+            )
+            .when(level > 0, |this| {
+                this.child(div().flex_shrink_0().w(px(9. * level as f32)))
+            })
+            .when_some(string_indent, |this, indent| {
+                this.child(
+                    div()
+                        .flex_shrink_0()
+                        .whitespace_nowrap()
+                        .text_size(px(11.))
+                        .child(indent),
+                )
+            })
+            .when_some(entry.kind, |this, kind| {
+                this.child(Self::outline_kind_icon(kind).mr(px(6.)))
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.))
+                    .when(entry.is_bold(), |this| {
+                        this.font_weight(FontWeight::SEMIBOLD)
+                    })
+                    .child(entry.title.clone()),
+            )
+    }
+
+    /// The outline picker in the navigation bar: every entry, jump on choose.
+    ///
+    /// Upstream's `OutlinePicker` is a borderless small `NSPopUpButton`. Its
+    /// closed label is the selected row's attributed title with the leading
+    /// indent trimmed — the kind symbol followed by the entry title — and
+    /// AppKit draws the disclosure chevrons at the trailing edge, outside the
+    /// label. When the caret sits above the first entry nothing is selected,
+    /// and the popup falls back to showing its first item; the menu's check
+    /// mark stays on that same item, so it agrees with the label.
     fn render_outline_menu(
         &self,
         entries: &[OutlineEntry],
@@ -8487,37 +9788,86 @@ impl Workspace {
     ) -> AnyElement {
         let workspace = cx.entity().downgrade();
         let current = crate::outline::index_of_item(entries, selection.start);
+        // `selectItem(at:)` is only called when the caret's entry is found, so
+        // a caret above the first entry leaves the popup on item 0. A
+        // separator has no title to show, so it is skipped.
+        let shown = current.or_else(|| entries.iter().position(|entry| !entry.is_separator()));
         // The menu builder runs after this frame, so the rows are owned rather
         // than borrowed from the entries.
-        let rows: Vec<(String, Range<usize>)> = entries
-            .iter()
-            .map(|entry| (entry.title.clone(), entry.range.clone()))
-            .collect();
+        let rows = entries.to_vec();
+
+        let label = shown.map(|index| {
+            let entry = &entries[index];
+            h_flex()
+                .min_w_0()
+                .gap_1p5()
+                .when_some(entry.kind, |this, kind| {
+                    this.child(Self::outline_kind_icon(kind))
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(11.))
+                        .when(entry.is_bold(), |this| {
+                            this.font_weight(FontWeight::SEMIBOLD)
+                        })
+                        .child(entry.title.clone()),
+                )
+                .child(
+                    // AppKit's disclosure indicator, part of the control rather
+                    // than the label, so it never truncates with the title. It
+                    // is lighter than the title — labelColor at 85%, #464646 on
+                    // white where the title is #262626 — and its two chevrons
+                    // ink 5 × 7 pt inside the 16 pt control. Lucide's pair inks
+                    // about half a point wider per chevron, so it takes 10 px.
+                    Icon::new(IconName::ChevronsUpDown)
+                        .with_size(px(10.))
+                        .flex_shrink_0()
+                        .text_color(cx.theme().foreground.opacity(0.85)),
+                )
+        });
 
         Button::new("nav-outline-menu")
             .ghost()
             .xsmall()
-            .icon(IconName::List)
             .accessibility_label(localization::t("Outline Menu"))
             .tooltip(localization::t("Outline Menu"))
+            // Upstream's frame: the badge starts 12 pt in and the trailing
+            // chevrons leave 6 pt. `max_w` stands in for `sizeThatFits`, which
+            // caps the picker at whatever the bar offers it.
+            .pl(px(12.))
+            .pr(px(6.))
+            .h(px(18.))
+            .max_w(rems(16.))
+            .when_some(label, |this, label| this.child(label))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, _cx| {
                 let mut menu = menu;
-                for (index, (title, range)) in rows.iter().enumerate() {
+                for (index, entry) in rows.iter().enumerate() {
+                    if entry.is_separator() {
+                        menu = menu.item(PopupMenuItem::separator());
+                        continue;
+                    }
                     let workspace = workspace.clone();
-                    let range = range.clone();
+                    let range = entry.range.clone();
+                    let row = entry.clone();
+                    let checked = Some(index) == shown;
                     menu = menu.item(
-                        PopupMenuItem::new(title.clone())
-                            .checked(Some(index) == current)
-                            .on_click(move |_, _, cx| {
-                                workspace
-                                    .update(cx, |workspace, cx| {
-                                        workspace.set_selection(range.clone(), cx);
-                                    })
-                                    .ok();
-                            }),
+                        PopupMenuItem::element(move |_, _| {
+                            Self::outline_menu_row(row.clone(), checked)
+                        })
+                        .on_click(move |_, _, cx| {
+                            workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.set_selection(range.clone(), cx);
+                                })
+                                .ok();
+                        }),
                     );
                 }
-                menu.max_h(window.rem_size() * 18.).scrollable(true)
+                menu.max_w(px(640.))
+                    .max_h(window.rem_size() * 18.)
+                    .scrollable(true)
             })
             .into_any_element()
     }
@@ -8671,53 +10021,107 @@ impl Workspace {
             .flex_shrink_0()
             .gap_2()
             .px_3()
-            .py_1()
             .text_xs()
+            // Upstream's content sits in `.frame(height: 18)` with
+            // `.padding(.vertical, 7)` on macOS before 27, so the bar is 32pt
+            // tall and its content is centred in it. A single fixed height says
+            // the same thing without rounding 7 to a token.
+            .h(px(32.))
             .border_t_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().status_bar_border)
+            // Upstream's status bar is `.windowBackground` at zero opacity
+            // unless the Appearance pane asks for "Opaque", so it shows what
+            // is behind it: the system window colour under an opaque window —
+            // the reference measures 255 there, not the page's own 250 — and
+            // the page at its alpha under a translucent one, where the window
+            // colour itself is the page.
+            .bg(
+                if self.settings.window.prefers_opaque_bar_background || !self.is_translucent() {
+                    cx.theme().title_bar
+                } else {
+                    self.page_fill(cx)
+                },
+            )
             .when(!editable, |this| {
                 this.child(
-                    // Upstream's `NotEditableBadge` is a `Label` with a help
-                    // tooltip. A disabled icon button is the closest thing that
-                    // can carry one, and it reads the same: an inert pencil.
-                    Button::new("status-not-editable")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::PenOff)
-                        .disabled(true)
-                        .accessibility_label(localization::t("Not editable"))
-                        .tooltip(localization::t("The document is not editable.")),
+                    // Upstream's `NotEditableBadge` is a `Label` with
+                    // `.labelStyle(.iconOnly)` and a help tooltip: an inert
+                    // primary-coloured pencil, no button chrome at all. A
+                    // disabled `Button` would say the same thing, but it would
+                    // paint at half opacity and read as "disabled" to assistive
+                    // technology, so the badge is a plain icon.
+                    div()
+                        .id("status-not-editable")
+                        .aria_label(localization::t("Not editable"))
+                        .tooltip(|_, cx| {
+                            cx.new(|_| {
+                                Tooltip::new(localization::t("The document is not editable."))
+                            })
+                            .into()
+                        })
+                        .child(
+                            Icon::new(IconName::PenOff)
+                                .xsmall()
+                                .text_color(cx.theme().foreground),
+                        ),
                 )
             })
             .child(
                 h_flex()
-                    .gap_3()
+                    // `TruncatingHStack` spaces counts by 8, and the digits are
+                    // `.monospacedDigit()` so the numbers stop jittering as they
+                    // tick. gpui-kit keeps its `tnum` helper crate-private, so
+                    // the feature is spelled out where the row is built.
+                    .gap_2()
                     .min_w_0()
                     .truncate()
+                    .font_features(tabular_figures())
+                    // Upstream paints the row `.secondary` and each *value*
+                    // `.primary` inside it, so a count reads "Line: 3" in two
+                    // colours rather than one flat grey.
                     .text_color(cx.theme().muted_foreground)
                     .when_some(notice, |this, status| {
                         this.child(div().truncate().child(status.message.clone()))
                     })
                     .when(notice.is_none(), |this| {
-                        this.children(
-                            items
-                                .into_iter()
-                                .map(|(_, label, value)| div().child(format!("{label}: {value}"))),
-                        )
+                        this.children(items.into_iter().map(|(_, label, value)| {
+                            h_flex()
+                                .flex_shrink_0()
+                                .child(format!("{label}: "))
+                                .child(div().text_color(cx.theme().foreground).child(value))
+                        }))
                     }),
             )
             .child(div().flex_1())
             .when_some(file_size, |this, size| {
                 this.child(
+                    // `FileSizeView` is `.fixedSize()` and inherits the primary
+                    // foreground — the number is a value, not a label — with
+                    // `.help("File size")` over it.
                     div()
-                        .text_color(cx.theme().muted_foreground)
+                        .id("status-file-size")
+                        .flex_shrink_0()
+                        .font_features(tabular_figures())
+                        .text_color(cx.theme().foreground)
+                        .tooltip(|_, cx| {
+                            cx.new(|_| Tooltip::new(localization::t("File size")))
+                                .into()
+                        })
                         .child(format_size(size, false)),
                 )
             })
-            .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
-            .child(self.render_encoding_picker(document.id, encoding, cx))
-            .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
-            .child(self.render_line_ending_picker(line_ending, editable, cx))
+            // `DocumentStatusBar` is its own `HStack(spacing: 4)`: the dividers
+            // hug the two pickers at half the row's spacing, which is what makes
+            // the pair read as one control group.
+            .child(
+                h_flex()
+                    .gap_1()
+                    .flex_shrink_0()
+                    .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+                    .child(self.render_encoding_picker(document.id, encoding, cx))
+                    .child(div().w(px(1.)).h(rems(0.75)).bg(cx.theme().border))
+                    .child(self.render_line_ending_picker(line_ending, editable, cx)),
+            )
             .into_any_element()
     }
 
@@ -8738,15 +10142,17 @@ impl Workspace {
             return div().flex_1().into_any_element();
         };
 
-        let font_family = self
-            .settings
-            .font_family
-            .clone()
-            .unwrap_or_else(|| cx.theme().mono_font_family.to_string());
-        // The document's own type size is user data, not application zoom: it
-        // is what Format ▸ Bigger Font changes, and it must not move when the
-        // interface scale does.
-        let text_size = px(self.settings.font_size);
+        // Appearance has a font per font type, and a window may override the
+        // mode's choice without saving it; `document_font` is the single place
+        // that turns those two into a family GPUI will accept.
+        let (font_family, base_size, ligatures) = self.document_font(document, cx);
+        // Magnification is the window's own multiple on the type size — what
+        // Format ▸ Bigger Font changes — not a change to the saved size.
+        let text_size = px(base_size * document.font_scale);
+        // CotEditor's `lineHeightMultiple`: a multiple of the font's own
+        // leading, which is exactly what `Fraction` means to GPUI.
+        let line_height =
+            DefiniteLength::Fraction(self.settings.appearance.line_height.clamp(0.1, 10.0));
         let document_id = document.id;
 
         let panes: Vec<gpui_kit::AnyElement> = document
@@ -8799,6 +10205,13 @@ impl Workspace {
                             .min_h_0()
                             .font_family(font_family.clone())
                             .text_size(text_size)
+                            .line_height(line_height)
+                            // Upstream's ligature switch is a font trait per
+                            // font type; off means the font's `calt` feature
+                            // is turned off.
+                            .when(!ligatures, |this| {
+                                this.font_features(FontFeatures::disable_ligatures())
+                            })
                             .into_any_element(),
                     )
                     .into_any_element()
@@ -8825,49 +10238,154 @@ impl Workspace {
     }
 }
 
+/// Fixes every digit at one advance width.
+///
+/// The status bar's counts and file size update on every keystroke, and
+/// proportional digits make the row twitch as they change. Upstream does this
+/// with `.monospacedDigit()`, which is the `tnum` OpenType feature. gpui-kit
+/// has the same helper, but it is crate-private, so the feature is named here.
+fn tabular_figures() -> FontFeatures {
+    FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))
+}
+
 /// A byte count as a file size, the way the platform's `ByteCountFormatStyle`
 /// does with `style: .file`.
 ///
-/// Decimal units — 1 kB is 1000 bytes — and one decimal place below ten, none
-/// above, which is what `.formatted(.byteCount(style: .file))` produces.
+/// Decimal units — 1 kB is 1000 bytes — but the unit is chosen by the
+/// thresholds below rather than by a power of ten: the platform promotes a
+/// notch early, so that the number never rounds up to `1,000`. The fraction
+/// digits are per unit (none for kB, one for MB, two from GB up), not per
+/// magnitude, and rounding is decimal half-to-even: 1.15 MB prints as `1.2 MB`,
+/// which a binary multiply-and-round would miss by a hair.
 ///
-/// `includes_actual_byte_count` appends the exact count in parentheses. That is
-/// what the *document inspector* shows; the status bar shows the same number
-/// without it.
+/// `includes_actual_byte_count` is the *document inspector*'s style: it appends
+/// the exact count in parentheses, grouped like any other count. The status bar
+/// shows the scaled number without it. The two also differ at zero, because the
+/// inspector spelling leaves `spellsOutZero` at its default — the inspector
+/// reads `Zero kB` (`0 kB` in Chinese), the status bar `0 bytes` (`0字节`).
 pub fn format_size(bytes: u64, includes_actual_byte_count: bool) -> String {
-    const UNITS: [(&str, f64); 4] = [("kB", 1e3), ("MB", 1e6), ("GB", 1e9), ("TB", 1e12)];
+    // (unit, smallest byte count that selects it, fraction digits). Both
+    // columns are measured against Foundation rather than derived: each
+    // threshold is the point where the previous unit would round to 1,000, and
+    // `PB` is the largest unit the style has — above it the number keeps
+    // growing and gets grouped instead.
+    const UNITS: [(&str, u64, u32); 5] = [
+        ("kB", 999, 0),
+        ("MB", 999_499, 1),
+        ("GB", 999_949_999, 2),
+        ("TB", 999_994_999_999, 2),
+        ("PB", 999_994_999_999_999, 2),
+    ];
+    const SCALES: [u64; 5] = [
+        1_000,
+        1_000_000,
+        1_000_000_000,
+        1_000_000_000_000,
+        1_000_000_000_000_000,
+    ];
     // CotEditor's Chinese status bar reads 58字节, with no space; English says
     // "58 bytes". The kB and above units are spelled the same in both, which is
-    // why only this one is translated.
-    let bytes_word = localization::t("bytes");
-    let separator = if localization::language() == localization::Language::English {
-        " "
-    } else {
-        ""
-    };
-    let value = bytes as f64;
-    let scaled = if value < 1e3 {
-        format!("{bytes}{separator}{bytes_word}")
-    } else {
-        let (unit, scale) = UNITS
-            .iter()
-            .rev()
-            .find(|(_, scale)| value >= *scale)
-            .copied()
-            .unwrap_or(("kB", 1e3));
-        let value = value / scale;
-        if value < 10.0 {
-            format!("{value:.1} {unit}")
-        } else {
-            format!("{value:.0} {unit}")
+    // why only the byte word is translated.
+    let english = localization::language() == localization::Language::English;
+    let separator = if english { " " } else { "" };
+
+    if bytes == 0 {
+        if includes_actual_byte_count {
+            // `spellsOutZero` is on at the inspector's default; English spells
+            // the word, Chinese falls back to the number.
+            return if english {
+                "Zero kB".to_string()
+            } else {
+                "0 kB".to_string()
+            };
         }
+        return format!("0{separator}{}", localization::t("bytes"));
+    }
+
+    let unit = UNITS
+        .iter()
+        .zip(SCALES)
+        .rposition(|((_, threshold, _), _)| bytes >= *threshold);
+    let scaled = match unit {
+        Some(index) => {
+            let (unit, _, decimals) = UNITS[index];
+            rendered_size(bytes, SCALES[index], decimals, unit)
+        }
+        None => format!("{bytes}{separator}{}", byte_label(bytes, english)),
     };
 
-    if includes_actual_byte_count {
-        format!("{scaled} ({bytes}{separator}{bytes_word})")
-    } else {
-        scaled
+    if !includes_actual_byte_count {
+        return scaled;
     }
+    // The inspector's exact count is grouped too, and its parentheses are the
+    // locale's: ASCII in English, full-width in Chinese, with no space before
+    // the opening one.
+    let actual = format!(
+        "{}{separator}{}",
+        grouped(u128::from(bytes)),
+        byte_label(bytes, english)
+    );
+    if english {
+        format!("{scaled} ({actual})")
+    } else {
+        format!("{scaled}（{actual}）")
+    }
+}
+
+/// The word after a count of bytes: singular in English at exactly one, the
+/// translated plural everywhere else.
+fn byte_label(value: u64, english: bool) -> &'static str {
+    if english && value == 1 {
+        "byte"
+    } else {
+        localization::t("bytes")
+    }
+}
+
+/// `bytes` in `unit`, rounded half-to-even to `decimals` places, trailing zeros
+/// trimmed and the integer part grouped.
+fn rendered_size(bytes: u64, scale: u64, decimals: u32, unit: &str) -> String {
+    // Round in integers: `bytes * 10^decimals / scale`, rounded to a whole
+    // number. Multiplying a ratio of `f64`s and rounding it would lose the
+    // exact ties Foundation rounds (1.15 MB is not representable in binary).
+    let places = 10u128.pow(decimals);
+    let numerator = u128::from(bytes) * places;
+    let divisor = u128::from(scale);
+    let mut quotient = numerator / divisor;
+    let remainder = numerator % divisor;
+    match (remainder * 2).cmp(&divisor) {
+        // More than half, or exactly half with an odd digit to round up from.
+        std::cmp::Ordering::Greater => quotient += 1,
+        std::cmp::Ordering::Equal if quotient % 2 == 1 => quotient += 1,
+        _ => {}
+    }
+
+    let whole = quotient / places;
+    let fraction = quotient % places;
+    let mut text = grouped(whole);
+    if fraction > 0 {
+        // Zero-padded, then trimmed: 2.00 GB prints as `2 GB`, 1.10 as `1.1`.
+        let digits = format!("{fraction:0width$}", width = decimals as usize);
+        text.push('.');
+        text.push_str(digits.trim_end_matches('0'));
+    }
+    text.push(' ');
+    text.push_str(unit);
+    text
+}
+
+/// A count with a comma every three digits, the way Foundation groups both the
+/// exact byte count and a size that has outgrown `PB`.
+fn grouped(value: u128) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.char_indices() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 /// The heading over one of the Warnings inspector's two lists.
@@ -9071,9 +10589,20 @@ impl Render for Workspace {
             .map_or_else(|| "SubText".to_string(), |document| document.title());
         window.set_window_title(&title);
 
+        // The page is painted once per region — here for the gaps, and by the
+        // editor, the sidebar, the inspector and the tinted status bar for
+        // their own areas. When the window is translucent the root draws
+        // nothing: painting the page here *and* in the children would
+        // composite the same colour twice and leave the desktop at
+        // `1 - (1-a)^2` instead of `a`.
+        let page = if self.is_translucent() {
+            hsla(0., 0., 0., 0.)
+        } else {
+            cx.theme().background
+        };
         let mut root = v_flex()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(page)
             .text_color(cx.theme().foreground)
             // Escape dismisses the Inspect Character popover. The capture phase
             // is the only place the workspace can see that key: the popover
@@ -9113,6 +10642,18 @@ impl Render for Workspace {
                         _ => {}
                     }
                 }
+                // The customization palette has no dialog to close itself, and
+                // it never takes focus — the editor keeps the caret — so this
+                // capture phase is the only place Escape and Return reach it.
+                // Return is Done because Done is the sheet's default button,
+                // which is how AppKit's palette answers the key too.
+                if this.toolbar_sheet.is_some()
+                    && matches!(event.keystroke.key.as_str(), "escape" | "enter")
+                {
+                    this.close_toolbar_sheet(cx);
+                    window.prevent_default();
+                    return;
+                }
                 if this.inspect_character.is_some() && event.keystroke.key == "escape" {
                     this.inspect_character = None;
                     window.prevent_default();
@@ -9128,17 +10669,34 @@ impl Render for Workspace {
         // dragging and double-click — so the toolbar goes inside it instead of
         // under it. The name is drawn here because the native title is hidden;
         // it is a label, not a field, since renaming belongs to File ▸ Rename.
-        let mut title_bar = TitleBar::new().child(
+        // `TitleBar`'s own background is `title_bar` blended a little against
+        // `background`; that gradient belongs to a window whose page and chrome
+        // are the same colour. CotEditor's are not — the bar is `title_bar`,
+        // which `project_theme` resolves to the system's window background
+        // (white, 255, measured on the reference) over a page of the theme's
+        // own 250 — so the blend is dropped and the token used directly.
+        let mut title_bar = TitleBar::new().bg(cx.theme().title_bar).child(
             div()
                 .flex_shrink_0()
                 .truncate()
                 .text_sm()
+                // Upstream's window title is set in the system's semibold
+                // face (`DocumentWindowController` styles the title text
+                // field); the regular weight reads as a label, not a title.
+                .font_semibold()
                 .child(SharedString::from(title)),
         );
         // With the toolbar hidden the strip is still the window's drag region,
         // which is what upstream's `titleVisibility` window keeps too.
         if self.settings.window.show_toolbar {
-            title_bar = title_bar.child(self.render_toolbar(cx));
+            // The bar has to grow for a caption under each glyph. AppKit does
+            // the same thing: `NSToolbar` with `displayMode = .iconAndLabel`
+            // is taller than the icon-only bar, and the window's content view
+            // starts below whichever one is showing.
+            title_bar = title_bar.h(rems(
+                self.settings.window.toolbar_display_mode.title_bar_height(),
+            ));
+            title_bar = title_bar.child(self.render_toolbar(window, cx));
         }
         root = root.child(title_bar);
 
@@ -9325,6 +10883,93 @@ impl Render for Workspace {
             );
         }
 
+        // The Customize Toolbar palette, drawn over the window instead of in a
+        // `Dialog`. Upstream's palette is a sheet pinned under the title bar, and
+        // the *real* toolbar stays a drop target while it is open — that is the
+        // whole gesture, drag a tile from the sheet into the toolbar. A `Dialog`
+        // here occludes the entire window (gpui-component's dialog layer has no
+        // switch to turn that off), so the toolbar underneath could never receive
+        // a drop. An in-tree absolute overlay occludes only its own panel and
+        // leaves everything above it live.
+        //
+        // Padding is the sheet's own content margin, measured off the capture:
+        // 29 points on each side for the captions, the preview strip and the
+        // footer. The 524-point tile block is not inset by it — the block is
+        // centred in the 558-point content area, so it keeps the absolute
+        // position it had when the padding was 16. Vertically the top is 16
+        // points and the bottom 20: the capture's card runs 10 points longer
+        // than ours did for the same content. See `PALETTE_WIDTH`.
+        //
+        // No border. AppKit's sheet is defined by its shadow alone: sampled
+        // across the reference capture, the surround runs 250 and ramps down
+        // through 238 to a single 209 edge pixel before the 251 sheet begins —
+        // there is no repeated hairline, and the darkest value belongs to the
+        // shadow. `border_1()` drew a crisp neutral-200 (223) line on all four
+        // sides instead, which read as a framed panel rather than a sheet.
+        // `shadow_lg()` already produces the ramp on its own, so the edge is
+        // left to it.
+        //
+        // The fill is `sheet_fill`, not `popover` or `background`. The first
+        // tried was `popover` — white in light mode — which made the sheet the
+        // same tone as the window chrome above it and five levels *lighter*
+        // than the editor page it covers. The second, `background`, is whatever
+        // a `.cottheme` sets its paper to, so a sheet filled with it sat on its
+        // own shadow with no step at all. A fresh capture of the reference put
+        // the sheet at 240-242 against a 251 page, i.e. darker; `muted` is the
+        // token that keeps that ordering (and reverses it in dark mode, where
+        // a floating surface is the lighter one). `sheet_fill` carries the
+        // reasoning; the strip below derives its two steps from it.
+        if let Some(sheet) = &self.toolbar_sheet {
+            let top = if self.settings.window.show_toolbar {
+                rems(self.settings.window.toolbar_display_mode.title_bar_height())
+            } else {
+                rems(0.)
+            };
+            // The palette is about 640 points tall: five rows of tiles, the
+            // default-set strip and the footer. The overlay hangs from the
+            // title bar, so in a short window the footer — and with it *Done*,
+            // the only way out besides Escape — ended up below the viewport,
+            // painted nowhere and clickable nowhere. Cap the card to what the
+            // window can show and let the sheet scroll inside it; the footer
+            // then sits at the bottom of the scroll rather than at a negative
+            // y. The sheet is capped rather than the window grown because the
+            // window's size is the user's, and AppKit's own customization
+            // palette likewise scrolls instead of refusing to open.
+            let rem = window.rem_size();
+            let visible = window.viewport_size().height - top.to_pixels(rem) - rem;
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(0.))
+                    .right(px(0.))
+                    .top(top)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        v_flex()
+                            .w(window.rem_size() * PALETTE_WIDTH)
+                            .max_h(visible)
+                            .px(rems(1.8125))
+                            .pt(rems(1.))
+                            .pb(rems(1.25))
+                            .rounded_lg()
+                            .shadow_lg()
+                            .bg(sheet_fill(cx))
+                            .occlude()
+                            // Top padding plus bottom padding, so the card
+                            // never touches the window edge it is measured
+                            // against.
+                            .child(
+                                div()
+                                    .id("toolbar-sheet-scroll")
+                                    .max_h(visible - rem * 2.25)
+                                    .overflow_y_scroll()
+                                    .child(sheet.clone()),
+                            ),
+                    ),
+            );
+        }
+
         root
     }
 }
@@ -9501,6 +11146,65 @@ fn put_rich_text_on_the_pasteboard(rtf: &str, plain: &str, cx: &mut App) -> std:
     }
     cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(plain.to_string()));
     Ok(false)
+}
+
+/// The smallest a document window may be made.
+///
+/// CotEditor's document windows open at 720 × 480 and the storyboard enforces
+/// that as their minimum; every window SubText opens for a document uses the
+/// same floor. A function rather than a `const` because `gpui_kit::size` is
+/// not a `const fn`.
+pub(crate) fn document_window_min_size() -> gpui_kit::Size<gpui_kit::Pixels> {
+    gpui_kit::size(px(720.), px(480.))
+}
+
+/// Give an opened window its size.
+///
+/// CotEditor does this in two layers as it creates a document window: AppKit
+/// restores the frame autosaved under "Document", and then `windowWidth` /
+/// `windowHeight` from the Window pane override one dimension each. A pane
+/// field that says "Auto" — and upstream counts any value ≤ 0 as Auto, not
+/// only an empty one — leaves that dimension as the autosaved frame had it.
+/// GPUI opens a window at a platform-chosen size and then offers
+/// [`Window::resize`], so both layers are applied to the opened window here.
+///
+/// A size below [`document_window_min_size`] is raised to it, because `resize`
+/// goes straight to the platform and not every platform re-applies the minimum
+/// itself.
+pub(crate) fn resize_window_to_saved_size(
+    window: &mut Window,
+    options: &crate::settings::WindowOptions,
+    last_size: Option<[f32; 2]>,
+) {
+    let current = window.viewport_size();
+    let minimum = document_window_min_size();
+    // The remembered size is the content size, which is what `resize` takes,
+    // so it can be used as-is; a dimension the file cannot vouch for falls
+    // back to the size the window manager chose.
+    let remembered = last_size.unwrap_or([0., 0.]);
+    let base_width = if remembered[0] > 0. {
+        px(remembered[0])
+    } else {
+        current.width
+    };
+    let base_height = if remembered[1] > 0. {
+        px(remembered[1])
+    } else {
+        current.height
+    };
+    let width = options
+        .window_width
+        .filter(|width| *width > 0.)
+        .map_or(base_width, |width| px(width as f32))
+        .max(minimum.width);
+    let height = options
+        .window_height
+        .filter(|height| *height > 0.)
+        .map_or(base_height, |height| px(height as f32))
+        .max(minimum.height);
+    if width != current.width || height != current.height {
+        window.resize(gpui_kit::size(width, height));
+    }
 }
 
 /// Load every `.cotsyntax` bundle the resource directory offers.
@@ -9701,6 +11405,435 @@ impl Workspace {
     }
 }
 
+/// The height of one toolbar item's capsule, in points.
+///
+/// Every measurement in this block comes from a 2× capture of CotEditor's
+/// window: an item is a 37-point capsule that sits 7.5 points below the top of
+/// the window, which is what makes the icon-only strip 52 points tall. It is
+/// the same number as an AppKit `.toolbar` bezel and the same number the
+/// caption band is measured against, so the three move together.
+const TOOLBAR_ITEM_HEIGHT: f32 = 37.;
+
+/// The corner radius that turns the capsule into a circle or a pill: exactly
+/// half its height, which is what AppKit's `NSBezelStyleToolbar` draws.
+const TOOLBAR_ITEM_RADIUS: f32 = TOOLBAR_ITEM_HEIGHT / 2.;
+
+/// The distance from the top of the window to the top of an item's capsule.
+const TOOLBAR_TOP_INSET: f32 = 7.5;
+
+/// The glyph size inside a capsule, in points. Upstream's toolbar items draw
+/// their SF Symbol at the same size the system uses for a toolbar image; a
+/// `Button`'s own `.icon()` cannot be used here because it derives the glyph
+/// from the button's *height* — 0.75 of it — which at 37 points would be a
+/// 27.75-point glyph, far too large.
+const TOOLBAR_GLYPH_SIZE: f32 = 16.;
+
+/// The width of a glyph-only capsule: square, so it is a circle.
+const TOOLBAR_ICON_WIDTH: f32 = TOOLBAR_ITEM_HEIGHT;
+
+/// The distance between two adjacent toolbar items, and the one between a
+/// capsule and the caption under it.
+///
+/// The item gap is AppKit's toolbar-item spacing in the reference, which draws
+/// 13 pixels of paper between two capsules' fills at 2×. The fills are the
+/// capsule minus a half point of antialiasing at each edge, so the boxes sit 6
+/// points apart; 7 drew 15 pixels and pushed every item a point right of the
+/// reference's. The caption gap is the remainder of the 4.5 points between the
+/// bottom of the capsule and the top of the label's ink: the label's line box
+/// already leaves 4 points above the ink, so the box itself starts half a point
+/// down.
+const TOOLBAR_ITEM_GAP: f32 = 6.;
+const TOOLBAR_CAPTION_GAP: f32 = 0.5;
+
+/// The bar's trailing inset, in rem — 13 points at the default rem size.
+///
+/// It is the distance from the last item's box to the window's edge, and it is
+/// also what the inspector half of the bar subtracts from its own width: the
+/// tail is laid out from the divider to the edge, so a row that spans
+/// `inspector width − trailing inset` and is pinned to the right puts the
+/// tracking separator exactly on the divider between content and inspector.
+///
+/// The reference window's toggle capsule ends 13.5 points from the edge at 2×,
+/// i.e. its layout box ends at 13. Ours drew at 12.5 with a 12-point inset, so
+/// the box is 13 and the antialiased drawn edge lands on the reference's pixel.
+const TOOLBAR_TRAILING_PADDING_REMS: f32 = 0.8125;
+
+/// AppKit draws a toolbar label at 11 points, not at the 12 `text_xs` uses.
+const TOOLBAR_CAPTION_SIZE: f32 = 11.;
+
+/// How much of the bar's white a caption's ink covers.
+///
+/// AppKit sets a toolbar label in the system's secondary label colour, not in
+/// the document theme's text colour. A controlled probe — three bordered items
+/// with the captions 缩进, 注释 and Find, all enabled and in the active window —
+/// read every caption at 125 against the bar's 255, i.e. 51 % of black whatever
+/// the script. Black at 0.51 over white renders exactly that, and the live
+/// toolbar measures 125 too, so this value is both derived and confirmed.
+const TOOLBAR_CAPTION_INK: f32 = 0.51;
+
+/// How much of the bar's white a disabled item's picture and caption cover.
+///
+/// AppKit leaves the bezel alone when an item is unavailable: a probe showing
+/// the same bordered item enabled and disabled side by side — captured by
+/// window id, then measured per pixel — read the capsule's fill and its
+/// hairline identical in both states, and so did a group's capsule. What drops
+/// is the ink inside it: the picture went from black to 182–185 over the
+/// capsule's 250, and the caption from 125 to 197 over the bar's 255 — 27 % and
+/// 23 % of black. The value below splits the two, which is well inside a
+/// rendering step at 2×.
+const TOOLBAR_DISABLED_INK: f32 = 0.25;
+
+/// The alpha of the inspector tracking separator's outline.
+///
+/// The outline exists only while the toolbar is being customized, and only
+/// there does the reference draw it. Its stroke measures RGB 197; black at
+/// this alpha over the bar's white is 197, which is how the value was
+/// calibrated (0.19 rendered 210 and 0.23 rendered 200).
+const TOOLBAR_TRACKING_STROKE: f32 = 0.226;
+
+/// The horizontal padding of a capsule whose picture is a word rather than a
+/// glyph. Half the difference between the 43-point `textformat` item and its
+/// 28-point picture.
+const TOOLBAR_PICTURE_PADDING: f32 = 7.5;
+
+/// The size of the stacked up/down chevron in the syntax pop-up.
+const TOOLBAR_POPUP_CHEVRON_SIZE: f32 = 12.;
+
+/// The font size the syntax pop-up's title is set at.
+///
+/// An `NSPopUpButton` titles itself at the system font size — 13 points — not
+/// at the 14 a `Button`'s `.small()` resolves to. Measured off the active
+/// reference window at 2×: the pop-up is 283 pixels (141.5 points) wide and
+/// its "Markdown" title inks 121 pixels, which is 13 points and not 14.
+const TOOLBAR_POPUP_TEXT_SIZE: f32 = 13.;
+
+/// Everything the syntax pop-up spends besides its widest name.
+///
+/// The reference pop-up is 141.5 points wide while its widest item,
+/// "reStructuredText" set at 13 points, is about 101 — so 40.5 points go to
+/// the two 12-point end paddings, the two one-point borders, the gap and the
+/// 12-point stacked chevron between them. `NSPopUpButton` reports the widest
+/// item as its intrinsic width, which is exactly what this reproduces: the
+/// control keeps one width while the document's syntax changes.
+const TOOLBAR_POPUP_CHROME: f32 = 40.5;
+
+/// The width of one half of a split item — the tab-style item's action half and
+/// its menu half — and of a segment's pill, which is inset inside a wider cell.
+const TOOLBAR_SPLIT_ACTION_WIDTH: f32 = 38.;
+const TOOLBAR_SPLIT_MENU_WIDTH: f32 = 26.;
+
+/// The chevron in a split item's menu half. Smaller than a toolbar glyph
+/// because it marks the half rather than standing for the command.
+const TOOLBAR_CARET_SIZE: f32 = 14.;
+
+/// One half of a group is a 28-point stadium inset inside its cell.
+///
+/// The two kinds of group differ by a point: AppKit draws a momentary half 32
+/// points across and a `selectOne` half 33, on the same 2.5-point margin either
+/// side. With the capsule's one-point border that makes a 76-point capsule for
+/// a momentary pair and 78 for a `selectOne` one, which is what Accessibility
+/// reports for both apps and what a 2× capture draws (152 vs 156 pixels). The
+/// chosen pill of a `selectOne` pair covers 66 pixels — 33 points — sampled at
+/// the capsule's centre row so the rounded ends cannot narrow the run; the same
+/// row of a momentary pair has no pill, only the two glyphs.
+const TOOLBAR_SEGMENT_WIDTH: f32 = 32.;
+const TOOLBAR_SELECT_SEGMENT_WIDTH: f32 = 33.;
+const TOOLBAR_SEGMENT_HEIGHT: f32 = 28.;
+const TOOLBAR_SEGMENT_INSET: f32 = 2.5;
+
+/// The hairline AppKit draws between the halves of a group while neither is
+/// chosen: 1 × 20 points, centred, at a fifth of the way from the fill to the
+/// ink. A chosen half is a pill that covers the seam, so the line is drawn only
+/// for pairs that have no selection.
+const TOOLBAR_SEGMENT_DIVIDER_WIDTH: f32 = 1.;
+const TOOLBAR_SEGMENT_DIVIDER_HEIGHT: f32 = 20.;
+const TOOLBAR_SEGMENT_DIVIDER: f32 = 0.22;
+
+/// How much of the way from the bar's colour to the ink each toolbar fill goes.
+///
+/// These are not theme tokens: AppKit's bezel is drawn from the ink with alpha,
+/// so it lands on the same grey in every appearance. Measured off the *active*
+/// reference window at 2× — the whole strip dims in a non-key window, which is
+/// what made an earlier pass read these a step dark: the bar is 255, the
+/// capsule fill 249 and its hairline 220. Over white that is 6/255 and 35/255.
+/// A chosen half over the capsule reads a further 8% toward the ink, and a
+/// half under the pointer about 10% off the bar.
+const TOOLBAR_BEZEL_FILL: f32 = 0.024;
+const TOOLBAR_BEZEL_EDGE: f32 = 0.137;
+const TOOLBAR_BEZEL_HOVER: f32 = 0.10;
+const TOOLBAR_SEGMENT_FILL: f32 = 0.08;
+const TOOLBAR_SEGMENT_HOVER: f32 = 0.05;
+
+/// The ink AppKit paints window chrome with.
+///
+/// An `NSToolbarItem`'s image, a group's segment glyphs and the syntax pop-up's
+/// title are all tinted with `NSColor.labelColor` — the system's dynamic
+/// black/white — not with the document theme's text colour. Measured on the
+/// active reference window at 2×, every toolbar glyph and the pop-up title ink
+/// pure black (0), while Anura's `#2b2b2b`, which is what the `.cottheme` gives
+/// the *page*, would ink 43. The same rule covers the badge and text the
+/// navigation bar adds above the editor.
+fn toolbar_ink(cx: &App) -> Hsla {
+    if cx.theme().is_dark() {
+        Hsla::white()
+    } else {
+        Hsla::black()
+    }
+}
+
+/// The capsule every toolbar item is drawn in.
+///
+/// CotEditor's toolbar is the AppKit `.toolbar` bezel: a fill a twentieth of
+/// the way from the bar's colour to the ink, a half-point hairline a sixth of
+/// the way, and a fully rounded corner — a circle for an icon item, a pill for
+/// one that carries text. AppKit draws that hairline inside the frame's edge:
+/// captured at 2×, the reference bezel is one device pixel (`217`) between the
+/// bar (`255`) and the fill (`242`), where a full point would cover two. The
+/// kit's `outline()` bezel is white with its own
+/// hover that measures the same as this fill, so hover on it is invisible;
+/// the fill and the hover are painted here instead, through a custom variant,
+/// because a caller's `.hover()` on a `Button` collides with the one the
+/// button installs itself (`elements/div.rs`'s `hover` asserts it is unset).
+fn toolbar_bezel(id: &'static str, ink: Hsla, cx: &App) -> Button {
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                // Only reached where the caller's own `.bg()` is not: the
+                // hover and pressed fills, and the hairline's colour in those
+                // states, which the button repaints from `color`.
+                .color(ink.opacity(TOOLBAR_BEZEL_EDGE))
+                .hover(ink.opacity(TOOLBAR_BEZEL_HOVER))
+                .active(ink.opacity(TOOLBAR_SEGMENT_FILL))
+                .foreground(ink),
+        )
+        .small()
+        .h(px(TOOLBAR_ITEM_HEIGHT))
+        .rounded(px(TOOLBAR_ITEM_RADIUS))
+        .bg(ink.opacity(TOOLBAR_BEZEL_FILL))
+        .border(px(0.5))
+        .border_color(ink.opacity(TOOLBAR_BEZEL_EDGE))
+}
+
+/// One capsule around both halves of an `NSToolbarItemGroup`.
+///
+/// The capsule is 37 points tall — a half-point hairline around a 36-point
+/// interior. Its width comes from the halves and their [`ToolbarGroupKind`]
+/// cells; the chosen half is drawn as a stadium inside the capsule rather than
+/// as a tall button filling it. The half-point padding below restores the
+/// point of inset the hairline used to take up, so every group keeps the
+/// width AppKit reports (76 points for a pair of icon cells, 78 for one with a
+/// selected pill).
+fn toolbar_group(
+    id: &'static str,
+    ink: Hsla,
+    kind: ToolbarGroupKind,
+    first: Button,
+    second: Button,
+) -> gpui_kit::Stateful<Div> {
+    let mut group = h_flex()
+        .id(id)
+        .flex_none()
+        .h(px(TOOLBAR_ITEM_HEIGHT))
+        .items_center()
+        .px(px(0.5))
+        .rounded(px(TOOLBAR_ITEM_RADIUS))
+        .bg(ink.opacity(TOOLBAR_BEZEL_FILL))
+        .border(px(0.5))
+        .border_color(ink.opacity(TOOLBAR_BEZEL_EDGE))
+        .child(first);
+    if kind.draws_divider() {
+        group = group.child(
+            div()
+                .flex_none()
+                .w(px(TOOLBAR_SEGMENT_DIVIDER_WIDTH))
+                .h(px(TOOLBAR_SEGMENT_DIVIDER_HEIGHT))
+                .mx(px(-TOOLBAR_SEGMENT_DIVIDER_WIDTH / 2.))
+                .bg(ink.opacity(TOOLBAR_SEGMENT_DIVIDER)),
+        );
+    }
+    group.child(second)
+}
+
+/// How an `NSToolbarItemGroup` chooses among its halves.
+///
+/// This is AppKit's selection mode, and it fixes two things the toolbar
+/// cannot derive from the item: how wide each half is (see
+/// [`TOOLBAR_SEGMENT_WIDTH`]) and whether the hairline between the halves is
+/// drawn. A momentary group has no chosen half, so nothing covers the seam and
+/// the line stays visible; a `selectOne` group always has one, and its pill
+/// covers the line.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolbarGroupKind {
+    Momentary,
+    SelectOne,
+}
+
+impl ToolbarGroupKind {
+    /// The width of one half's stadium. The margin either side is
+    /// [`TOOLBAR_SEGMENT_INSET`] in both kinds.
+    fn segment_width(self) -> f32 {
+        match self {
+            Self::Momentary => TOOLBAR_SEGMENT_WIDTH,
+            Self::SelectOne => TOOLBAR_SELECT_SEGMENT_WIDTH,
+        }
+    }
+
+    /// The hairline AppKit puts between the halves when neither is chosen:
+    /// 1 × 20 points, centred, at a fifth of the way from the fill to the ink.
+    /// It overlaps the shared gutter rather than widening the capsule, which is
+    /// why it carries negative margins.
+    fn draws_divider(self) -> bool {
+        self == Self::Momentary
+    }
+}
+
+/// One half of a group: a 28-point stadium, transparent until it is chosen.
+///
+/// The width comes from the group's kind (see [`TOOLBAR_SEGMENT_WIDTH`]). The
+/// selected state is the pressed fill rather than a second colour, which is
+/// how AppKit's `selectOne` group draws the chosen half; a chosen half also
+/// drops its hover, so pressing it does not read as a different selection.
+fn toolbar_segment(
+    id: &'static str,
+    ink: Hsla,
+    selected: bool,
+    kind: ToolbarGroupKind,
+    cx: &App,
+) -> Button {
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .hover(ink.opacity(TOOLBAR_SEGMENT_HOVER))
+                .active(ink.opacity(TOOLBAR_SEGMENT_FILL))
+                .foreground(ink),
+        )
+        .small()
+        .h(px(TOOLBAR_SEGMENT_HEIGHT))
+        .w(px(kind.segment_width()))
+        .mx(px(TOOLBAR_SEGMENT_INSET))
+        .px_0()
+        .rounded(px(TOOLBAR_SEGMENT_HEIGHT / 2.))
+        .selected(selected)
+}
+
+/// A toolbar glyph at the size a toolbar draws one.
+///
+/// A child of the button, never `.icon()`: a child is drawn at the size asked
+/// for, while the builder's icon size is derived from the button's height.
+fn toolbar_glyph(icon: IconName) -> AnyElement {
+    Icon::new(icon)
+        .with_size(px(TOOLBAR_GLYPH_SIZE))
+        .into_any_element()
+}
+
+/// Draw a toolbar command in the representation the user chose.
+///
+/// The caption is [`ToolbarItemId::label`], which is upstream's
+/// `Toolbar.*.label` — the exact text `NSToolbar` draws in its text modes.
+/// It doubles as the accessible name, so what a screen reader announces and
+/// what the bar shows cannot drift apart.
+///
+/// The button is always the picture. In the two text modes the caption is the
+/// one `render_toolbar_item` stacks *under* the capsule, the way AppKit draws
+/// it; putting the words inside the button as well would show them twice and
+/// would not be the label-only bar AppKit actually produces.
+fn toolbar_command_button(
+    id: &'static str,
+    item: ToolbarItemId,
+    icon: IconName,
+    mode: ToolbarDisplayMode,
+    cx: &App,
+) -> Button {
+    toolbar_picture_button(id, item, toolbar_glyph(icon), mode, cx)
+}
+
+/// The same button with a picture other than a Lucide glyph.
+///
+/// Upstream gives a palette tile and its toolbar item the *same* `NSImage`,
+/// varying it only through `stateImages`, so any item whose art is drawn in
+/// `toolbar.rs` must take its picture from there rather than redraw it here.
+fn toolbar_picture_button(
+    id: &'static str,
+    item: ToolbarItemId,
+    picture: AnyElement,
+    mode: ToolbarDisplayMode,
+    cx: &App,
+) -> Button {
+    let label = localization::t(item.label());
+    let button = toolbar_bezel(id, toolbar_ink(cx), cx).accessibility_label(label);
+    match mode {
+        // Every mode draws the picture: AppKit's label-only bar is its
+        // icon-and-label bar, with the caption under the capsule rather than
+        // inside it. `mode` stays in the signature because the caller has it
+        // and because a future AppKit may separate the two again.
+        ToolbarDisplayMode::IconOnly
+        | ToolbarDisplayMode::IconAndText
+        | ToolbarDisplayMode::TextOnly => button.w(px(TOOLBAR_ICON_WIDTH)).px_0().child(picture),
+    }
+}
+
+/// How wide `text` is when set at `font_size` in the interface font.
+///
+/// The pop-up's width has to come from the text itself: upstream asks
+/// `NSPopUpButton` for its intrinsic width, which is measured from the menu's
+/// widest title. `layout_line` is the same measurement the text renderer will
+/// use for the label, so the two cannot disagree about where the title ends.
+fn toolbar_text_width(text: &str, font_size: f32, window: &Window, cx: &App) -> f32 {
+    if text.is_empty() {
+        return 0.;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font: Font {
+            family: cx.theme().font_family.clone(),
+            ..Font::default()
+        },
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    f32::from(
+        window
+            .text_system()
+            .layout_line(text, px(font_size), &[run], None)
+            .width,
+    )
+}
+
+/// The syntax pop-up's width: its widest item plus the capsule's chrome.
+///
+/// This is the rule `NSPopUpButton` follows, and the one
+/// `updateSyntaxPopUpButtonWidth` relies on — the pop-up is as wide as
+/// "reStructuredText" in every document, not as wide as the syntax that is
+/// currently selected.
+fn toolbar_popup_width<'a>(names: impl Iterator<Item = &'a str>, window: &Window, cx: &App) -> f32 {
+    let widest = names
+        .map(|name| toolbar_text_width(name, TOOLBAR_POPUP_TEXT_SIZE, window, cx))
+        .fold(0., f32::max);
+    widest + TOOLBAR_POPUP_CHROME
+}
+
+/// The picture an item shows, falling back to its Lucide glyph.
+///
+/// `on` selects the state picture the way AppKit's `stateImages` does — the
+/// palette always draws the off picture, so a glyph that changes with its
+/// command changes only here.
+fn toolbar_art(item: ToolbarItemId, on: bool) -> AnyElement {
+    symbol_glyph(item, on).unwrap_or_else(|| toolbar_glyph(item.icon()))
+}
+
+/// A command whose picture comes from `toolbar.rs` and changes with its state.
+fn toolbar_symbol_button(
+    id: &'static str,
+    item: ToolbarItemId,
+    on: bool,
+    mode: ToolbarDisplayMode,
+    cx: &App,
+) -> Button {
+    toolbar_picture_button(id, item, toolbar_art(item, on), mode, cx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9717,6 +11850,69 @@ mod tests {
             top_offset: cursor,
             bottom_offset: cursor,
         }
+    }
+
+    /// `ByteCountFormatStyle`'s `.file` style, read off Foundation rather than
+    /// derived: the unit has its own number of fraction digits, a unit is
+    /// promoted before the old one would print `1,000`, and ties round to even.
+    #[test]
+    fn sizes_are_formatted_the_way_foundation_formats_them() {
+        let _english = localization::pin(localization::Language::English);
+        let cases = [
+            (0, "0 bytes"),
+            (1, "1 byte"),
+            (58, "58 bytes"),
+            (998, "998 bytes"),
+            (999, "1 kB"),
+            (4_500, "4 kB"),
+            (5_500, "6 kB"),
+            (999_498, "999 kB"),
+            (999_499, "1 MB"),
+            (999_949_998, "999.9 MB"),
+            (999_949_999, "1 GB"),
+            (999_994_999_998, "999.99 GB"),
+            (999_994_999_999, "1 TB"),
+            (1_234_567, "1.2 MB"),
+            (12_345_678, "12.3 MB"),
+            (123_456_789, "123.5 MB"),
+            (1_234_567_890, "1.23 GB"),
+            (12_345_678_901, "12.35 GB"),
+            (123_456_789_012, "123.46 GB"),
+            (1_234_567_890_123, "1.23 TB"),
+            (9_007_199_254_740_993, "9.01 PB"),
+            // Half-to-even, then a trailing zero is trimmed: .05 goes down to
+            // `1`, .25 stays at `.2`, .15 and .35 round up.
+            (1_050_000, "1 MB"),
+            (1_150_000, "1.2 MB"),
+            (1_250_000, "1.2 MB"),
+            (1_350_000, "1.4 MB"),
+        ];
+        for (bytes, expected) in cases {
+            assert_eq!(format_size(bytes, false), expected, "{bytes} bytes");
+        }
+    }
+
+    /// The document inspector's variant: the exact count in parentheses, and
+    /// the platform's default `spellsOutZero`, which the status bar turns off.
+    #[test]
+    fn the_inspector_adds_the_exact_count_and_spells_out_zero() {
+        let _english = localization::pin(localization::Language::English);
+        assert_eq!(format_size(0, true), "Zero kB");
+        assert_eq!(format_size(1, true), "1 byte (1 byte)");
+        assert_eq!(format_size(66_000, true), "66 kB (66,000 bytes)");
+        assert_eq!(format_size(1_234_567, true), "1.2 MB (1,234,567 bytes)");
+    }
+
+    #[test]
+    fn sizes_speak_chinese_without_a_space_before_the_unit() {
+        let _chinese = localization::pin(localization::Language::Chinese);
+        assert_eq!(format_size(0, false), "0字节");
+        assert_eq!(format_size(1, false), "1字节");
+        assert_eq!(format_size(58, false), "58字节");
+        assert_eq!(format_size(66_000, false), "66 kB");
+        assert_eq!(format_size(0, true), "0 kB");
+        assert_eq!(format_size(1, true), "1字节（1字节）");
+        assert_eq!(format_size(66_000, true), "66 kB（66,000字节）");
     }
 
     #[test]

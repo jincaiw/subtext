@@ -30,6 +30,7 @@ Appearance	外观
 Appearance:	外观：
 AppleScript Dictionary	AppleScript词典
 Ask how to update	询问如何更新
+Auto	自动
 Automatically	自动
 Automatically indent while typing	键入时自动缩进
 Automatically trim trailing whitespace	自动去除末尾空格
@@ -45,6 +46,7 @@ Change background color	改变背景颜色
 Change Font	更换字体
 Change syntax	改变语法
 Character count	字符数
+Comment Out	注释
 Characters	字符
 Check Document Now	立即检查文稿
 Check for updates automatically	自动检查更新
@@ -61,11 +63,13 @@ Close tab	关闭标签页
 Column	列
 Command	命令
 Comment	注释
+Comment:	注释：
 Comment-out or uncomment selection	将选中内容注释或取消注释
 Complete	联想
 Completion:	补全：
 Console	控制台
 Content parse	内容解析
+Content parse:	内容解析：
 Convert Alphanumeric Text to Full Width	将字母数字转换为全角
 Convert Alphanumeric Text to Half Width	将字母数字转换为半角
 Convert Indentation to Spaces	将缩进转换为空格
@@ -103,11 +107,11 @@ Delete Duplicates	删除重复
 Delete Line	删除行
 Description	描述
 Detect indent style on document opening	在打开文稿时检测缩进格式
-Dialog warnings	对话框警告
+Dialog warnings:	对话框警告：
 Direction	方向
 Do Nothing	不执行任何操作
 Document Inspector	文稿信息
-Document save	文稿保存
+Document save:	文稿保存：
 Donate to SubText…	为 SubText 捐赠…
 Done	完成
 Don’t Save	不保存
@@ -137,7 +141,8 @@ Find All	全部查找
 Find Next	查找下一个
 Find Previous	查找上一个
 Find…	查找…
-Flexible Space	弹性间距
+Fixed Space	间距
+Flexible Space	可调间距
 Folder Find	文件夹查找
 Font	字体
 Font Type	字体类型
@@ -154,8 +159,10 @@ Hide indent guide lines	隐藏缩进指示线
 Hide invisible characters	隐藏不可见元素
 Hide Others	隐藏其他
 Hide SubText	隐藏 SubText
+Hide Inspector	隐藏检查器
 Hide the inspector	隐藏检查器
 Hide the navigation bar	隐藏导航栏
+Hide Sidebar	隐藏边栏
 Hide the sidebar	隐藏边栏
 Hide Toolbar	隐藏工具栏
 Highlight All	全部高亮
@@ -170,10 +177,11 @@ Indent	缩进
 Indent Guides	缩进指示
 Indent guides	缩进指示
 Indent selection with Tab key	使用 Tab 键对选择进行缩进
-Indent width:	以
+Indent width:	缩进宽度：
 Indent wrapped lines by	自动换行缩进字符数：
 Indentation	缩进
 Indentation, whitespace and content parsing.	缩进、空白字符与内容解析。
+Indentation:	缩进：
 Inline Comment	行注释
 Insert Backslash	输入反斜杠
 Insert by Unicode Code Point…	用Unicode输入…
@@ -186,7 +194,7 @@ Insertion format:	按格式插入：
 Inspect Character	检视文字
 Inspector	检查器
 Integration	集成
-Interface language	界面语言
+Interface language:	界面语言：
 Invisible characters	不可见元素
 Invisibles	不可见元素
 Join Lines	连接行
@@ -242,9 +250,11 @@ New Window	新建窗口
 None	无
 Not found	未找到
 OK	好
-On startup	启动时
+On startup:	启动时：
 Opaque	不透明
 Open documents in tabs:	在标签页中打开文稿：
+Open help	打开帮助
+Open help.	打开帮助。
 Open in New Tab	在新标签页中打开
 Open Outline Menu	打开大纲菜单
 Open Recent	打开最近使用
@@ -254,6 +264,7 @@ Orientation	方位
 Other control characters	其他控制字符
 Other whitespace	其他空白字符
 Outline	大纲
+Overscroll:	额外滚动：
 Page guide at column:	列位置页面指示：
 Page Setup…	页面设置…
 Parentheses	圆括号
@@ -303,7 +314,7 @@ Select Previous Outline Item	选择上一个大纲项目
 Select Word	选择单词
 Services	服务
 Settings	设置
-Settings import & export	设置导入与导出
+Settings import & export:	设置导入与导出：
 Settings…	设置…
 Share	共享
 Share document file	共享文稿文件
@@ -353,7 +364,7 @@ Smart Dashes	智能破折号
 Smart quotes	智能引号
 Smart Quotes	智能引号
 Snippets	代码片段
-Software update	软件更新
+Software update:	软件更新：
 Sort	排序
 Sort by Pattern…	按模式排序…
 Space	空格
@@ -389,7 +400,7 @@ Syntax	语法
 Syntax in which this file drop setting is used.	应用此文件拖放设置的语法。
 System monospaced	系统等宽字体
 Tab	制表符
-Tab Style	Tab 样式
+Tab Style	Tab样式
 Tab width	制表符宽度
 Tab Width	制表符宽度
 Tabs	制表符
@@ -411,6 +422,7 @@ This syntax does not exist	此语法不存在
 This syntax is customized.	该语法已被自定义。
 Tinted	色调
 To change a shortcut, click the key column, then type the new keys.	通过点击“键”列，并输入新的键来修改快捷键。
+To show invisible characters, set them in Window settings	要显示不可见元素，请在窗口设置中进行设定
 Toggle Comment	切换注释
 Transformations	转换
 Trim Trailing Whitespace	移除行尾空白
@@ -419,7 +431,7 @@ Undo	撤销
 Unicode Normalizations	Unicode 标准化
 Unknown	未知
 Unwrap lines	不换行
-Update to prereleases	包含预发布版本
+Update to prereleases when available	有预发布版本时更新
 Update to the changed version	更新到被更改的版本
 URL Decode	URL解码
 URL Encode	URL编码
@@ -436,9 +448,10 @@ Vertical	竖排
 View	显示
 Warnings	警告
 What’s New in SubText	SubText 新功能
-When a file is modified by another application	当文稿被其他应用更改时：
+When document is changed by another application:	当文稿被其他应用更改时：
 When nothing else is open:	当没有打开任何文稿时：
 Whitespace	空白字符
+Whitespace:	空白字符：
 Width	宽度
 Window	窗口
 Window size, tabs, and what the editor shows.	窗口大小、标签页以及编辑器显示的内容。
@@ -479,9 +492,10 @@ Close find result.	关闭查找结果。
 Code	代码
 Color Code	颜色码
 Color:	颜色：
-Command-line tool	命令行工具
+Command-line tool:	命令行工具：
 Completion list includes:	补全列表包括：
 Conditions	条件
+Allow remote files to be opened in SubText over the rmate protocol. The port is stored, but the listener is not implemented yet: no socket is opened and no remote file can be received.	允许通过 rmate 协议在 SubText 中打开远程文件。端口会被保存，但监听器尚未实现：不会打开套接字，也不会收到远程文件。
 Convert	转换
 Custom Surround	自定义环绕
 Customize Toolbar	自定义工具栏…
@@ -534,7 +548,7 @@ Match	匹配
 New Saved Scope	新建已保存的范围
 Next Outline Item	下一个大纲项
 No conditions — every file is searched.	没有条件 — 将搜索每个文件。
-No item selected	未选择任何项目
+No item selected	未选择任何项
 No recent files	无最近文件
 No saved scopes.	没有已保存的范围。
 Nonsense	无效
@@ -557,7 +571,7 @@ RE	RE
 Refer to the encoding declaration in the document	参考文稿中的编码声明
 Regular Expression	正则表达式
 Reinterpret	再次解释
-Remote editing	远程编辑
+Remote editing:	远程编辑：
 Remove	移除
 Remove this condition	移除此条件
 Rename	重新命名
@@ -569,6 +583,7 @@ Replace with	替换
 Respect language rules	遵守语言规则
 Restore Defaults	恢复默认
 Review Incompatible Characters	检查不兼容字符
+Run “subtext FILE” to open a file from a terminal. No installer puts “subtext” on your PATH yet, so call the executable by its full path.	在终端运行“subtext 文件”即可打开文件。目前还没有安装程序把“subtext”放进 PATH，请用可执行文件的完整路径调用。
 Sample:	示例：
 Save Available Text	保存可用的文本
 Saved Scopes	已保存的范围
@@ -603,6 +618,7 @@ Use captured group:	使用捕获组：
 Use the document's folder	使用文稿所在的文件夹
 deprecated	已弃用
 of the following conditions:	以下条件：
+px	像素
 seconds	秒
 spaces	个空格
 times	倍
@@ -624,7 +640,7 @@ No output yet. A script's standard error appears here.	暂无输出。脚本的�
 Entire line	整行
 Regular expression	正则表达式
 bytes	字节
-Documents are saved automatically while you work, and earlier versions stay reachable from File ▸ Revert To.	文档会自动保存，之前的版本仍可从「文件」▸「复原到」访问。
+Not implemented yet. SubText writes a file only when you save, and keeps no earlier versions to revert to.	尚未实现。SubText 只在你保存时写入文件，也没有可复原的早期版本。
 Dot matches line separators	使点匹配换行
 Ignore Case	忽略大小写
 Ignore diacritical marks	忽略变音符号
@@ -753,6 +769,8 @@ Find {1} matches in “{2}.”	在“{2}”中找到{1}个匹配项。
 Find text: {}	搜索文本：{}
 {} matches	{}个匹配项
 {} replaced	{}处被替换
+# The Shortcuts pane's footer, under the shortcut list.
+{} shortcuts, all at their CotEditor defaults	{}个快捷键，全部为 CotEditor 的默认值
 # The folder find pane's counts, worded the way upstream words them.
 {1} matches in {2} files	{2}个文件中的{1}个匹配项
 {1}+ matches in {2} files	{2}个文件中的{1}个以上匹配项
@@ -858,3 +876,26 @@ Count	计数
 # own placeholder — so it follows the same shape.
 No Filter Results	无过滤结果
 No outline items	无大纲项目
+Display	显示
+Icon and Text	图标和文本
+Icon Only	仅图标
+Text Only	仅文本
+Drag your favorite items into the toolbar…	将喜爱的项目拖入工具栏…
+… or drag the default set into the toolbar.	…或者将默认的一组拖入工具栏。
+# The About and Donation panels. The donation sentences are upstream's
+# (`Localizables/Panels/Donation.xcstrings`) with the project renamed where
+# SubText's own sentence already differs; the version line is upstream's
+# `Version %@ (%@)` without the build number SubText does not have.
+A cross-platform plain-text editor, reimplementing CotEditor's menus, key bindings, syntax rules and themes on GPUI Kit.	一个跨平台纯文本编辑器，用 GPUI Kit 重新实现 CotEditor 的菜单、快捷键、语法规则与主题。
+SubText provides all features for free to everyone. You can support the original project this editor reimplements.	SubText 向所有人免费提供所有功能。你可以通过支持本编辑器所重新实现的原项目来支持这项工作。
+The In-App donation feature is available only in CotEditor distributed in the App Store.	App内捐赠功能仅在App Store分发的CotEditor中可用。
+Version {}	版本 {}
+Resources: {} — {}	资源：{} — {}
+Resources: not found; using the built-in fallbacks	未找到资源，正在使用内置的替代项。
+# The font picker, its opacity control, and the monospaced warning.
+Select…	选择…
+Transparent	透明
+Font: {}	字体：{}
+The selected font doesn’t seem to be monospaced.	所选字体似乎不是等宽字体。
+Do you want to use it for the monospaced font?	要在等宽字体中使用它吗？
+File size	文件尺寸

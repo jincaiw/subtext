@@ -192,8 +192,8 @@ impl Workspace {
             // so the menu bar is rebuilt by the dialog's OK rather than here.
             "CustomizeEncodings" => self.show_encoding_list_editor(cx),
             "OpenScriptsFolder" => self.open_scripts_folder(cx),
-            "MakeFontStandard" => self.set_font(None, cx),
-            "MakeFontMonospaced" => self.set_font(Some(mono_font()), cx),
+            "MakeFontStandard" => self.set_font_standard(cx),
+            "MakeFontMonospaced" => self.set_font_monospaced(cx),
             // Upstream's result view receives the standard Text Size commands
             // through `.onCommand` while it holds the focus, ahead of the text
             // view; the same three commands sit on its context menu.
@@ -204,15 +204,12 @@ impl Workspace {
                 self.step_find_result_font_size(false, cx)
             }
             "ResetFont" if self.find_results_focused() => self.reset_find_result_font_size(cx),
-            "BiggerFont" => self.bump_font(1.0, cx),
-            "SmallerFont" => self.bump_font(-1.0, cx),
-            "ResetFont" => {
-                self.set_font(None, cx);
-                self.set_font_size(13.0, cx)
-            }
+            "BiggerFont" => self.scale_font(1.1, cx),
+            "SmallerFont" => self.scale_font(1.0 / 1.1, cx),
+            "ResetFont" => self.reset_font(cx),
             "OrderFrontFontPanel" => self.notice(localization::t("Use Format ▸ Font to change the font"), cx),
-            "ToggleAntialias" => self.toggle_antialias(window, cx),
-            "ToggleLigatures" => self.toggle_ligatures(window, cx),
+            "ToggleAntialias" => self.toggle_antialias(cx),
+            "ToggleLigatures" => self.toggle_ligatures(cx),
             "ChangeTabWidth" | "CustomizeTabWidth" => self.cycle_tab_width(cx),
             "ToggleAutoTabExpand" => self.toggle_auto_expand_tabs(cx),
             "ToggleInvisibleChars" => self.update_editor_options(window, cx, |options| {
@@ -466,7 +463,7 @@ impl Workspace {
 const PROJECT_URL: &str = "https://github.com/jincaiw/subtext";
 const ISSUES_URL: &str = "https://github.com/jincaiw/subtext/issues";
 const RELEASES_URL: &str = "https://github.com/jincaiw/subtext/releases";
-const DOCS_URL: &str = "https://github.com/jincaiw/subtext/tree/main/docs";
+pub(crate) const DOCS_URL: &str = "https://github.com/jincaiw/subtext/tree/main/docs";
 
 /// A deterministic stand-in for a random source, so `Shuffle Lines` is
 /// reproducible in tests and needs no `rand` dependency.
@@ -486,21 +483,4 @@ fn pseudo_random(bound: usize) -> usize {
         state.set(value);
         (value % bound as u64) as usize
     })
-}
-
-/// CotEditor's "Standard Font" is the monospaced face the system recommends;
-/// `Menlo` is the macOS default the application ships with.
-fn mono_font() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        "Menlo".to_string()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "Consolas".to_string()
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        "DejaVu Sans Mono".to_string()
-    }
 }

@@ -434,6 +434,156 @@ pub fn toggle_comment(
     Edit::unchanged(text.to_string(), selection.clone())
 }
 
+/// Whether uncommenting would remove a delimiter from the selection.
+///
+/// This is CotEditor's `String.canUncomment(partly:delimiters:in:)` for a
+/// single selection. `partly` asks the question the *Uncomment* menu item
+/// asks: is there anything here to remove? `partly == false` asks the one
+/// *Toggle Comment* asks when it picks its title: can the whole selection be
+/// uncommented?
+///
+/// The selection is widened to whole line contents first, so a caret in the
+/// middle of `// foo` counts as commented. Block delimiters are tried before
+/// inline ones, in the same order upstream tries them.
+pub fn can_uncomment(
+    text: &str,
+    selection: &Range<usize>,
+    delimiters: &CommentDelimiters,
+    partly: bool,
+) -> bool {
+    can_uncomment_contents(
+        &text[line_contents_range(text, selection)],
+        delimiters,
+        partly,
+    )
+}
+
+/// [`can_uncomment`] for a caller that already has the selected lines.
+///
+/// The workspace reads the text out of the editor's rope, where copying the
+/// whole document on every caret move would be wasteful; slicing just these
+/// lines first keeps the same answer without the copy.
+pub fn can_uncomment_contents(
+    contents: &str,
+    delimiters: &CommentDelimiters,
+    partly: bool,
+) -> bool {
+    if delimiters.inline.is_none() && delimiters.block.is_none() {
+        return false;
+    }
+
+    if contents.is_empty() {
+        return false;
+    }
+
+    if let Some((begin, end)) = &delimiters.block {
+        // One selection means one target line range, so an exact block match
+        // is always 2 captured delimiter ranges against 2 * 1 — true.
+        if has_block_delimiters(contents, begin, end) {
+            return true;
+        }
+    }
+
+    if let Some(inline) = &delimiters.inline {
+        let (commented, lines) = inline_commented_lines(contents, inline);
+        if commented > 0 {
+            return partly || commented == lines;
+        }
+    }
+
+    false
+}
+
+/// The line contents touched by `selection`: first line start through last
+/// line contents end.
+///
+/// A selection that ends after a line's terminating newline stops at that
+/// newline's contents end rather than picking up the next line, which is what
+/// `NSString.getLineStart(_:end:contentsEnd:for:)` does for the same range.
+///
+/// The terminator is excluded whether it is `\n`, `\r\n`, or a lone `\r`;
+/// [`line_bounds`] is the single place that knows all three. That matters
+/// beyond tidiness: leaving a `\r` on the end of the line makes a completed
+/// block comment — `/* foo */\r` — look unclosed, which greys out *Uncomment*
+/// in every CRLF document.
+pub fn line_contents_range(text: &str, selection: &Range<usize>) -> Range<usize> {
+    let start = floor_char_boundary(text, selection.start.min(text.len()));
+    let end = floor_char_boundary(text, selection.end.min(text.len()));
+    // `end - 1` can land inside a multi-byte character; step back to the start
+    // of that character before asking which line holds it.
+    let probe = if end > start {
+        floor_char_boundary(text, end - 1)
+    } else {
+        start
+    };
+    let bounds = line_bounds(text);
+    let first = line_at(&bounds, start);
+    let last = line_at(&bounds, probe);
+    bounds[first].0..bounds[last].1
+}
+
+/// Index of the logical line that holds `offset`.
+///
+/// A line starts at its own start and runs through its terminator, which is
+/// what keeps a caret just after a newline on the line it ended rather than
+/// pulling in the next one.
+fn line_at(bounds: &[(usize, usize)], offset: usize) -> usize {
+    bounds
+        .iter()
+        .rposition(|&(line_start, _)| line_start <= offset)
+        .unwrap_or(0)
+}
+
+/// Whether `contents` is exactly one block comment: optional indentation, the
+/// begin marker, anything, the end marker, optional trailing whitespace.
+///
+/// The `.*?` between the markers is what makes this "fits exactly": the end
+/// marker has to be the last non-space text in the range.
+fn has_block_delimiters(contents: &str, begin: &str, end: &str) -> bool {
+    let indent = contents.len() - contents.trim_start_matches([' ', '\t']).len();
+    if !contents[indent..].starts_with(begin) {
+        return false;
+    }
+    if end.is_empty() {
+        return true;
+    }
+    let trimmed = contents.trim_end_matches([' ', '\t']);
+    // `strip_suffix` is the boundary-safe way to ask this: arithmetic on the
+    // length (`trimmed[trimmed.len() - end.len()..]`) can land in the middle
+    // of a multi-byte character and panic, which a selection change must never
+    // do.
+    let Some(rest) = trimmed.strip_suffix(end) else {
+        return false;
+    };
+    // The end marker must start at or after the begin marker ended.
+    rest.len() >= indent + begin.len()
+}
+
+/// `(lines that begin with the inline delimiter, lines in total)`.
+///
+/// Both counts are over `contents`, which is one line or several; blank lines
+/// count as lines but never as commented ones.
+fn inline_commented_lines(contents: &str, inline: &str) -> (usize, usize) {
+    // A lone `\r` is a line terminator too. Normalise only when one is
+    // present, so the common case stays allocation-free.
+    let normalized;
+    let contents = if contents.contains('\r') {
+        normalized = contents.replace("\r\n", "\n").replace('\r', "\n");
+        normalized.as_str()
+    } else {
+        contents
+    };
+    let mut commented = 0;
+    let mut lines = 0;
+    for line in contents.split('\n') {
+        lines += 1;
+        if line.trim_start_matches([' ', '\t']).starts_with(inline) {
+            commented += 1;
+        }
+    }
+    (commented, lines)
+}
+
 /// Move the selected lines up one line, or down one line.
 pub fn move_lines(text: &str, selection: &Range<usize>, up: bool) -> Edit {
     let (start, end) = (
@@ -2443,6 +2593,121 @@ mod tests {
         assert_eq!(wrapped.text, "/*abc*/");
         let unwrapped = toggle_comment(&wrapped.text, &(0..wrapped.text.len()), &delimiters);
         assert_eq!(unwrapped.text, "abc");
+    }
+
+    #[test]
+    fn can_uncomment_needs_delimiters() {
+        let text = "// foo";
+        let none = CommentDelimiters::default();
+        assert!(!can_uncomment(text, &all(text), &none, true));
+        assert!(!can_uncomment(text, &all(text), &none, false));
+    }
+
+    #[test]
+    fn can_uncomment_with_every_line_commented() {
+        // CotEditor's `checkIncompatibility`: "//" is a valid comment line,
+        // so the whole selection can be uncommented.
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        let text = "// foo\n//\n// foo bar";
+        assert!(can_uncomment(text, &all(text), &delimiters, true));
+        assert!(can_uncomment(text, &all(text), &delimiters, false));
+    }
+
+    #[test]
+    fn can_uncomment_with_an_uncommented_line() {
+        // CotEditor's `checkPartialIncompatibility`: the blank line keeps
+        // this from being a full uncomment.
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        let text = "// foo\n\n// foo bar";
+        assert!(can_uncomment(text, &all(text), &delimiters, true));
+        assert!(!can_uncomment(text, &all(text), &delimiters, false));
+    }
+
+    #[test]
+    fn can_uncomment_reads_the_line_around_the_caret() {
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        let text = "abc\n  // foo\ndef";
+        // A collapsed caret inside the comment still counts.
+        assert!(can_uncomment(text, &(7..7), &delimiters, true));
+        // A caret on an uncommented line does not.
+        assert!(!can_uncomment(text, &(0..0), &delimiters, true));
+    }
+
+    #[test]
+    fn can_uncomment_recognises_a_wrapped_block() {
+        let delimiters = CommentDelimiters {
+            inline: None,
+            block: Some(("<-".into(), "->".into())),
+        };
+        let text = "<-foo->";
+        assert!(can_uncomment(text, &all(text), &delimiters, true));
+        assert!(can_uncomment(text, &all(text), &delimiters, false));
+        // The end marker has to close the range; `bar` after it is not a
+        // complete comment.
+        let text = "<-foo-> bar";
+        assert!(!can_uncomment(text, &all(text), &delimiters, true));
+    }
+
+    #[test]
+    fn can_uncomment_stops_at_the_selections_last_line() {
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        let text = "// one\nplain";
+        // Selecting through the newline that ends line one still targets
+        // only line one.
+        assert!(can_uncomment(text, &(0..7), &delimiters, false));
+    }
+
+    #[test]
+    fn can_uncomment_handles_every_line_terminator() {
+        let delimiters = CommentDelimiters {
+            inline: Some("//".into()),
+            block: Some(("/*".into(), "*/".into())),
+        };
+        // Cocoa's line contents exclude `\r\n` as one terminator; leaving the
+        // `\r` behind made a closed block comment look unclosed.
+        assert!(can_uncomment(
+            "/* foo */\r\nplain",
+            &(0..0),
+            &delimiters,
+            false
+        ));
+        // A classic Mac line ending is a terminator too.
+        assert!(can_uncomment(
+            "/* foo */\rplain",
+            &(0..0),
+            &delimiters,
+            false
+        ));
+    }
+
+    #[test]
+    fn can_uncomment_does_not_slice_inside_a_character() {
+        let block = CommentDelimiters {
+            inline: None,
+            block: Some(("/*".into(), "*/".into())),
+        };
+        // Measuring the missing end marker from the end of the string used to
+        // land inside 語 and panic.
+        assert!(!can_uncomment("/* 日本語", &(0..0), &block, false));
+
+        let inline = CommentDelimiters {
+            inline: Some("//".into()),
+            block: None,
+        };
+        // `end - 1` is the second byte of `é`, not a character boundary.
+        assert!(!can_uncomment("é", &(0..2), &inline, true));
     }
 
     #[test]

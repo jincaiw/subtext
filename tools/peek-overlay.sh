@@ -15,6 +15,15 @@
 # Debug builds only: `SUBTEXT_PANEL_PEEK` is compiled out of release.
 set -eu
 
+# `winlist` is a local helper (id, x,y, WxH, owner, title), not part of this
+# repository. Override the path with WINLIST when it lives elsewhere, and say
+# so plainly instead of sleeping for seven seconds and reporting "not found".
+WINLIST="${WINLIST:-/tmp/winlist}"
+if [ ! -x "$WINLIST" ]; then
+    echo "error: $WINLIST is missing or not executable; set WINLIST=<path> to the window-list helper" >&2
+    exit 1
+fi
+
 if [ $# -lt 1 ]; then
     sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
@@ -47,7 +56,14 @@ done
 HOME="$home" SUBTEXT_PANEL_PEEK="$step" "$binary" "$doc" > "$home/log" 2>&1 &
 sleep 7
 
-line=$(/tmp/winlist 2>/dev/null | grep -i "\.md" | head -1 || true)
+# Match the owner column, not just the title: this machine also runs CotEditor,
+# which opens documents called `a.md` and `cot-ref.md`, so a bare `.md` grep
+# photographs the wrong application. `winlist` prints
+# `id<TAB>x,y<TAB>WxH<TAB>owner<TAB>title`; owner is the process name.
+owner=$(basename "$binary")
+line=$("$WINLIST" 2>/dev/null | awk -F'\t' -v o="$owner" '
+    index(tolower($4), tolower(o)) && index(tolower($5), ".md") && $3 != "0x0" { print; exit }
+' || true)
 if [ -z "${line:-}" ]; then
     echo "document window not found; log:" >&2
     head -5 "$home/log" >&2

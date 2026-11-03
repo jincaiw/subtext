@@ -1,5 +1,6 @@
 # Rust
 /target/
+/target-linux/
 **/*.rs.bk
 
 # Reference checkouts. These are upstream repositories cloned for study —
@@ -39,7 +40,9 @@ compile_commands.json
 *.app/
 *.zip
 
-# Agent skills installed locally (npx skills add)
-/.agents/
-/.claude/skills/
-/skills-lock.json
+# Agent skills installed with `npx skills add`. The skill bodies live in
+# `.agents/skills/`, `.claude/skills/` holds symlinks into them, and
+# `skills-lock.json` pins the source tag — all three are tracked, because a
+# clone without `.agents/` gets dangling symlinks. See AGENTS.md §6.
+# Per-machine overrides stay local.
+/.claude/settings.local.json

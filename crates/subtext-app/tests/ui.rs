@@ -24,7 +24,7 @@ use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
 use gpui_kit::{
     AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, WindowBounds,
-    WindowOptions, div, px, size,
+    WindowOptions, div, point, px, size,
 };
 
 /// A minimal view with one button and one label, so this file can prove the
@@ -107,6 +107,26 @@ fn open_workspace_with_document(
     gpui_kit::AnyWindowHandle,
     gpui_kit::Entity<subtext_app::workspace::Workspace>,
 ) {
+    open_workspace_with_document_sized(cx, name, text, size(px(900.), px(600.)))
+}
+
+/// The same window at a size the caller picks.
+///
+/// One test needs it: the toolbar palette is about 640 points tall, so a
+/// 600-point window cannot show its footer without scrolling. The workspace
+/// caps and scrolls the palette — see the overlay in `workspace.rs` — but the
+/// test that clicks *Done* is about the click, not about scrolling, so it
+/// opens a window the whole sheet fits in, the way a document window normally
+/// is.
+fn open_workspace_with_document_sized(
+    cx: &mut TestAppContext,
+    name: &str,
+    text: &str,
+    window_size: gpui_kit::Size<gpui_kit::Pixels>,
+) -> (
+    gpui_kit::AnyWindowHandle,
+    gpui_kit::Entity<subtext_app::workspace::Workspace>,
+) {
     use subtext_app::settings::Settings;
     use subtext_app::workspace::Workspace;
     use subtext_app::{load_syntaxes, load_themes};
@@ -136,7 +156,7 @@ fn open_workspace_with_document(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                     Default::default(),
-                    size(px(900.), px(600.)),
+                    window_size,
                 ))),
                 ..Default::default()
             },
@@ -356,6 +376,87 @@ fn settings_buttons_keep_their_width(cx: &mut TestAppContext) {
     .expect("render the settings window");
 }
 
+/// The Format pane fits all five of its rows in the window.
+///
+/// The pane used to render the encoding and syntax choices as bordered inline
+/// lists, several hundred points tall together, which pushed *Encoding
+/// priorities*, *Default syntax* and *Available syntaxes* below the fold of a
+/// 580 pt window. Upstream is a `Grid` of popup buttons and one fixed
+/// 260 × 140 list, so every row is visible at once; this is the test that says
+/// so, because a screenshot taken at the right moment can still miss a row that
+/// scrolled away.
+#[gpui_kit::test]
+fn format_pane_rows_fit_without_scrolling(cx: &mut TestAppContext) {
+    use subtext_app::settings::SettingsPane;
+    use subtext_app::settings_window::SettingsWindow;
+
+    let (_document, workspace) = open_workspace_with_document(cx, "format", "abc");
+
+    let settings = cx.update(|cx| {
+        let weak = workspace.downgrade();
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(760.), px(580.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                cx.new(|cx| SettingsWindow::new(weak, Some(SettingsPane::Format), window, cx))
+            },
+        )
+        .expect("open the settings window")
+        .0
+    });
+
+    cx.update_window(settings, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        for id in [
+            "default-line-ending",
+            "default-encoding",
+            "encoding-priorities",
+            "default-syntax",
+            "available-syntaxes",
+        ] {
+            let row = window
+                .try_find(id)
+                .unwrap_or_else(|| panic!("the Format pane should show {id}"));
+            let bounds = row.bounds();
+            assert!(
+                bounds.origin.y + bounds.size.height <= px(580.),
+                "{id} ends at {} — it is below the fold",
+                bounds.origin.y + bounds.size.height
+            );
+        }
+
+        // Upstream caps the three pickers at 260 pt and gives the syntax list
+        // 260 × 140; an inline list cannot be mistaken for one of these.
+        for id in ["default-line-ending", "default-encoding", "default-syntax"] {
+            let bounds = window.try_find(id).expect(id).bounds();
+            assert!(
+                (bounds.size.width - px(260.)).abs() < px(4.),
+                "{id} is {} wide — a picker should be 260 wide",
+                bounds.size.width
+            );
+        }
+        let list = window
+            .try_find("available-syntaxes")
+            .expect("the syntax list");
+        assert!(
+            (list.bounds().size.width - px(260.)).abs() < px(4.)
+                && (list.bounds().size.height - px(140.)).abs() < px(4.),
+            "the syntax list is {} × {}, not 260 × 140",
+            list.bounds().size.width,
+            list.bounds().size.height
+        );
+    })
+    .expect("render the Format pane");
+}
+
 /// The Mode pane's switches are one line tall.
 ///
 /// §22.19 left this as a gap: *Smart copy/paste* wrapped onto two lines in a
@@ -410,6 +511,171 @@ fn mode_pane_switches_stay_on_one_line(cx: &mut TestAppContext) {
         }
     })
     .expect("render the Mode pane");
+}
+
+/// The Mode pane's *Use custom settings* switch arms its own indentation rows.
+///
+/// Upstream's `ModeIndentOptionsView` disables the inner group while the switch
+/// is off, and a disabled control must also be inert when something clicks it —
+/// otherwise the pane would write a mode override the user never asked for.
+/// Turning the switch on seeds that override from the Edit pane's defaults
+/// (`defaultExpandsTab` / `defaultIndentWidth`), not from zero.
+#[gpui_kit::test]
+fn mode_indentation_follows_its_custom_switch(cx: &mut TestAppContext) {
+    use subtext_app::settings::{ModeIndent, SettingsPane};
+    use subtext_app::settings_window::SettingsWindow;
+
+    let (_document, workspace) = open_workspace_with_document(cx, "mode-indent", "abc");
+
+    // The Edit pane's defaults, which the switch should copy.
+    cx.update(|cx| {
+        workspace.update(cx, |workspace, _| {
+            workspace.settings.set_indentation(true, 3);
+        })
+    });
+
+    let settings = cx.update(|cx| {
+        let weak = workspace.downgrade();
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    // Tall enough for the whole Mode pane. The settings window
+                    // fits itself to the pane (see `on_pane_measured`), but the
+                    // test harness measures visibility against the viewport it
+                    // was opened with, and that viewport does not follow
+                    // `Window::resize`; 760 × 760 is what a display shows
+                    // once the window has fitted itself.
+                    size(px(760.), px(760.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                cx.new(|cx| SettingsWindow::new(weak, Some(SettingsPane::Mode), window, cx))
+            },
+        )
+        .expect("open the settings window")
+        .0
+    });
+
+    cx.update_window(settings, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        // Off: the width stepper is disabled, so a click must not create an
+        // override. This is the gesture that proves the dimming is not only
+        // paint.
+        assert_eq!(workspace.read(cx).settings.mode.indent, None);
+        window.click("mode-indent-width-increment", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read(cx).settings.mode.indent,
+            None,
+            "a disabled stepper should not write a mode override"
+        );
+
+        // On: the override appears, seeded from the Edit pane.
+        window.click("mode-custom-indentation", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read(cx).settings.mode.indent,
+            Some(ModeIndent {
+                expands_tab: true,
+                width: 3
+            }),
+            "the switch should seed the override from the Edit pane's defaults"
+        );
+
+        // Now the stepper is live, and it edits the override.
+        window.click("mode-indent-width-increment", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read(cx).settings.mode.indent.map(|i| i.width),
+            Some(4)
+        );
+
+        // Back off: the override is gone and the base defaults take over.
+        window.click("mode-custom-indentation", cx);
+        window.render_frame(cx);
+        assert_eq!(workspace.read(cx).settings.mode.indent, None);
+        assert_eq!(workspace.read(cx).settings.indent_unit(), "   ");
+    })
+    .expect("drive the Mode pane's indentation rows");
+}
+
+/// Moving the opacity slider in the settings window reaches the document.
+///
+/// The settings window is a second window, and it can only reach the
+/// workspace through a weak handle. `WeakEntity::update_in` looks the window
+/// up from the last window that *read* the entity — the settings window while
+/// its pane renders — and a window refuses its own handle while it dispatches
+/// the event that led here, so the update was silently dropped: the slider
+/// moved, the percent field followed, and the document window (and the saved
+/// settings) stayed where they were. The workspace now keeps its own window
+/// handle and every pane edit is addressed to it; this is the gesture that
+/// says so.
+#[gpui_kit::test]
+fn the_opacity_slider_moves_the_document_window(cx: &mut TestAppContext) {
+    use subtext_app::settings::SettingsPane;
+    use subtext_app::settings_window::SettingsWindow;
+
+    let (_document, workspace) = open_workspace_with_document(cx, "opacity", "abc");
+
+    let settings = cx.update(|cx| {
+        let weak = workspace.downgrade();
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(760.), px(580.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            move |window, cx| {
+                cx.new(|cx| SettingsWindow::new(weak, Some(SettingsPane::Appearance), window, cx))
+            },
+        )
+        .expect("open the settings window")
+        .0
+    });
+
+    let before = cx.update(|cx| workspace.read(cx).settings.appearance.window_alpha);
+    // The slider spans 0.2…1.0. Click a quarter of the way along, on whichever
+    // side of the middle the current value is not: the point has to produce a
+    // different value, or the assertion below cannot tell the fix from the bug.
+    let across = if before >= 0.6 { 0.25 } else { 0.75 };
+
+    cx.update_window(settings, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        let slider = window
+            .try_find("slider-bar-container")
+            .expect("the Appearance pane should show the opacity slider");
+        window.click_at(
+            "slider-bar-container",
+            point(
+                slider.bounds().size.width * across,
+                slider.bounds().size.height / 2.,
+            ),
+            cx,
+        );
+        window.render_frame(cx);
+    })
+    .expect("click the slider");
+
+    let after = cx.update(|cx| workspace.read(cx).settings.appearance.window_alpha);
+    let expected = 0.2 + 0.8 * across;
+    assert!(
+        (after - expected).abs() < 0.05,
+        "the slider should have set the opacity to about {expected}, got {after}"
+    );
+    assert_ne!(
+        after, before,
+        "the document window's settings should have received the new opacity"
+    );
 }
 
 /// Escape dismisses the sheet.
@@ -1223,6 +1489,235 @@ fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppCon
     );
 }
 
+/// Dragging a row of the real toolbar reorders it while the palette is open.
+///
+/// The palette's model tests call `move_row` directly, so they cannot say
+/// whether the gesture is wired to it. AppKit's palette leaves the toolbar
+/// itself as the place items are arranged — the strip under the grid is only a
+/// picture of the shipped set — so this opens the palette and drives the
+/// pointer on the toolbar's own slots, then reads the order back off the
+/// workspace.
+///
+/// The palette has to be open for the slots to be drag sources: outside
+/// customization the bar is inert, exactly as upstream's is.
+#[gpui_kit::test]
+fn dragging_an_item_reorders_the_toolbar(cx: &mut TestAppContext) {
+    use subtext_app::toolbar::ToolbarItemId;
+
+    let (window, workspace) =
+        open_workspace_with_document(cx, "toolbar-reorder", "# Title\n\ntext\n");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_toolbar_items(
+                vec![
+                    ToolbarItemId::Syntax,
+                    ToolbarItemId::Comment,
+                    ToolbarItemId::Find,
+                    ToolbarItemId::FlexibleSpace,
+                    ToolbarItemId::ToggleInspector,
+                ],
+                cx,
+            );
+            workspace.customize_toolbar(window, cx);
+        });
+        window.render_frame(cx);
+
+        let comment = window.find(("toolbar-slot", 1usize)).bounds();
+        let find = window.find(("toolbar-slot", 2usize)).bounds();
+        window.drag(
+            gpui_kit::point(comment.center().x, comment.center().y),
+            gpui_kit::point(find.center().x, find.center().y),
+            cx,
+        );
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read(cx).toolbar_items(),
+            vec![
+                ToolbarItemId::Syntax,
+                ToolbarItemId::Find,
+                ToolbarItemId::Comment,
+                ToolbarItemId::FlexibleSpace,
+                ToolbarItemId::ToggleInspector,
+            ],
+            "dragging the comment row onto the Find row should swap them"
+        );
+    })
+    .expect("drag the item");
+}
+
+/// The syntax pop-up is a scrolling list, not a list that runs off the screen.
+///
+/// There are seventy syntaxes, and the menu builds an item for each. The widget
+/// caps its height and adds a scroll container only when the menu is marked
+/// `scrollable`; without the flag the list simply grew past the bottom of the
+/// window and every syntax below the fold was unreachable. This opens the menu
+/// and wheels it: the first row has to move up, which only a real scroll can do.
+#[gpui_kit::test]
+fn the_syntax_menu_scrolls_to_the_syntaxes_past_the_fold(cx: &mut TestAppContext) {
+    let (window, _workspace) = open_workspace_with_document(cx, "syntax-menu", "text\n");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toolbar-syntax", cx);
+        window.render_frame(cx);
+
+        let items = window
+            .within("popup-menu")
+            .find_all_by_role(gpui_kit::Role::MenuItem);
+        assert!(
+            items.len() > 60,
+            "expected the installed syntaxes in the menu, found {} items",
+            items.len()
+        );
+        let first_row = items[0].bounds().origin.y;
+
+        window.scroll(
+            "popup-menu",
+            gpui_kit::ScrollDelta::Lines(gpui_kit::point(0., -5.)),
+            cx,
+        );
+        window.render_frame(cx);
+
+        let scrolled = window
+            .within("popup-menu")
+            .find_all_by_role(gpui_kit::Role::MenuItem);
+        assert!(
+            scrolled[0].bounds().origin.y < first_row,
+            "the syntax list did not scroll: the first row stayed at {first_row}"
+        );
+    })
+    .expect("open and scroll the syntax menu");
+}
+
+/// Dragging a tile of the grid into the real toolbar adds it there.
+///
+/// The palette offers this twice — a click on a tile, and a drag out of the
+/// grid — and the click is covered by the sheet's own model tests. The drag is
+/// the one that can be present but inert: GPUI starts a gesture only when the
+/// source's hitbox is the hovered one, and the tile is a `Button` wrapped in a
+/// drag source. Pressing on the tile and releasing over the toolbar therefore
+/// exercises the wiring the model tests cannot see — including the overlay's
+/// occlusion, which is what has to leave the toolbar behind it live.
+#[gpui_kit::test]
+fn dragging_a_palette_tile_adds_it_to_the_toolbar(cx: &mut TestAppContext) {
+    use subtext_app::toolbar::ToolbarItemId;
+
+    let (window, workspace) = open_workspace_with_document(cx, "toolbar-tile", "# Title\n\ntext\n");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_toolbar_items(
+                vec![
+                    ToolbarItemId::Syntax,
+                    ToolbarItemId::FlexibleSpace,
+                    ToolbarItemId::ToggleInspector,
+                ],
+                cx,
+            );
+            workspace.customize_toolbar(window, cx);
+        });
+        window.render_frame(cx);
+        assert!(
+            !workspace
+                .read(cx)
+                .toolbar_items()
+                .contains(&ToolbarItemId::Comment),
+            "the toolbar should start without the comment item"
+        );
+
+        let tile = window.find(("toolbar-tile-source", ToolbarItemId::Comment as usize));
+        let syntax = window.find(("toolbar-slot", 0usize));
+        let middle = |bounds: Bounds<gpui_kit::Pixels>| {
+            gpui_kit::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            )
+        };
+
+        window.drag(middle(tile.bounds()), middle(syntax.bounds()), cx);
+        window.render_frame(cx);
+
+        let items = workspace.read(cx).toolbar_items();
+        assert_eq!(
+            items.first(),
+            Some(&ToolbarItemId::Comment),
+            "dropping the comment tile on the syntax row should insert it there, got: {items:?}"
+        );
+    })
+    .expect("drag the tile");
+}
+
+/// Clicking a palette tile toggles its membership, and *Done* closes the sheet.
+///
+/// The sheet's model tests call `add` and `remove` directly, so they cannot say
+/// whether the tile's button reaches them; and *Done* is a plain button whose
+/// only job is to close the palette. Both are the paths a hand uses when it
+/// does not drag: a click is the shortcut AppKit does not offer, and Done is
+/// the sheet's default button. The second click is on the dimmed tile — the
+/// in-use state must keep working, because it is the only way back out.
+#[gpui_kit::test]
+fn clicking_a_palette_tile_toggles_it_and_done_closes_the_sheet(cx: &mut TestAppContext) {
+    use subtext_app::toolbar::ToolbarItemId;
+
+    let (window, workspace) = open_workspace_with_document_sized(
+        cx,
+        "toolbar-click",
+        "# Title\n\ntext\n",
+        size(px(900.), px(800.)),
+    );
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_toolbar_items(
+                vec![
+                    ToolbarItemId::Syntax,
+                    ToolbarItemId::Comment,
+                    ToolbarItemId::ToggleInspector,
+                ],
+                cx,
+            );
+            workspace.customize_toolbar(window, cx);
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+
+        let tile = ("toolbar-tile", ToolbarItemId::Comment as usize);
+        window.click(tile, cx);
+        window.render_frame(cx);
+        assert!(
+            !workspace
+                .read(cx)
+                .toolbar_items()
+                .contains(&ToolbarItemId::Comment),
+            "clicking the in-use comment tile should remove it from the toolbar"
+        );
+
+        window.click(tile, cx);
+        window.render_frame(cx);
+        assert!(
+            workspace
+                .read(cx)
+                .toolbar_items()
+                .contains(&ToolbarItemId::Comment),
+            "clicking the dimmed tile again should add the item back"
+        );
+
+        assert!(
+            window.try_find("toolbar-sheet").is_some(),
+            "the palette should still be open before Done"
+        );
+        window.click("toolbar-done", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("toolbar-sheet").is_none(),
+            "Done should have closed the palette"
+        );
+    })
+    .expect("click a palette tile");
+}
+
 /// Dragging a row of the encoding list reorders it.
 ///
 /// §22.47 replaced the two arrow buttons with upstream's gesture — drag a row,
@@ -1231,78 +1726,6 @@ fn the_ui_harness_writes_settings_into_a_temporary_directory(cx: &mut TestAppCon
 /// the way a hand does (press, move past the threshold, release) and reads the
 /// answer off the rows' own bounds: the row that was first has to end up lower
 /// than it started.
-/// Dragging a row of the toolbar palette reorders it.
-///
-/// The palette's model tests call `move_row` directly, so they cannot say
-/// whether the drag gesture is wired to it. This drives the pointer path the way
-/// a hand does and reads the answer off the rows' own bounds: the syntax row,
-/// dragged onto the Find row, has to end up lower than it started.
-#[gpui_kit::test]
-fn dragging_a_row_reorders_the_toolbar(cx: &mut TestAppContext) {
-    use subtext_app::toolbar::{ToolbarItemId, ToolbarSheet};
-
-    cx.update(gpui_kit::init);
-
-    let sheet = cx.update(|cx| {
-        cx.new(|_| {
-            ToolbarSheet::new(
-                gpui_kit::WeakEntity::new_invalid(),
-                vec![
-                    ToolbarItemId::Syntax,
-                    ToolbarItemId::Comment,
-                    ToolbarItemId::Find,
-                    ToolbarItemId::FlexibleSpace,
-                    ToolbarItemId::ToggleInspector,
-                ],
-            )
-        })
-    });
-
-    let window = cx.update(|cx| {
-        gpui_kit::open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                    Default::default(),
-                    size(px(760.), px(520.)),
-                ))),
-                ..Default::default()
-            },
-            cx,
-            |_window, _cx| sheet.clone(),
-        )
-        .expect("open the test window")
-        .0
-    });
-
-    cx.update_window(window, |_, window, cx| {
-        window.render_frame(cx);
-        let syntax = window.find(("toolbar-row", ToolbarItemId::Syntax as usize));
-        let find = window.find(("toolbar-row", ToolbarItemId::Find as usize));
-        let syntax_before = syntax.bounds();
-        let middle = |bounds: Bounds<gpui_kit::Pixels>| {
-            gpui_kit::point(
-                bounds.origin.x + bounds.size.width / 2.,
-                bounds.origin.y + bounds.size.height / 2.,
-            )
-        };
-
-        window.drag(middle(syntax_before), middle(find.bounds()), cx);
-        window.render_frame(cx);
-
-        let syntax_after = window
-            .find(("toolbar-row", ToolbarItemId::Syntax as usize))
-            .bounds();
-        assert!(
-            syntax_after.origin.y > syntax_before.origin.y,
-            "the syntax row should have been dragged below the Find row \
-             ({} → {})",
-            f32::from(syntax_before.origin.y),
-            f32::from(syntax_after.origin.y)
-        );
-    })
-    .expect("drag the row");
-}
-
 #[gpui_kit::test]
 fn dragging_a_row_reorders_the_encoding_list(cx: &mut TestAppContext) {
     use subtext_app::encoding_list_sheet::EncodingListSheet;

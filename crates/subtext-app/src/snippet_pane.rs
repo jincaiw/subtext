@@ -52,7 +52,7 @@ use gpui_kit::{
     Anchor, App, AppContext as _, Context, Div, ElementId, Entity, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement as _,
     Render, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
-    rems,
+    px, rems,
 };
 
 use subtext_core::filedrop::FileDropItem;
@@ -192,18 +192,50 @@ fn cell(width: f32, content: impl IntoElement) -> Div {
 }
 
 /// The header row of a table.
+///
+/// Upstream's header is a grey band with a 1-point rule between every column,
+/// which is what keeps the three fields readable as columns once the rows
+/// under them hold differently-sized controls. The rule runs the full height
+/// of the band, so the row stretches its cells instead of centring them.
 pub fn header(labels: impl IntoIterator<Item = (&'static str, f32)>, cx: &App) -> impl IntoElement {
-    let mut row = h_flex().w_full().gap_2().px_1().py_1().flex_shrink_0();
-    for (label, width) in labels {
-        row = row.child(cell(
+    let mut row = h_flex()
+        .w_full()
+        .items_stretch()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .flex_shrink_0()
+        .bg(cx.theme().table)
+        .border_b_1()
+        .border_color(cx.theme().border);
+    for (index, (label, width)) in labels.into_iter().enumerate() {
+        let mut column = cell(
             width,
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(label),
-        ));
+            h_flex().h_full().items_center().child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            ),
+        );
+        if index > 0 {
+            // The rule is drawn over the row rather than inserted into it.
+            // A separator child would take 1 px plus the two 8 px gaps around
+            // it, and the data rows below have no separators, so every header
+            // cell would start 9 px to the right of the column it labels.
+            column = column.relative().child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(-4.))
+                    .w(px(1.))
+                    .bg(cx.theme().border),
+            );
+        }
+        row = row.child(column);
     }
-    row.border_b_1().border_color(cx.theme().border)
+    row
 }
 
 // ---- shortcuts -----------------------------------------------------------
@@ -564,7 +596,7 @@ impl SnippetRow {
                         row.update(cx, |row, cx| row.set_scope(Some(name), cx)).ok();
                     }));
                 }
-                menu
+                menu.scrollable(true)
             })
     }
 
@@ -624,7 +656,7 @@ impl Render for SnippetRow {
         h_flex()
             .w_full()
             .gap_2()
-            .px_1()
+            .px_2()
             .py_0p5()
             .items_center()
             .rounded_sm()
@@ -795,7 +827,10 @@ impl FileDropRow {
                         row.update(cx, |row, cx| row.set_scope(Some(name), cx)).ok();
                     }));
                 }
-                menu
+                // The syntax list is the whole installed set, which is taller
+                // than the screen; AppKit's menu scrolls, and the widget caps
+                // and scrolls only when asked.
+                menu.scrollable(true)
             })
     }
 }
@@ -809,7 +844,7 @@ impl Render for FileDropRow {
         h_flex()
             .w_full()
             .gap_2()
-            .px_1()
+            .px_2()
             .py_0p5()
             .items_center()
             .rounded_sm()

@@ -363,11 +363,22 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                 MenuItem::submenu(Menu {
                     name: "Comment".into(),
                     items: vec![
-                        MenuItem::action("Toggle Comment", actions::text::ToggleComment),
+                        MenuItem::action(
+                            if state.can_uncomment_whole {
+                                "Uncomment"
+                            } else {
+                                "Comment Out"
+                            },
+                            actions::text::ToggleComment,
+                        )
+                        .disabled(!state.can_comment),
                         MenuItem::separator(),
-                        MenuItem::action("Inline Comment", actions::text::InlineCommentOut),
-                        MenuItem::action("Block Comment", actions::text::BlockCommentOut),
-                        MenuItem::action("Uncomment", actions::text::Uncomment),
+                        MenuItem::action("Inline Comment", actions::text::InlineCommentOut)
+                            .disabled(!state.can_inline_comment),
+                        MenuItem::action("Block Comment", actions::text::BlockCommentOut)
+                            .disabled(!state.can_block_comment),
+                        MenuItem::action("Uncomment", actions::text::Uncomment)
+                            .disabled(!state.can_uncomment),
                     ],
                     disabled: false,
                 }),

@@ -177,13 +177,11 @@ impl EncodingListSheet {
     /// submenu's contents — the same reason the Snippets pane rebuilds it.
     pub fn submit(&mut self, cx: &mut App) {
         let list = self.list.clone();
-        self.workspace
-            .update_in(cx, move |workspace, window, cx| {
-                workspace.settings.encoding_list = list;
-                workspace.apply_settings(window, cx);
-                workspace.rebuild_menus(cx);
-            })
-            .ok();
+        Workspace::update_in_own_window(&self.workspace, cx, move |workspace, window, cx| {
+            workspace.settings.encoding_list = list;
+            workspace.apply_settings(window, cx);
+            workspace.rebuild_menus(cx);
+        });
     }
 
     // ---- the two parallel structures -------------------------------------

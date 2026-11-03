@@ -3506,25 +3506,39 @@ SubText 原来只回一句「工具栏还不能自定义」。
   把两个不可移除项补回来（`flexibleSpace` 补在检查器开关之前）。
 * 每一项的 label / 符号 / 动作。状态项在按下时显示选中态，对应上游的 `StatableToolbarItem`。
 
-`ToolbarSheet` 是调色板：左列是当前项，可以拖动改序（复用 §22.47 的 `ListItem` +
-`on_drag` / `on_drop` / `DragPreview`），用 − 移除；右列是还没用到的允许项，点击加入；
-底部 *Default Set* 恢复默认，*Done* 关闭。每次编辑立即写回 `settings.toolbar_items`
-并保存，和 `NSToolbar` 拖动结束就写 `UserDefaults` 一致。
+`ToolbarSheet` 是调色板，版面照 AppKit 的截图排：一句说明、**四列可用项格子**
+（19 个非不可移除项，四行四列加最后一行的三个；每格画的是这一项变成的控件，所以格子里能直接
+认出胶囊、弹出按钮和分隔块）、**当前工具栏的预览条**（左端写文稿名，中间是现有项）、
+底部「显示」弹出按钮、*Default Set* 和 *Done*。格子尺寸、行距、格子块的固定宽度都来自 2×
+截图（`TILE_WIDTH` / `TILE_HEIGHT` / `GRID_WIDTH`），四列是上游的排法，最后一行左对齐而不是
+居中展开。
 
-**手势与上游不同**：AppKit 的调色板是**跨列表**拖拽（从调色板拖进工具栏、从工具栏拖出去）。
-GPUI 的拖放落点属于一个元素，对话框重建后也留不住跨列表的拖动状态，所以加入/移除走点击与按钮，
-拖动只用于改序。能力在四个方向上都有 —— 任何允许项能加、任何可移动项能移除、顺序随用户、
-默认能恢复 —— 只是手势不同，写进矩阵。
+**调色板是工作区的浮层，不是 `Dialog`。** 这是这一条真正花时间的地方。AppKit 的调色板是
+sheet，但**真实工具栏仍在它上方可见、可用**：项从格子拖进工具栏、在工具栏里改序、再拖出去。
+`gpui_component` 的 `Dialog` 把整扇窗口遮住（`.occlude()`），后面没有任何东西能成为落点，
+也没有开关能关掉这层遮罩。所以调色板由 `Workspace::render` 作为普通子节点画在标题栏下方：
+绝对定位、水平居中、`PALETTE_WIDTH` 宽、自己带边框和阴影，只对面板自身 `occlude`。
+标题栏和真工具栏因此仍在命中测试里，拖放的落点就是上游用的那些表面。
+
+**手势与上游一致**：格子是拖动源（`ToolbarDrag::Palette`），工具栏的每一项包在一个带
+`on_drag` / `on_drop` 的槽里（槽的 id 是 `("toolbar-slot", index)`）；落到槽上是
+`insert_at` —— 新项插入、已有项移动；工具栏项之间的拖动是 `move_row`。拖出工具栏放到调色板的
+预览条上就是移除。点击格子仍然切换加入/移除，因为拖动之外还得给一只手留一条路（上游只有拖动）。
+每次编辑立即写回 `settings.toolbar_items` 并保存，和 `NSToolbar` 拖动结束就写 `UserDefaults`
+一致。Escape 和 *Done* 关闭；没有 Cancel，上游也没有。
 
 **没做的**：`Writing Direction`、`Text Orientation`、Spell Check、Emoji & Symbols、Print、
 Share 这些项照列、照能加，按下时仍走原有的状态栏说明 —— 和菜单栏保留它们是同一条规则。
 `ToggleSidebar` 是允许项里唯一的增项：上游只在目录文稿里提供它，SubText 的侧栏属于每个文稿。
 
 **验证**：`toolbar` 单元测试 11 条（默认项、允许项唯一性、sanitize 的去重/补项、拖动落点、
-调色板的加/删/恢复、序列化名字与未知标识符）；UI 测试
-`dragging_a_row_reorders_the_toolbar` 用指针拖第一行到 Find 行，按行自己的 bounds 判位置；
-面板冒烟增至 23 步（第 22 步开调色板）。截图走查用 `tools/peek-overlay.sh 22`：画面里默认工具栏
-是 **Markdown · 弹性空隙 · 检查器开关**，调色板两列都完整落在对话框内，不可移除项的 − 已淡出。
+调色板的加/删/恢复、序列化名字与未知标识符）；两条 UI 测试走真实指针路径 ——
+`dragging_an_item_reorders_the_toolbar` 在打开调色板的窗口里把 `("toolbar-slot", 1)` 拖到
+`("toolbar-slot", 2)`，再从 `toolbar_items()` 读回顺序（模型测试直接调 `move_row`，看不出手势
+是否接上）；`dragging_a_palette_tile_adds_it_to_the_toolbar` 把格子的 Comment 拖到工具栏第一槽，
+断言它插在最前 —— 这条同时验证浮层没有遮住工具栏。面板冒烟增至 23 步（第 22 步开调色板）。
+截图走查用 `tools/peek-overlay.sh 22`：画面里默认工具栏是 **Markdown · 弹性空隙 · 检查器开关**，
+调色板的四列格子、预览条与底部按钮都完整落在面板内。
 
 
 缺口表原来写的是「Foundation 写 `?` / `＼`，`encoding_rs` 写 `&#65533;`」。这一轮没有再猜，
@@ -4396,14 +4410,351 @@ CotEditor 的默认值补上」，投影复用它，补默认值的地方就只�
 `apply_to_editor`。它们不报错、也不影响结果，但会让下一个读代码的人以为颜色是从那里来的 ——
 这正是这一轮踩的坑。
 
+### 22.55 文档窗口记住上次的大小
+
+上游每个文稿窗口都设了 `windowFrameAutosaveName = "Document"`，`windowDidResize` / `windowDidMove`
+里把 frame 写进 `UserDefaults`；下一次启动 `setFrameUsingName` 把整块 frame 还原。SubText 此前
+**什么都不记** —— 每次启动都是平台默认尺寸，用户把窗口拉到喜欢的宽度，退出再进就没了。
+
+**只还原尺寸，不还原位置。** 读过 macOS 后端之后放弃位置：
+
+* `Window::window_bounds()` 返回的是**翻转坐标系**（左上原点）的整窗 frame，而
+  `MacWindowState::open` 把 bounds 交给 `initWithContentRect:` 时，原点的 y 没有做高度换算；
+  把保存的 bounds 原样喂回去，每次启动都会整窗下移一个标题栏的高度；
+* GPUI 没有 `set_position`，`WindowOptions::window_bounds` 也只在创建时读一次；
+* 把同一个原点发给每个新窗口，多窗口会叠在一起 —— 而现在 GPUI 的 `default_bounds` 已经按活动窗口
+  向下偏移 25pt 级联，那正好是上游 `cascadeTopLeft` 的行为，位置交给它比交给一个会错位的数字好。
+
+**尺寸存的是内容尺寸**（`viewport_size()`），因为 `Window::resize` 设的就是内容尺寸
+（`setContentSize:`），Window 面板的两个字段量的也是它。窗口的尺寸只在「拖拽停手」之后写一次
+（`WINDOW_SIZE_SETTLE` = 250 ms）：拖边框每帧都来一次 bounds 变化，上游写 `UserDefaults` 是免费的，
+这里写的是 JSON 文件。代价记在缺口表：拖完立刻退出，这一次尺寸会丢。
+
+设置项是 `Settings::document_window_size: Option<[f32; 2]>`，`#[serde(default)]` 让旧配置文件直接可用。
+还原逻辑在 `resize_window_to_saved_size`：Window 面板的 *Width* / *Height* **逐维**覆盖，只有值
+`> 0` 才生效（与上游 `$0 > 0 ? max($0, minSize) : nil` 同一条件），最后夹到 `document_window_min_size()`。
+首次运行的启动窗口与 File ▸ New Window 走同一条路，所以两者开出来一样大。
+
+**验证**：`cargo fmt --all`（工作树里另有几处早先的格式漂移，一并格式化了）、
+`tools/check.sh` 全绿。
+
+### 22.56 Appearance 面板按上游重排：字体、行高、外观、状态栏与不透明度
+
+此前 Appearance 面板只有一个「字体」组，字体族与字号存在配置**顶层**的 `font_family` /
+`font_size`；上游面板的其余六项 —— 等宽字体、行高、外观、状态栏底色、编辑器不透明度、
+主题 —— 有的缺，有的只在 Format 菜单里有入口。
+
+**面板顺序照 `AppearanceSettingsView.swift` 逐项排**：
+
+1. *Standard font* / *Monospaced font*：样本用该字体族、`SAMPLE_SIZE` 13 号字画，宽 260 pt
+   封顶；右侧字号步进器，下面是 `Select…` —— 打开已安装字体族列表，当前项打勾；再下面两个
+   小开关 `Antialias`、`Ligatures`。
+2. *Line height*：数字输入，尾部跟 `times`；1.0 是单倍距。
+3. *Appearance*：System / Light / Dark 单选行。
+4. *Status bar*：Tinted / Opaque 单选行。
+5. *Editor opacity*：两端各一个 20 pt 的不透明度样本（最淡、最不透明），中间滑块，右侧百分号
+   输入框宽 64 pt、右对齐。
+6. 主题选择器。
+
+设置项收进 `settings.rs` 的 `AppearanceOptions`，默认值逐条对 `DefaultSettings.swift`：
+两种字体都开抗锯齿；标准字体连字**开**、等宽字体连字**关**；行高 **1.3**；窗口不透明度
+**1.0**；状态栏默认 Tinted。此前行高默认 1.2、标准字体连字默认关，这一轮改成上游的值。
+老配置由 `adopt_legacy_font` 迁移：只有当 appearance 段里没有写这个键、而顶层还留着旧的
+`font_family` / `font_size` 时才搬过去 —— 否则升级后用户 16 pt 的字体会静默退回 13 pt。
+
+**不透明度画在内容上，不画在窗口上。** 上游一个 `NSWindow.alphaValue` 就让桌面从整窗后面
+透上来；GPUI 没有这个钩子（`WindowBackgroundAppearance` 只影响材质），所以：
+
+* `AppearanceOptions::WINDOW_ALPHA_RANGE = 0.2..=1.0`，与上游
+  `AppearanceSettingsView.windowAlphaRange` 同一个范围。`clamp_window_alpha` 夹范围、
+  圆整到百分位；`NaN` / `inf` 回 1.0 —— 配置是手改得到的，越界值不能把窗口画成不可见。
+* 根表面只画一层「纸」：`Workspace::paper()` 把主题背景乘上 alpha 作根元素底色；编辑区、
+  侧栏等内部表面走 `page_fill()`，半透明时返回 clear。否则 0.5 的 alpha 叠两层会变成 0.75。
+* 工具栏、状态栏、导航栏与边框保持不透明，文字也保持满不透明 —— 只有底板与正文一起变淡。
+  上游把 alpha 设在窗口上，控件背景另有不透明材质；GPUI 没有逐窗材质，就按「chrome 不透明、
+  纸半透明」投影。
+* 改变时先给根窗口设 `set_background_appearance`，再带上 alpha 投影一次组件主题
+  （`highlighter::project_theme` 里分隔线一类合成色要按变淡后的纸重算），最后遍历
+  `cx.windows()` 把新的纸交给其它文档窗口 —— `AnyWindowHandle::downcast` 只认 `Root`，
+  只能按 handle 逐个更新。
+* 状态栏底色由 `WindowOptions::prefers_opaque_bar_background` 决定：Opaque 用
+  `theme.title_bar`，Tinted 用 `page_fill`；半透明窗口下后者跟着纸一起变淡。
+
+**验证**：`tools/check.sh` 全绿（fmt、单元测试、UI 测试、clippy）。面板截图用
+`tools/peek-panel.sh`，与上游窗口并排核对行序与控件位置。
+
+**没对齐的部分，一并记账**：
+
+* 滑块没有刻度。上游用
+  `SliderTickContentForEach(Array(stride(from: lowerBound, through: 1, by: 0.1)))` 在轨道下
+  画 9 个刻度；gpui-component 的 `Slider` 没有刻度槽，硬画会压住点击区域，所以只保留轨道。
+* 不透明度滑块的宽度：早先所有面板共用 12 rem（192 pt）的标签列，760 pt 面板的 536 pt
+  内容宽里只剩约 190 pt 给滑块，而上游给它 260 pt。现在 Appearance 面板用自己的
+  `APPEARANCE_LABEL_COLUMN = 7.5`（120 pt）—— 这一面板的标签最长不到 100 pt，缩窄后滑块
+  拿满 260 pt，百分比输入框仍贴右。上游各面板本来就是各自视图、各自的 `Form`，按面板定
+  标签列宽度与它的布局同构；`MODE_LABEL_COLUMN` 已是同一做法的先例。
+* `Antialias` 两个开关会存、菜单项 `toggle_antialias` 也会翻转它们，但 GPUI 的文字渲染没有
+  暴露抗锯齿开关 —— 开关不改变绘制结果。上游对应 `NSTextView` 的 `shouldAntialias`。
+* `Appearance`（System / Light / Dark）只存不用：窗口外观仍跟随系统，`.cottheme` 的调色板
+  也不随这个设置切换。上游用它决定 `NSAppearance`。
+
+### 22.57 Mode 面板补上 Indentation 分组
+
+上游 `ModeIndentOptionsView` 是 Mode 面板的最后一块：一个 *Use custom settings* 开关，
+打开后在其下方缩进 20 pt 的分组里放 *Prefer using*（Spaces / Tabs）与
+*Indent width*（1–99）。SubText 的 Mode 面板此前只有字体、替换、拼写、补全四组，文档的缩进
+只能走 Edit 面板的全局默认。
+
+数据模型是 `ModeIndent { expands_tab, width }`（与上游同名同义：`expands_tab` 为真表示把
+制表符展开成空格），挂在 `ModeOptions::indent: Option<ModeIndent>`。它与 Edit 面板的
+`auto_expand_tab` / `tab_width` 是**覆盖**关系，不是第二份拷贝：
+
+* `effective_indentation()` 有覆盖用覆盖，否则回落到 Edit；`indent_unit()` 与
+  `tab_width` / `uses_spaces_for_indentation` / `auto_expand_tabs` 三个旧镜像都由它派生。
+* `load()` 之后补一次 `sync_indentation()`：手改配置里只写了 mode 段时，旧镜像不能停在默认值，
+  否则文本操作读到的是另一组数字。
+* 写入口径按「谁在生效」分开。面板里的 Spaces/Tabs、步进器，以及 Format 菜单的
+  *Tab Width* / *Expand Tabs* 都走 `set_effective_indentation`——有覆盖改覆盖、没覆盖改 Edit，
+  否则命令看起来「点了没反应」。Edit 面板自己走 `set_indentation`，只改全局默认，
+  不动已经存在的 mode 覆盖。
+* 打开开关时用 Edit 面板当时的两个值给 mode 播种（上游 `defaultExpandsTab` /
+  `defaultIndentWidth`），不是从 0 开始；关掉就把 `indent` 置 `None`，Edit 的值原样回来。
+
+开关关闭时内层分组整体禁用：单选与步进器都 `disabled(!enabled)`，标签换成
+`muted_foreground`；但**显示的是开关将采纳的播种值**（上游的 getter 同样回落到默认），
+所以关闭态读起来是「打开后会变成什么」，而不是一组空白。
+
+**验证**：单元测试 `indentation_is_written_through_one_door`、
+`a_mode_indent_override_wins_until_it_is_removed`、
+`a_hand_written_mode_indent_section_gets_sane_defaults`；UI 测试
+`mode_indentation_follows_its_custom_switch` 在真实窗口里点开关与步进器——关闭时点
+`mode-indent-width-increment` 不写覆盖（证明禁用是行为上的，不只是变灰），打开后种子为
+Edit 的（空格, 3）、步进到 4、关掉回到 `None` 且 `indent_unit()` 为三个空格。
+`tools/check.sh` 全绿（41 条 UI 测试）。截图用 `tools/peek-panel.sh 11 Mode`，
+与上游面板并排核对缩进、标签列与禁用态颜色。
+
+**没对齐的部分**：SubText 的 Mode 仍只有一个 `mode` 设置块，上游是**按语法名**各存一份
+（`ModeSettingsView` 以语法名为键）。在按语法存设置的那一步落地之前，列表里的 `Code`
+保持禁用并带 tooltip；届时 `mode` 会变成一张按语法名索引的表，`ModeIndent` 原样复用。
+
+---
+
+### 22.58 设置面板的标签列按语言定宽；Window 面板去掉自造说明
+
+上游 `WindowSettingsView` 用 SwiftUI 的 `Form` / `Grid`，标签列宽度由**该面板最宽的标签**
+决定，所以英文界面和中文界面的列宽本来就不是同一个数。SubText 早先给所有面板共用 12 rem
+（192 pt）：中文标签最长只有 *自动换行缩进字符数：* 约 8.5 rem，整列多花的 40 pt 把每个控件
+都往右推。现在共享的 `field()` 走 `label_column()`：
+
+* `Language::English` → 12 rem（*When nothing else is open:* 约 11.5 rem，刚好单行）
+* `Language::Chinese` → 9.5 rem（8.5 rem 的标签留一点呼吸）
+
+`MODE_LABEL_COLUMN` / `APPEARANCE_LABEL_COLUMN` 保持各自的定值：那两个面板在两种语言下都
+更窄、标签都更短，按面板定宽与上游「每个面板各自一个 `Form`」同构。
+
+同一面板另有两条与上游不一致的地方，一并改掉：
+
+* 窗口大小下面那句「“自动”表示窗口根据内容自动调整大小。」是 SubText 自己写的，上游没有，
+  删掉。占位符 *Auto* 与 *px* 单位本身已经说明了行为，多一句话只是噪声。
+* `行尾 / 其他空白字符 / 制表符 / 其他控制字符 / 空格` 五个子开关此前在
+  *不可见元素* 关闭时禁用。上游没有 `.disabled`：这五个开关只决定父开关打开后显示哪些字符，
+  父开关关着时照样可以先选。改成普通 `edit_switch`，`child_switch` 只留给 Edit 面板的
+  *包含只有空格的行*（那一处上游确实 `.disabled(!autoTrimsTrailingWhitespace)`）。
+
+**验证**：`cargo fmt --all`、`tools/check.sh` 全绿（41 条 UI 测试）。截图用
+`tools/peek-panel.sh 7/9/10 General/Window/Edit` 分别看通用、窗口、编辑三面板：中文标签单行不折、
+控件左缘统一、大小输入框与宽度/高度说明对齐。
+
+**没对齐的部分**：上游的 tabbing 选择器首项是 *Respect System Setting*，后面用次要颜色跟
+`(NSWindow.userTabbingPreference.label)` 显示系统当前偏好。读那个值要走 AppKit 的
+`NSUserDefaults`（`AppleWindowTabbingMode`），SubText 没有绑定 objc2，菜单项只显示
+*使用系统设定*。设置项本身存得住、也按它开标签页，缺的只是这一截括号里的说明。
+
+---
+
+### 22.59 设置窗口自绘 88 pt 顶栏，按所开面板量高，末行是帮助链接
+
+上游的偏好窗口没有原生标题栏：`TitleBar` 之外那 88 点由窗口自己画——32 点的标题行
+（面板名居中，`NSTabView` 上方那一行）加 56 点的九格工具栏（图标在上、名字在下，选中的
+一格是浮起白胶囊、图标取强调绿）。SubText 早先让 AppKit 画标题栏，于是标题紧贴红绿灯，
+工具栏与标题分属两层。现在整窗交给 `TitleBar::window_options()`，自己画这两行：
+
+* `window.set_window_title(localization::t(self.pane.title()))` 仍然调用，但只为系统而设：
+  窗口菜单、Mission Control、辅助技术读到的是当前面板名（随工具栏选择变化），屏幕上看到
+  的是自绘的那一份。**这也是 `tools/peek-panel.sh` 要传面板名而不是 `Settings` 的原因**。
+* `TitleBar` 给子元素让出红绿灯的宽度（macOS 80 pt，其他平台 12 pt），而这两行要相对
+  **窗口**居中，所以内容列用负 margin 拉回、宽度取 `viewport_size().width`。AppKit 把红绿灯
+  画在内容层之上，标题离得远，不会重叠。
+* 面板本体是滚动属主，滚动条因此贴在窗口右缘；内边距放在它里面那一列，否则滚动条会被推离边缘。
+
+**按面板量高**。上游每个面板随内容定高，窗口跟着变；这里用
+`Div::on_children_prepainted` 量面板的落地高度（它必须在 `.id()` **之前**调用——`Stateful<Div>`
+不透传这个钩子；且它按值取 `Fn`，与 `cx.listener` 的按引用签名不兼容，所以先
+`cx.entity().downgrade()` 再在钩子里 `update`）。量到高度后 `window.defer` 里
+`window.resize` 到 `面板高 + 88`，下限 480，上限是主屏可见高度（超出就滚动）。缓存
+`fit: Option<(SettingsPane, f32)>` 带 0.5 pt 容差，避免「resize → 重新布局 → 再 resize」的抖动。
+窗口不可缩放，尺寸全部由这一步决定。
+
+**UI 测试的视口**：测试 harness 里 `window.resize` 只改 `window.bounds()`，不改
+`window.viewport_size()`，而 `ElementSnapshot::visible` 是拿裁剪后的 bounds 与视口求交得出的。
+所以测某个面板下半部分的控件时，窗口要以足够高的尺寸**创建**（Mode 面板 613 pt → 用 760×760 开），
+不能先开小再 resize。这是 harness 的语义，不是布局回归。
+
+**帮助链接**。上游每个面板末尾是 `HelpLink(anchor:)`：24 点实心次要色圆碟 + 粗体问号。
+`render_help_link()` 用 `Button::secondary().compact().w/min_w/h(24.)` 画出同一颗碟
+（`.compact()` 自带 `min_w_6()`，单靠 `.w()` 缩不小），带无障碍标签 `Open help` 与
+提示 `Open help.`，点击打开 `DOCS_URL`。Snippets 面板自己出这一行——它的表格是定高的，
+链接属于「表格 + 编辑器」那一列而不是面板尾部——其余面板由 `help_link_row()` 收尾。
+
+**验证**：`tools/check.sh` 全绿（41 条 UI 测试，其中 Mode 那条在 760×760 的窗口里点
+Indentation 的宽度步进器，证明禁用态不只是变灰）。截图
+`tools/peek-panel.sh 11 Mode /tmp/mode.png`：标题行与工具栏两行都在、标题是面板名、
+窗口高度随面板变、九格工具栏居中、右下角有一颗问号碟。
+
+---
+
+### 22.60 General 与 Integration 面板按上游重排，并把「没做的」写进界面
+
+两个面板原来是把上游的分组拆成一串 `field()` 行，控件之间没有上游那种「复选框 + 缩进说明」
+的从属关系。现在照 `GeneralSettingsView.swift` / `IntegrationSettingsView.swift` 的
+`Grid(alignment: .leadingFirstTextBaseline, verticalSpacing: 18)` 重排：
+
+* **General**：界面语言（SubText 自己的一行，上游按系统语言走，没有这一行）、*On startup*
+  （复选框 + 缩进 20 pt 的 *When nothing else is open:* 单选组）、*Document save*、
+  *When document is changed by another application:*（标签跨两列，下一行第一格留空，
+  单选组因此与上面的控件左缘对齐——那格用 `div().w(rems(label_column()))` 顶替上游的
+  1×1 `Color.clear`）、*Settings import & export*、*Dialog warnings*、一条分隔线、
+  *Software update*，末尾是帮助链接。
+* **Integration**：*Command-line tool* 的 *Learn More…* 打开 `dispatch::DOCS_URL`
+  （上游给 `NSHelpManager` 的 `about_cot` 锚点，SubText 没有帮助书，面板自己的问号也去同一页），
+  按钮保持可点而不是永久置灰；*Remote editing* 的 *Port:* 标签与步进器在复选框关闭时一起变次要色。
+
+**文案以事实为准，这不是可选项。** 两处说明都重写了：
+
+* 自动保存的说明原本写「文档会自动保存，早期版本可从『文件 ▸ 复原到』访问」——SubText
+  没有自动保存，也没有版本历史，`revert` 只是从磁盘重读。改成「尚未实现。SubText 只在你保存
+  时写入文件，也没有可复原的早期版本。」。复选框本身仍可点、仍存进 `Settings`（与抗锯齿开关
+  相同的处理，见缺口表）。
+* 命令行说明去掉了反引号，并写明「还没有安装程序把 subtext 放进 PATH」——可执行文件确实会打开
+  传给它的路径，但不能让读者以为装完就在 `PATH` 里。
+
+**禁用态的值也要变灰。** `stepper_when` 的 −/+ 在禁用时本来就是灰的，值却是黑的，夹在两个灰
+按钮中间读起来像一个还活着的控件。值格改为跟着 `enabled` 取 `muted_foreground`；宽度同时从
+4 rem 收到 2.5 rem（三位数是这些步进器的上限），Window 面板那几行因此不再顶到窗口右缘。
+
+**工具栏提示的名字与菜单一致**：侧栏/检查器的悬停提示改成 *Show Sidebar* / *Hide Sidebar* /
+*Show Inspector* / *Hide Inspector*，与 AppKit 系统工具栏项、菜单标题、`menu.json` 的键同名；
+原来小写的四个字符串在中文表里没有条目，显示为英文。
+
+**验证**：`tools/check.sh` 全绿（41 条 UI 测试）。截图
+`tools/peek-panel.sh 7 General /tmp/pane-general.png`、
+`tools/peek-panel.sh 15 Integration /tmp/pane-integration.png`：标签列左缘统一、单选组与上面
+控件对齐、说明文字在控制列里换行、端口步进器三个部件同为次要色、问号碟在右下角。
+
+---
+
+### 22.61 工具栏的检查器跟踪分隔条：槽位与墨迹都不随面板状态变
+
+`NSToolbarItem.Identifier.inspectorTrackingSeparator` 是 AppKit 的一等项：它在
+`toolbarDefaultItemIdentifiers` 里，位于最后一个内容项与检查器开关之间，**不可移除、不出现在自定义
+面板里、AX 也读不到**。SubText 没有这个标识符，只能从活窗口反推：从 `toggleInspector` 的位置向前
+走过连续的 `Space` / `FlexibleSpace`，得出的空位就是它的 4 pt 槽。
+
+**墨迹是无条件的。** 早先的实现只在检查器打开时画这条框，理由是「关掉的检查器没有要跟踪的东西」。
+量过默认工具栏的新窗口后这条理由不成立：检查器关闭时，槽位与 8 × 72 像素的框都在。AppKit 给的是
+项自己的 4 × 36 pt 方框加 1 pt 描边，圈内不填充 — 不是自定义面板预览条里那种发丝线；窗口画的是
+tracking 项，面板画的是 item 本身，两边本来就是两张图。
+
+**颜色是标定出来的，不是算出来的。** 参考窗口的描边均匀落在 RGB 201（背景 255），四条边与四角
+都一样。GPUI 的 border 合成比 alpha 名义值深一档：0.19 渲染 210，0.23 渲染 200，最终
+`TOOLBAR_TRACKING_STROKE = 0.226` 落在 201。几何也逐像素核过：两边都是 2 px 竖边、4 px 空腔、
+72 px 高，差的只是窗口里 y 的位置。
+
+参考机上另有一个早于该标识符的旧窗口，它的保存工具栏里没有这一项，于是既没有槽也没有框 —
+那是旧配置的例外，不是默认行为的证据。
+
+**验证**：`/tmp/toolbar-match.sh` 用临时 HOME 起一个默认项集合的窗口、按窗口 id 截图，
+`pxval` 读像素；`tools/check.sh` 全绿（41 条 UI 测试）。
+
+---
+
+### 22.62 注释命令跟着选区变灰，*Toggle Comment* 还跟着变标题
+
+`EditorTextView.validateUserInterfaceItem` 对四条注释命令做两件事，SubText 原来只做了第一件：
+
+* **能否执行**：缓冲区可编辑、语法有对应分隔符、选区里有可去掉的注释（*Uncomment* 用上游
+  `canUncomment(partly: true)`，部分注释也算）。
+* **标题**：*Toggle Comment* 既能加分隔符也能去掉，所以上游每次打开菜单都把它改成
+  `canUncomment(partly: false) ? "Uncomment" : "Comment Out"` —— 故事板里那个静态标题
+  "Toggle Comment" 用户根本看不到。标题**不看** `isEditable`：只读文档里这条命令是灰的，
+  标题照样变。
+
+GPUI 的菜单是一棵装一次就不变的树，所以两个条件都由生成器烘进条目：`GATED_ACTIONS` 写
+`.disabled(...)`，新增的 `TITLE_EXPRESSIONS` 把标题写成 Rust 表达式
+`if state.can_uncomment_whole { "Uncomment" } else { "Comment Out" }`。`MenuItem::action`
+收 `impl Into<SharedString>`，表达式和字面量走同一条路，安装时的 `localize_menus` 照样翻译；
+`zh-Hans.tsv` 补上 `Comment Out → 注释`（`Uncomment` 原来就有）。
+
+`MenuGates` 因此从七个字段变成八个：`can_uncomment` 仍是 *Uncomment* 的启用条件（partly），
+`can_uncomment_whole` 只用来挑标题（whole），故意不与 `editable` 相与。`for_editor` 对同一批
+行问两次 `textops::can_uncomment` —— 一次 partly、一次 whole —— 不是扫两遍文档。
+`Workspace::sync_menu_gates` 比较整个 `MenuGates`，新字段翻转时菜单栏重建，标题随之更新。
+
+**路径按动作认，不按标题认。** 标题会变，命令的身份不变：`Command.path` 由活菜单的标题拼出，
+变成 "Text > Comment > Uncomment" 之后就查不到 ⌘/ 了。`menus::shortcut` 在按路径查不到时改按
+动作名回查 `menu::COMMANDS` 的静态路径；`menu_contract` 的置灰表按 `::ActionName` 匹配
+（不能按标题 —— *Uncomment* 既是标题也是隔壁动作名），Quick Actions 的快捷键测试同样按动作
+匹配。菜单栏本身显示的是动态标题。
+
+**验证**：`tools/check.sh` 全绿。新增
+`menu_contract::the_comment_item_is_titled_by_the_selection`：同一棵建出来的树，
+`can_uncomment_whole` 为真时条目叫 *Uncomment*、为假时叫 *Comment Out*；`menus` 的注释门测试
+补了 partly / whole 两种选区与只读文档的用例。计数：core 428、app lib 299、syntax 53、
+theme 7、UI 41。
+
+---
+
+### 22.63 长下拉菜单要能滚：语法框不再被屏幕底边截断
+
+**症状**：右上角语法框点开后只画到屏幕底，后面的语法既没有滚动条，滚轮也不动。安装的语法有
+70 种，菜单按 26 pt 一行大约 1800 pt，比任何窗口都高。
+
+**原因**：gpui-kit 的 `PopupMenu` 默认既不裁剪也不滚动；`.max_h()` 只是记下一个高度，读它的
+是 `scrollable` 分支 —— 只有 `.scrollable(true)` 才会同时加上 `max_h`、`overflow_y_scroll`
+与竖向滚动条（`gpui-component-0.8.1/src/menu/popup_menu.rs:1511/1526`）。AppKit 的 `NSMenu`
+在超出屏幕时自己会滚，所以这不是上游行为，是漏接了一个开关。
+
+**改法**：条目不设上限、会随用户环境增长的下拉菜单，一律以 `.scrollable(true)` 收尾：
+
+* 工具栏语法框（70 种语法）、状态栏编码列表（系统全部编码 + 最近使用）；
+* Appearance 面板的字体族（系统全部字族）；
+* 片段面板的两处语法选择（语法作用域）。
+
+片段面板之外，编码表的加编码菜单、`popup_pick_list`（Format 面板的语法/编码选择）、大纲菜单
+本来就已经是这么写的，这次只是把剩下的补齐。
+
+**验证**：新增 UI 测试
+`the_syntax_menu_scrolls_to_the_syntaxes_past_the_fold`：打开真实工具栏的语法弹层，数出菜单里
+的动作项（> 60），再在弹层上滚轮，断言第一行的 y 坐标真的上移 —— 只有真正的滚动容器才会这样。
+**注入验证过**：临时去掉 `.scrollable(true)` 后测试在「first row stayed at 11.5px」处变红，加回
+即绿。`tools/check.sh` 全绿；计数：core 428、app lib 299、syntax 53、theme 7、UI 42。
+
 ---
 
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
+| 文档窗口只还原尺寸，不还原位置 | 上游 `windowFrameAutosaveName = "Document"` 连位置一起还原。GPUI 的 `window_bounds()` 是翻转坐标（左上原点）的整窗 frame，`MacWindowState::open` 把它交给 `initWithContentRect:` 时没有换算 y，喂回去会整窗下移一个标题栏高；且没有 `set_position`。位置留给 `default_bounds` 的 25pt 级联（对应上游 `cascadeTopLeft`）。另：尺寸在拖拽停手 250 ms 后才落盘，拖完立刻退出会丢这一次（§22.55）。 |
 | LaTeX 大纲由线性扫描提供，不是 tree-sitter | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号，装不上，而 1024jp fork 的 parser.c 有 44 MB。`outline.rs::latex_entries` 按 `outline.scm` 的语义扫描标题、`\title` 与 `\caption`，测试覆盖层级 / 排除 / 注释 / 可选参数。差异：语法上不成立的参数里的 `\section` 也会被收进来（§22.54）。 |
 | 打印 / 页面设置没有实现 | 上游用 AppKit 的 `NSPrintOperation` 与 `PrintTextView`；GPUI 不暴露打印面板或页面布局模型，没有可交给系统的对象。菜单保留，触发时说明原因（§22.54）。 |
+| 抗锯齿开关只存不用 | `AppearanceOptions::standard_antialias` / `monospaced_antialias` 与菜单项 `toggle_antialias` 都会翻转并保存，但 GPUI 的文字渲染没有抗锯齿开关，开关不改变绘制。上游对应 `NSTextView.shouldAntialias`（§22.56）。 |
+| 外观模式只存不用 | `document_appearance`（System / Light / Dark）可设置、会保存，但窗口外观仍跟随系统，`.cottheme` 的调色板不按它分叉。上游用它设 `NSAppearance`（§22.56）。 |
+| General 面板的四个启动/保存选项只存不用 | *Enable Auto Save with Versions*、*Reopen windows from last session*、*When nothing else is open* 的三选一、*When document is changed by another application* 的三选一都会写进 `Settings` 并落盘，但没有任何代码读它们：启动路径不读会话与启动选项，保存路径不读自动保存与冲突策略，也没有文件监听。界面上自动保存那一行的说明已改成「尚未实现」，其余三组保留原样并在此记账（§22.60）。 |
+| rmate 远程编辑没有监听器 | 复选框与端口都存得住，但不开套接字、收不到远程文件；界面上那一行说明写明了这一点（§22.60）。上游走 `CotEditorRmateServer`。 |
+| 命令行工具没有安装程序 | 可执行文件接受文件路径并在已有窗口里打开，但没有 `.app` 内的启动器安装、没有 `subtext` 的 PATH 入口；*Learn More…* 与说明文字都按这个事实写（§22.60）。 |
+| tabbing 首项不显示系统当前偏好 | 上游在 *Respect System Setting* 后用次要颜色附上 `NSWindow.userTabbingPreference.label`；读它要 AppKit 的 `NSUserDefaults`，SubText 没有绑定 objc2。选择本身照常生效（§22.58）。 |
+| 不透明度滑块没有刻度 | 上游轨道下有 0.1 步长的刻度；gpui-component 的 `Slider` 没有刻度槽。宽度已对齐上游的 260 pt 上限（Appearance 面板用 7.5 rem 标签列，§22.56）；精确值也可走 64 pt 的百分比输入框。 |
 | 书写方向与竖排布局不可设置 | 上游分别设 `NSTextView.baseWritingDirection` 与 `NSLayoutManager.TextLayoutOrientation.vertical`。GPUI 的 bidi shaping 只按字符排列，没有段落基准方向；排版只有横向。菜单与工具栏项保留，触发时说明原因（§22.54）。 |
 | 列选择按逻辑行而不是视觉行 | 上游 `addSelectedColumn` 用 `NSLayoutManager` 的 wrapped row 与 glyph 列；GPUI 只公开 `visible_row_range`，没有「偏移 → 显示行」的查询。`select_column` 按逻辑行 + 字符列，短行夹到行尾；未折行时与上游一致（§22.54）。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |

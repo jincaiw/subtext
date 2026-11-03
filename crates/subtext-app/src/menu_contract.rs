@@ -369,22 +369,36 @@ fn the_generated_table_gates_exactly_the_commands_that_say_so() {
     // generated line the contract: one gate per command that has one, and each
     // tests a field the workspace actually maintains.
     let gated = gated_items();
-    assert_eq!(
-        gated.len(),
-        3,
-        "expected three state-dependent items, found {}:\n  {}",
-        gated.len(),
-        gated.join("\n  ")
-    );
     let expected = [
         ("StraightenQuotesInSelection", "state.selection_empty"),
         ("SelectPrevItemOfOutlineMenu", "!state.can_previous_outline"),
         ("SelectNextItemOfOutlineMenu", "!state.can_next_outline"),
+        // `EditorTextView.validateUserInterfaceItem`: the comment commands need
+        // an editable buffer, and each needs the delimiter its command uses.
+        ("ToggleComment", "!state.can_comment"),
+        ("InlineCommentOut", "!state.can_inline_comment"),
+        ("BlockCommentOut", "!state.can_block_comment"),
+        ("Uncomment", "!state.can_uncomment"),
     ];
+    assert_eq!(
+        gated.len(),
+        expected.len(),
+        "expected {} state-dependent items, found {}:\n  {}",
+        expected.len(),
+        gated.len(),
+        gated.join("\n  ")
+    );
     for (action, gate) in expected {
+        // Match the action, not the title: *Toggle Comment* is shown as
+        // "Uncomment" when the whole selection is commented out, and that word
+        // is also the action name of the item beside it. The action ends the
+        // line with a `)` when it fits on one line and with a `,` when rustfmt
+        // breaks the call across lines.
         let item = gated
             .iter()
-            .find(|item| item.contains(action))
+            .find(|item| {
+                item.contains(&format!("::{action},")) || item.contains(&format!("::{action})"))
+            })
             .unwrap_or_else(|| panic!("{action} carries no gate:\n  {}", gated.join("\n  ")));
         assert!(
             item.contains(gate),
@@ -416,6 +430,7 @@ fn the_outline_items_follow_the_caret() {
         selection_empty: false,
         can_previous_outline: true,
         can_next_outline: true,
+        ..Default::default()
     });
     assert_eq!(
         disabled(&both_ways, "Select Previous Outline Item"),
@@ -439,6 +454,61 @@ fn the_outline_items_follow_the_caret() {
         disabled(&forward_only, "Select Next Outline Item"),
         Some(false)
     );
+}
+
+/// The comment item says which job it will do, as upstream's
+/// `EditorTextView.validateUserInterfaceItem` retitles it on every menu open.
+///
+/// A GPUI menu is a tree set once, so the title comes out of the same gates
+/// the disabled state does, and the bar is rebuilt when the answer changes
+/// (`Workspace::sync_menu_gates`). The editable flag is deliberately not part
+/// of this: upstream retitles a greyed item too.
+#[test]
+fn the_comment_item_is_titled_by_the_selection() {
+    let uncomments = crate::menu::app_menus(&crate::menus::MenuGates {
+        can_comment: true,
+        can_uncomment_whole: true,
+        ..Default::default()
+    });
+    assert_eq!(
+        title_of(&uncomments, "ToggleComment").as_deref(),
+        Some("Uncomment"),
+        "the whole selection is commented out, so the item removes delimiters"
+    );
+
+    let comments_out = crate::menu::app_menus(&crate::menus::MenuGates {
+        can_comment: true,
+        can_uncomment_whole: false,
+        ..Default::default()
+    });
+    assert_eq!(
+        title_of(&comments_out, "ToggleComment").as_deref(),
+        Some("Comment Out"),
+        "there is something left to comment, so the item adds delimiters"
+    );
+}
+
+/// The title of the one item that carries `action_name`, wherever it sits.
+fn title_of(menus: &[gpui_kit::Menu], action_name: &str) -> Option<String> {
+    fn walk(items: &[gpui_kit::MenuItem], action_name: &str) -> Option<String> {
+        for item in items {
+            match item {
+                gpui_kit::MenuItem::Action { name, action, .. }
+                    if crate::bridge::name_of(action.as_ref()) == action_name =>
+                {
+                    return Some(name.to_string());
+                }
+                gpui_kit::MenuItem::Submenu(menu) => {
+                    if let Some(found) = walk(&menu.items, action_name) {
+                        return Some(found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    menus.iter().find_map(|menu| walk(&menu.items, action_name))
 }
 
 /// Whether the item titled `title` is greyed, wherever it sits in the bar.

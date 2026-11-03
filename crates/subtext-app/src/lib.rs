@@ -40,6 +40,7 @@ pub mod dispatch;
 pub mod encoding_list_sheet;
 pub mod find_panel;
 pub mod folder_find;
+pub mod fonts;
 pub mod highlighter;
 pub mod keymap;
 pub mod localization;
@@ -62,7 +63,7 @@ pub mod workspace;
 
 use std::path::PathBuf;
 
-use gpui_kit::{App, AppContext as _, WindowOptions, px};
+use gpui_kit::{App, AppContext as _, WindowOptions};
 
 use settings::Settings;
 use workspace::Workspace;
@@ -144,7 +145,11 @@ pub fn run() {
                 gpui_kit::component::ThemeMode::Light
             };
             gpui_kit::component::Theme::change(mode, None, cx);
-            highlighter::project_theme(&theme, cx);
+            highlighter::project_theme(
+                &theme,
+                settings::clamp_window_alpha(settings.appearance.window_alpha),
+                cx,
+            );
 
             bridge::install(cx);
             // The keymap and the menu bar, with the saved snippets already in
@@ -202,8 +207,19 @@ fn open_main_window(
     // — and `app_owns_titlebar_drag` hands dragging to the `TitleBar` this
     // window renders, rather than letting AppKit also treat the row as a move
     // region (which would delay every click in it by the double-click timeout).
+    // The saved window size, read before `settings` is moved into the
+    // constructor: the pane's dimensions and the size the last document window
+    // was left at.
+    let saved_size = settings.window;
+    let last_size = settings.document_window_size;
+    // The Appearance pane's editor opacity, applied to the window itself: an
+    // opaque window draws a backing store the page cannot show through, which
+    // is the difference between a translucent window and a white one.
+    let window_alpha = settings::clamp_window_alpha(settings.appearance.window_alpha);
+
     let options = WindowOptions {
-        window_min_size: Some(gpui_kit::size(px(720.), px(480.))),
+        window_min_size: Some(workspace::document_window_min_size()),
+        window_background: workspace::Workspace::window_appearance(window_alpha),
         ..gpui_kit::component::TitleBar::window_options()
     };
 
@@ -225,6 +241,12 @@ fn open_main_window(
             return;
         }
     };
+
+    // The saved size, applied to the window that just opened: by the time the
+    // first frame is drawn it already has the size the user left it at.
+    let _ = handle.update(cx, |_, window, _| {
+        workspace::resize_window_to_saved_size(window, &saved_size, last_size);
+    });
 
     // A manual smoke for the panels no test can reach; see
     // `Workspace::panel_sweep`. `SUBTEXT_PANEL_PEEK=<n>` opens panel n and

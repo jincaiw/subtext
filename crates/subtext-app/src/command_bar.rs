@@ -646,6 +646,11 @@ mod tests {
                 selection_empty: false,
                 can_previous_outline: true,
                 can_next_outline: true,
+                can_comment: true,
+                can_inline_comment: true,
+                can_block_comment: true,
+                can_uncomment: true,
+                can_uncomment_whole: true,
             },
             ..state()
         })
@@ -867,8 +872,21 @@ mod tests {
             if row.0 == "View > Show Quick Actions…" {
                 continue;
             }
+            // The storyboard's path is what the key map holds, but one item is
+            // titled by the editor ("Uncomment" / "Comment Out"), so its live
+            // path moves. The command it runs does not, so the row is matched
+            // by action as well as by path.
+            let action = crate::menu::COMMANDS
+                .iter()
+                .find(|entry| entry.path == row.0)
+                .map(|entry| entry.action);
             assert!(
-                offered.iter().any(|command| command.path == row.0),
+                offered.iter().any(|command| {
+                    command.path == row.0
+                        || action.is_some_and(|name| {
+                            name == crate::bridge::name_of(command.action.as_ref())
+                        })
+                }),
                 "{} has a shortcut but is not a command",
                 row.0
             );

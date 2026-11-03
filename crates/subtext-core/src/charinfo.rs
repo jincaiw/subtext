@@ -966,13 +966,29 @@ pub struct Count {
 
 impl Count {
     /// `entire (selected)` — upstream's `Count.formatted`.
+    ///
+    /// Both halves go through `Int.formatted()`, so a five-digit document reads
+    /// `12,345 (10)` — the commas are what make the number legible at a glance.
     pub fn formatted(self) -> String {
         if self.selected > 0 {
-            format!("{} ({})", self.entire, self.selected)
+            format!("{} ({})", grouped(self.entire), grouped(self.selected))
         } else {
-            self.entire.to_string()
+            grouped(self.entire)
         }
     }
+}
+
+/// A count with a comma every three digits, the way `Int.formatted()` groups.
+fn grouped(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.char_indices() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 /// CotEditor's "Advanced Character Count" breakdown, and the three counts the
@@ -1603,6 +1619,23 @@ mod tests {
             }
             .formatted(),
             "12 (4)"
+        );
+        // `Int.formatted()` groups both halves: five digits, then seven.
+        assert_eq!(
+            Count {
+                entire: 1363,
+                selected: 10
+            }
+            .formatted(),
+            "1,363 (10)"
+        );
+        assert_eq!(
+            Count {
+                entire: 1_234_567,
+                selected: 0
+            }
+            .formatted(),
+            "1,234,567"
         );
     }
 

@@ -65,21 +65,28 @@ use subtext_syntax::OutlineItem;
 /// colour and whether the label is drawn bold, and — for `title` and
 /// `heading.N` — whether the entry carries a nesting level of its own.
 ///
-/// `heading.N` is folded into [`OutlineKind::Heading`] because upstream does
-/// the same: the level moves into [`Indent`] and the kind keeps only the fact
-/// that it is a heading.
+/// The level inside [`OutlineKind::Heading`] is `Some` only when the rule
+/// spelled it (`kind: heading.2`); a bare `kind: heading` rule, and every
+/// tree-sitter capture, carries `None` and takes its depth from [`Indent`]
+/// instead. The two are *not* interchangeable: upstream draws them with
+/// different symbols, a list square for the bare form and a numbered square
+/// for the levelled one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OutlineKind {
     Container,
     Value,
     Function,
     Title,
-    Heading,
+    Heading(Option<usize>),
     Mark,
     Separator,
 }
 
 impl OutlineKind {
+    /// The kinds `heading.N` accepts. Upstream's `Kind.levelRange`, and the
+    /// reason `heading.8` is not a heading at all but an unknown kind.
+    const HEADING_LEVELS: std::ops::RangeInclusive<usize> = 1..=7;
+
     /// The kind a rule's `kind` field names, or `None` when it names nothing
     /// SubText knows — three of the bundled rules have no kind at all.
     fn from_name(name: &str) -> Option<Self> {
@@ -88,23 +95,30 @@ impl OutlineKind {
             "value" => Self::Value,
             "function" => Self::Function,
             "title" => Self::Title,
+            "heading" => Self::Heading(None),
             "mark" => Self::Mark,
             "separator" => Self::Separator,
-            _ if name.starts_with("heading") => Self::Heading,
-            _ => return None,
+            _ => {
+                let level = name.strip_prefix("heading.")?.parse::<usize>().ok()?;
+                if !Self::HEADING_LEVELS.contains(&level) {
+                    return None;
+                }
+                Self::Heading(Some(level))
+            }
         })
     }
 
     /// The name the syntax files spell the kind with.
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Self::Container => "container",
-            Self::Value => "value",
-            Self::Function => "function",
-            Self::Title => "title",
-            Self::Heading => "heading",
-            Self::Mark => "mark",
-            Self::Separator => "separator",
+            Self::Container => "container".to_string(),
+            Self::Value => "value".to_string(),
+            Self::Function => "function".to_string(),
+            Self::Title => "title".to_string(),
+            Self::Heading(None) => "heading".to_string(),
+            Self::Heading(Some(level)) => format!("heading.{level}"),
+            Self::Mark => "mark".to_string(),
+            Self::Separator => "separator".to_string(),
         }
     }
 
@@ -115,7 +129,7 @@ impl OutlineKind {
             Self::Value => "Value",
             Self::Function => "Function",
             Self::Title => "Title",
-            Self::Heading => "Heading",
+            Self::Heading(_) => "Heading",
             Self::Mark => "Mark",
             Self::Separator => "Separator",
         }
@@ -125,6 +139,58 @@ impl OutlineKind {
     /// `.mark` a `Style` of `.bold` and leaves the rest plain.
     pub fn is_bold(self) -> bool {
         matches!(self, Self::Container | Self::Mark)
+    }
+
+    /// Whether the symbol paints a tinted tile behind its glyph.
+    ///
+    /// Upstream draws every kind with `.symbolRenderingMode(.hierarchical)`,
+    /// so a `*square.fill` symbol comes out as a tinted square with the glyph
+    /// at full strength. `flag.fill` and `minus` have no square to tint, so
+    /// those two kinds stay bare. The views use this to draw the same tile,
+    /// because Lucide has no filled squares to render in two layers.
+    pub fn has_tile(self) -> bool {
+        !matches!(self, Self::Mark | Self::Separator)
+    }
+
+    /// The glyph drawn *inside* the kind's tile, whatever entry it is attached
+    /// to.
+    ///
+    /// Upstream's symbols are all SF Symbols `*square.fill`, and a filled
+    /// square renders in two layers under `.hierarchical`: the square takes the
+    /// tint at reduced alpha while the glyph over it stays at full strength.
+    /// Lucide has no such symbol, so the views draw the tile themselves and
+    /// this returns the bare glyph that goes on top. Using Lucide's own
+    /// `square-*` icons here instead would put a second, full-strength square
+    /// outline inside the tile — the one thing upstream never shows.
+    ///
+    /// A levelled heading is upstream's `N.square.fill`. Lucide has no numbered
+    /// squares, so it gets `Hash`; the bare `heading` — upstream's
+    /// `listBulletSquareFill` — gets `List`. They are different symbols
+    /// upstream and must stay different here.
+    pub fn icon(self) -> IconName {
+        match self {
+            Self::Container => IconName::Box,
+            Self::Value => IconName::Dot,
+            Self::Function => IconName::Sigma,
+            Self::Title => IconName::Tag,
+            Self::Heading(Some(_)) => IconName::Hash,
+            Self::Heading(None) => IconName::List,
+            Self::Mark => IconName::Flag,
+            Self::Separator => IconName::Minus,
+        }
+    }
+
+    /// The kind's colour, from the palette in [`symbol`].
+    pub fn color(self) -> Hsla {
+        match self {
+            Self::Container => symbol::BLUE,
+            Self::Value => symbol::GREEN,
+            Self::Function => symbol::ORANGE,
+            Self::Title => symbol::TEAL,
+            Self::Heading(_) => symbol::INDIGO,
+            Self::Mark => symbol::RED,
+            Self::Separator => symbol::GRAY,
+        }
     }
 }
 
@@ -184,6 +250,21 @@ impl OutlineEntry {
     pub fn is_separator(&self) -> bool {
         self.kind == Some(OutlineKind::Separator)
     }
+
+    /// The kind's symbol, or `None` for a rule that named no kind.
+    pub fn icon(&self) -> Option<IconName> {
+        self.kind.map(OutlineKind::icon)
+    }
+
+    /// The kind's colour, grey for a rule that named no kind.
+    pub fn icon_color(&self) -> Hsla {
+        self.kind.map_or(symbol::GRAY, OutlineKind::color)
+    }
+
+    /// Whether the label is drawn semibold — see [`OutlineKind::is_bold`].
+    pub fn is_bold(&self) -> bool {
+        self.kind.is_some_and(OutlineKind::is_bold)
+    }
 }
 
 /// Extract outline entries from `text` using a syntax's outline rules.
@@ -231,7 +312,7 @@ pub fn extract(text: &str, rules: &[OutlineItem]) -> Vec<OutlineEntry> {
                 id: String::new(),
                 title: title.to_string(),
                 range,
-                indent: indent_for(kind, &rule.kind, indent),
+                indent: indent_for(kind, indent),
                 kind,
             });
         }
@@ -358,7 +439,12 @@ fn latex_entries(text: &str) -> Vec<OutlineEntry> {
                                     range: group.range,
                                     indent: Indent::Level(level.unwrap_or(0)),
                                     kind: Some(if level.is_some() {
-                                        OutlineKind::Heading
+                                        // A tree-sitter capture names the kind
+                                        // `outline.heading` and puts the number
+                                        // in a separate component, so the kind
+                                        // here is the unlevelled one even though
+                                        // the query spells `heading.3`.
+                                        OutlineKind::Heading(None)
                                     } else {
                                         OutlineKind::Title
                                     }),
@@ -538,7 +624,7 @@ fn normalize_levels(entries: &mut [OutlineEntry]) {
 
         if entry.kind == Some(OutlineKind::Title) {
             let level = match last_kind {
-                Some(OutlineKind::Heading) => last_level + 1,
+                Some(OutlineKind::Heading(_)) => last_level + 1,
                 _ => last_level,
             };
             entry.indent = Indent::Level(level);
@@ -602,13 +688,10 @@ fn compile(rule: &OutlineItem) -> Result<Regex, regex::Error> {
 /// The `heading` case matters: a rule whose kind is a bare `heading`, with no
 /// level, falls through to the whitespace case, and two of the bundled rules
 /// are spelled that way.
-fn indent_for(kind: Option<OutlineKind>, rule_kind: &str, indent: &str) -> Indent {
+fn indent_for(kind: Option<OutlineKind>, indent: &str) -> Indent {
     match kind {
         Some(OutlineKind::Title) => Indent::Level(0),
-        Some(OutlineKind::Heading) => rule_kind
-            .strip_prefix("heading.")
-            .and_then(|level| level.parse::<usize>().ok())
-            .map_or_else(|| Indent::String(indent.to_string()), Indent::Level),
+        Some(OutlineKind::Heading(Some(level))) => Indent::Level(level),
         _ => Indent::String(indent.to_string()),
     }
 }
@@ -639,7 +722,9 @@ fn assign_ids(entries: &mut [OutlineEntry]) {
     for entry in entries.iter_mut() {
         let key = format!(
             "{}{SEPARATOR}{}",
-            entry.kind.map_or("plain", OutlineKind::name),
+            entry
+                .kind
+                .map_or_else(|| "plain".to_owned(), OutlineKind::name),
             entry.title
         );
         let nth = seen.entry(key.clone()).or_insert(0);
@@ -998,19 +1083,7 @@ impl OutlineRow {
     /// has no numbered squares, so a levelled heading gets `Hash` where
     /// upstream gets `N.square.fill`.
     pub fn icon(&self) -> Option<IconName> {
-        Some(match self.kind? {
-            OutlineKind::Container => IconName::Box,
-            OutlineKind::Value => IconName::SquareDot,
-            OutlineKind::Function => IconName::SquareFunction,
-            OutlineKind::Title => IconName::Tag,
-            // `indent` is `None` exactly when the entry's indent is a level,
-            // which for a heading means `heading.N` and for everything else
-            // means a `title` rule. Only a heading can be either.
-            OutlineKind::Heading if self.indent.is_none() => IconName::Hash,
-            OutlineKind::Heading => IconName::SquareMenu,
-            OutlineKind::Mark => IconName::Flag,
-            OutlineKind::Separator => IconName::Minus,
-        })
+        self.kind.map(OutlineKind::icon)
     }
 
     /// The colour of that symbol.
@@ -1018,15 +1091,7 @@ impl OutlineRow {
     /// CotEditor colours each kind with a macOS system colour, and these are
     /// those colours — see [`symbol`] for why they are not theme roles.
     pub fn icon_color(&self) -> Hsla {
-        match self.kind {
-            Some(OutlineKind::Container) => symbol::BLUE,
-            Some(OutlineKind::Value) => symbol::GREEN,
-            Some(OutlineKind::Function) => symbol::ORANGE,
-            Some(OutlineKind::Title) => symbol::TEAL,
-            Some(OutlineKind::Heading) => symbol::INDIGO,
-            Some(OutlineKind::Mark) => symbol::RED,
-            Some(OutlineKind::Separator) | None => symbol::GRAY,
-        }
+        self.kind.map_or(symbol::GRAY, OutlineKind::color)
     }
 }
 
@@ -1310,7 +1375,7 @@ mod tests {
     fn a_heading_kind_carries_its_own_level() {
         // The rule says three, and `indent_for` keeps that…
         assert_eq!(
-            indent_for(Some(OutlineKind::Heading), "heading.3", ""),
+            indent_for(Some(OutlineKind::Heading(Some(3))), ""),
             Indent::Level(3)
         );
 
@@ -1322,8 +1387,10 @@ mod tests {
         let entries = extract("### Deep\n", &rules);
         assert_eq!(entries[0].indent, Indent::Level(0));
         assert_eq!(entries[0].title, "Deep");
-        // The level lives in the indent, so the kind is just "a heading".
-        assert_eq!(entries[0].kind, Some(OutlineKind::Heading));
+        // The indent is compacted; the kind keeps the level the rule spelled.
+        // Upstream keeps both the same way, and the two are read separately:
+        // the indent nests the row, the kind chooses its symbol.
+        assert_eq!(entries[0].kind, Some(OutlineKind::Heading(Some(3))));
     }
 
     /// A syntax whose outline is a tree-sitter query gets one, end to end.
@@ -1336,7 +1403,10 @@ mod tests {
         let entries = entries("# One\n\n## Two\n", &syntax("Markdown"));
         assert_eq!(titles(&entries), ["One", "Two"]);
         assert_eq!(levels(&entries), [0, 1]);
-        assert_eq!(entries[0].kind, Some(OutlineKind::Heading));
+        // A tree-sitter capture writes `outline.heading` and carries the depth
+        // in the indent, so the kind has no level of its own — which is also
+        // why upstream draws these with the list square rather than a number.
+        assert_eq!(entries[0].kind, Some(OutlineKind::Heading(None)));
     }
 
     /// …and a syntax whose outline is a regex rule still takes that path.
@@ -1445,7 +1515,7 @@ mod tests {
         assert!(
             entries
                 .iter()
-                .all(|entry| entry.kind == Some(OutlineKind::Heading))
+                .all(|entry| entry.kind == Some(OutlineKind::Heading(None)))
         );
     }
 
@@ -1938,7 +2008,7 @@ mod tests {
         let row = &rows[&entries[0].id];
         assert_eq!(row.kind, Some(OutlineKind::Function));
         assert_eq!(row.indent.as_deref(), Some("    "));
-        assert_eq!(row.icon(), Some(IconName::SquareFunction));
+        assert_eq!(row.icon(), Some(IconName::Sigma));
     }
 
     #[test]
@@ -1949,11 +2019,8 @@ mod tests {
             matches: Vec::new(),
         };
         assert_eq!(row(OutlineKind::Container).icon(), Some(IconName::Box));
-        assert_eq!(row(OutlineKind::Value).icon(), Some(IconName::SquareDot));
-        assert_eq!(
-            row(OutlineKind::Function).icon(),
-            Some(IconName::SquareFunction)
-        );
+        assert_eq!(row(OutlineKind::Value).icon(), Some(IconName::Dot));
+        assert_eq!(row(OutlineKind::Function).icon(), Some(IconName::Sigma));
         assert_eq!(row(OutlineKind::Title).icon(), Some(IconName::Tag));
         assert_eq!(row(OutlineKind::Mark).icon(), Some(IconName::Flag));
         assert_eq!(row(OutlineKind::Separator).icon(), Some(IconName::Minus));
@@ -1971,23 +2038,30 @@ mod tests {
 
     #[test]
     fn a_levelled_heading_gets_the_hash() {
-        // `heading.1` … `heading.6` carry a level, so they draw no captured
-        // whitespace and get the hash.
+        // `heading.1` … `heading.7` keep the level in the kind, so they get the
+        // hash whatever their indent says.
         let row = OutlineRow {
-            kind: Some(OutlineKind::Heading),
+            kind: Some(OutlineKind::Heading(Some(3))),
             indent: None,
             matches: Vec::new(),
         };
         assert_eq!(row.icon(), Some(IconName::Hash));
-
-        // A bare `heading` rule nests by its captured whitespace instead, and
-        // gets the plain square. Two bundled rules are spelled that way.
         let row = OutlineRow {
-            kind: Some(OutlineKind::Heading),
+            kind: Some(OutlineKind::Heading(Some(3))),
             indent: Some("  ".into()),
             matches: Vec::new(),
         };
-        assert_eq!(row.icon(), Some(IconName::SquareMenu));
+        assert_eq!(row.icon(), Some(IconName::Hash));
+
+        // A bare `heading` rule — and every tree-sitter capture — carries no
+        // level and nests by its indent instead. Upstream draws those with the
+        // bulleted-list square, not the hash. Two bundled rules spell it bare.
+        let row = OutlineRow {
+            kind: Some(OutlineKind::Heading(None)),
+            indent: Some("  ".into()),
+            matches: Vec::new(),
+        };
+        assert_eq!(row.icon(), Some(IconName::List));
     }
 
     #[test]
@@ -1995,7 +2069,27 @@ mod tests {
         assert!(OutlineKind::Container.is_bold());
         assert!(OutlineKind::Mark.is_bold());
         assert!(!OutlineKind::Function.is_bold());
-        assert!(!OutlineKind::Heading.is_bold());
+        assert!(!OutlineKind::Heading(None).is_bold());
+
+        assert!(!OutlineKind::Heading(Some(2)).is_bold());
+    }
+
+    #[test]
+    fn only_a_square_symbol_gets_a_tile() {
+        // Hierarchical rendering tints the square of a `*square.fill` symbol.
+        for kind in [
+            OutlineKind::Container,
+            OutlineKind::Value,
+            OutlineKind::Function,
+            OutlineKind::Title,
+            OutlineKind::Heading(None),
+            OutlineKind::Heading(Some(2)),
+        ] {
+            assert!(kind.has_tile(), "{kind:?}");
+        }
+        // `flag.fill` and `minus` have no square behind them.
+        assert!(!OutlineKind::Mark.has_tile());
+        assert!(!OutlineKind::Separator.has_tile());
     }
 
     #[test]
@@ -2005,17 +2099,27 @@ mod tests {
             OutlineKind::Value,
             OutlineKind::Function,
             OutlineKind::Title,
-            OutlineKind::Heading,
+            OutlineKind::Heading(None),
+            OutlineKind::Heading(Some(1)),
+            OutlineKind::Heading(Some(7)),
             OutlineKind::Mark,
             OutlineKind::Separator,
         ] {
-            assert_eq!(OutlineKind::from_name(kind.name()), Some(kind));
+            assert_eq!(OutlineKind::from_name(&kind.name()), Some(kind));
             assert!(!kind.label().is_empty());
         }
         assert_eq!(
             OutlineKind::from_name("heading.4"),
-            Some(OutlineKind::Heading)
+            Some(OutlineKind::Heading(Some(4)))
         );
+        assert_eq!(
+            OutlineKind::from_name("heading"),
+            Some(OutlineKind::Heading(None))
+        );
+        // Upstream clamps outside 1...7 to nil at decode time; we reject the
+        // name and let the caller fall back, which has the same visible effect.
+        assert_eq!(OutlineKind::from_name("heading.0"), None);
+        assert_eq!(OutlineKind::from_name("heading.8"), None);
         assert_eq!(OutlineKind::from_name("nonsense"), None);
         assert_eq!(OutlineKind::from_name(""), None);
     }

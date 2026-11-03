@@ -89,7 +89,15 @@ impl HighlightStyleResolver for CotStyleResolver {
 /// theme. Its syntax palette speaks Zed's names (`keyword`, `string.special`),
 /// which is what [`HighlightToken::style_name`] maps CotEditor's ten tokens
 /// onto.
-pub fn project_theme(theme: &Theme, cx: &mut App) {
+///
+/// `window_alpha` is the Appearance pane's opacity. CotEditor makes the window
+/// non-opaque and paints `theme.background` at that alpha from the window
+/// itself, so the paper is the theme's background *with* the alpha — laid down
+/// once on the window's root surface, while the chrome around it stays opaque.
+/// Below 1.0 the editor's own fill goes clear so that layer is the only one
+/// carrying the alpha; `1.0` writes the plain background back, which is what
+/// happens every launch unless the slider was moved.
+pub fn project_theme(theme: &Theme, window_alpha: f32, cx: &mut App) {
     // Every editor colour goes through [`editor_style`] first, so the fallbacks
     // a `.cottheme` leaves out are resolved in exactly one place — the same
     // place the editor state is given its style, which is what keeps the two
@@ -97,19 +105,133 @@ pub fn project_theme(theme: &Theme, cx: &mut App) {
     let style = editor_style(theme);
 
     let mut component = gpui_kit::component::Theme::global(cx).clone();
-    component.colors.foreground = style.foreground;
+    // AppKit paints UI text and template icons with `NSColor.labelColor`: the
+    // foreground at 85%, so it sits *on* the material behind it rather than
+    // punching through it. The component library's default is an opaque
+    // neutral-900 (light) / neutral-50 (dark), which reads blacker than
+    // CotEditor's labels — and #FAFAFA instead of AppKit's #D8D8D8 in the dark
+    // appearance. `secondary_foreground` is what a ghost button, the
+    // navigation bar's picker among them, draws its title with.
+    //
+    // Both are set here rather than once at launch because
+    // `Theme::change` reloads the component theme from its config, which would
+    // put the opaque default back on every Format ▸ Theme switch.
+    let label = if theme.is_dark() {
+        gpui_kit::hsla(0., 0., 1., 0.85)
+    } else {
+        gpui_kit::hsla(0., 0., 0., 0.85)
+    };
+    component.colors.foreground = label;
+    component.colors.secondary_foreground = label;
     component.colors.muted_foreground = style.muted_foreground;
     component.colors.background = style.background;
-    component.colors.border = style.border;
+    // Hairlines are the system's: AppKit's `separatorColor` is black at 10% in
+    // the light appearance and white at 10% in the dark one, which over the
+    // window's white is the 229 CotEditor's window measures between the
+    // toolbar and the page. The `.cottheme`'s invisibles colour — what the
+    // editor's own border uses — is a *text* colour and draws a much darker
+    // 192 at its default.
+    //
+    // The alphas are calibrated rather than derived: GPUI paints a border
+    // against the view's background, and a translucent hairline does not land
+    // where the same alpha would by hand. Measured at 2× on the chrome's
+    // white, 20/255 renders 232 and 26/255 renders 225, so 23 lands on 229.
+    let separator = if theme.is_dark() {
+        to_hsla(CotRgba::new(255, 255, 255, 23))
+    } else {
+        to_hsla(CotRgba::new(0, 0, 0, 23))
+    };
+    // CotEditor rules the line above the status bar over the page rather than
+    // over the chrome, so it measures 225 — the same 10% separator against the
+    // theme's own 250. GPUI composites both hairlines against their view's
+    // background, white in either case, so this one takes the stronger alpha
+    // to land on the reference's 225 instead of 229.
+    let status_separator = if theme.is_dark() {
+        to_hsla(CotRgba::new(255, 255, 255, 26))
+    } else {
+        to_hsla(CotRgba::new(0, 0, 0, 26))
+    };
+    component.colors.border = separator;
     component.colors.selection = style.selection;
     component.colors.caret = style.caret;
 
+    // CotEditor's accent, from its asset catalog: `Accent Color.colorset` is
+    // sRGB 108/166/9. The two shades are the ones the component library's own
+    // schema would have derived — hover blends a 90%-opaque accent over white,
+    // active keeps the hue and drops lightness by 10% — written out because
+    // `Hsla` has no `darken` and `project_theme` bypasses the theme loader that
+    // computes them.
+    let accent = to_hsla(CotRgba::new(108, 166, 9, 255));
+    let accent_hover = to_hsla(CotRgba::new(123, 175, 34, 255));
+    let accent_active = to_hsla(CotRgba::new(97, 149, 8, 255));
+    let accent_foreground = Hsla::white();
+
+    // Only the primary/button family. `accent` and `ring` stay neutral on
+    // purpose: they are what menus, list rows and focus borders paint with,
+    // and AppKit paints those in the system selection colour rather than in
+    // the app accent.
+    component.colors.primary = accent;
+    component.colors.primary_hover = accent_hover;
+    component.colors.primary_active = accent_active;
+    component.colors.primary_foreground = accent_foreground;
+    component.colors.button_primary = accent;
+    component.colors.button_primary_hover = accent_hover;
+    component.colors.button_primary_active = accent_active;
+    component.colors.button_primary_foreground = accent_foreground;
+    // The slider keeps its own two fields rather than reading `primary`: the
+    // library's default theme sets `slider.bar.background` to a near-black
+    // #171717 (white #FAFAFA in the dark appearance) and the `slider_bar`
+    // token is derived from *that* field, not from `primary`. Projecting only
+    // the primary family leaves the Appearance pane's opacity slider grey while
+    // the checkbox beside it is green. AppKit's `NSSlider` fills its track with
+    // the control accent and draws a white thumb in both appearances, which is
+    // what these two become.
+    component.colors.slider_bar = accent;
+    component.colors.slider_thumb = accent_foreground;
+
+    // Window chrome, as opposed to paper. AppKit draws the title bar, the
+    // toolbar strip, the navigation bar and the status bar with
+    // `windowBackgroundColor` — pure white in the light appearance, #1E1E1E in
+    // the dark one — and the `.cottheme`'s background applies only to the
+    // document. CotEditor's reference window shows the split: 255 above and
+    // below a 250 page. `title_bar` is the component theme's token for exactly
+    // that surface, and `TitleBar` already falls back to it, so the chrome is
+    // projected here rather than painted view by view.
+    component.colors.title_bar = if theme.is_dark() {
+        to_hsla(CotRgba::new(0x1E, 0x1E, 0x1E, 0xFF))
+    } else {
+        Hsla::white()
+    };
+    // `TitleBar` draws its own hairline with this one, so it gets the system
+    // separator too rather than the component library's fixed light grey.
+    component.colors.title_bar_border = separator;
+    component.colors.status_bar_border = status_separator;
+
+    // `Theme::from(&ThemeColor)` derives `tokens` once, at construction. This
+    // function writes `colors` on a clone and installs it with a raw
+    // `set_global`, so `Theme::edit` never runs and `tokens.reconcile` never
+    // happens — and `Theme::apply_semantic_tokens` does not cover the
+    // `button_primary*` fields. Rebuild the mirror here, or half the library
+    // keeps reading the old accent.
+    component.tokens = (&component.colors).into();
+
     let mut highlight = (*component.highlight_theme).clone();
-    highlight.style.editor_background = Some(style.background);
+    // `Input` takes the page's fill from here for every code editor, and the
+    // gutter from `editor_gutter_background`. Below full opacity the window's
+    // root surface already carries the translucent paper — and its alpha — so
+    // these go clear rather than compositing a second 0.6 layer over it, which
+    // would render as 0.84 and hide the desktop the slider was moved to show.
+    // At 1.0 they keep painting the page themselves.
+    let paper = if window_alpha >= 1.0 {
+        style.background
+    } else {
+        style.background.opacity(0.0)
+    };
+    highlight.style.editor_background = Some(paper);
     highlight.style.editor_foreground = Some(style.foreground);
     highlight.style.editor_invisible = style.editor_invisible;
     highlight.style.editor_active_line = style.editor_active_line;
-    highlight.style.editor_gutter_background = style.editor_gutter_background;
+    highlight.style.editor_gutter_background = Some(paper);
     highlight.style.syntax = syntax_colors(theme);
     component.highlight_theme = std::sync::Arc::new(highlight);
 

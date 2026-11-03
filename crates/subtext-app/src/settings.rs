@@ -220,8 +220,10 @@ impl WindowTabbing {
     pub fn label(self) -> &'static str {
         match self {
             WindowTabbing::RespectSystem => "Respect System Setting",
-            WindowTabbing::Manual => "Manually",
-            WindowTabbing::InFullScreen => "In Full Screen Only",
+            // `NSWindow.UserTabbingPreference`'s own labels, which the Window
+            // pane shows as menu items after the system-setting entry.
+            WindowTabbing::Manual => "Never",
+            WindowTabbing::InFullScreen => "Automatically",
             WindowTabbing::Always => "Always",
         }
     }
@@ -255,8 +257,6 @@ pub struct EditorOptions {
     pub page_guide_column: usize,
     pub wrap_lines: bool,
     pub highlight_current_line: bool,
-    pub antialias: bool,
-    pub ligatures: bool,
     pub editable: bool,
 }
 
@@ -282,8 +282,6 @@ impl EditorOptions {
             page_guide_column: 80,
             wrap_lines: false,
             highlight_current_line: true,
-            antialias: true,
-            ligatures: false,
             editable: true,
         }
     }
@@ -297,6 +295,8 @@ impl EditorOptions {
 pub struct WindowOptions {
     pub show_tab_bar: bool,
     pub show_toolbar: bool,
+    /// How the toolbar draws its items — glyphs, glyphs with labels, or labels.
+    pub toolbar_display_mode: crate::toolbar::ToolbarDisplayMode,
     pub show_sidebar: bool,
     pub show_inspector: bool,
     pub show_navigation_bar: bool,
@@ -326,6 +326,13 @@ pub struct WindowOptions {
     pub enables_hanging_indent: bool,
     pub hanging_indent_width: f32,
     pub writing_direction: WritingDirection,
+    /// How much blank space the editor keeps below the last line, as a
+    /// fraction of the visible height.
+    ///
+    /// CotEditor's `overscrollRate` (`0...1` in 0.1 steps, off by default).
+    /// Applied in rows, because that is the unit GPUI's editor takes; see
+    /// `Workspace::overscroll_rows`.
+    pub overscroll_rate: f64,
 
     /// Which fields the status bar shows.
     pub show_status_bar_lines: bool,
@@ -347,6 +354,9 @@ impl WindowOptions {
         Self {
             show_tab_bar: true,
             show_toolbar: true,
+            // Upstream never sets `NSToolbar.displayMode`, so AppKit's
+            // `.iconAndLabel` is what a CotEditor window opens with.
+            toolbar_display_mode: crate::toolbar::ToolbarDisplayMode::IconAndText,
             show_sidebar: false,
             show_inspector: false,
             show_navigation_bar: true,
@@ -361,6 +371,9 @@ impl WindowOptions {
             enables_hanging_indent: false,
             hanging_indent_width: 2.0,
             writing_direction: WritingDirection::default(),
+            // Upstream's default is 0: the last line can rest against the
+            // bottom of the editor, with no blank overscroll below it.
+            overscroll_rate: 0.0,
             show_status_bar_lines: true,
             show_status_bar_chars: true,
             // Upstream hides the word count and the column by default
@@ -522,14 +535,60 @@ impl AppearanceOptions {
             standard_font_family: None,
             standard_font_size: 13.0,
             standard_antialias: true,
-            standard_ligature: false,
+            // `DefaultSettings.swift`'s `.ligature: true` — the standard font
+            // ligates out of the box; the monospaced one does not.
+            standard_ligature: true,
             monospaced_font_family: None,
             monospaced_font_size: 13.0,
             monospaced_antialias: true,
             monospaced_ligature: false,
-            line_height: 1.0,
+            // `DefaultSettings.swift`'s `.lineHeight: 1.3`.
+            line_height: 1.3,
             document_appearance: DocumentAppearance::default(),
             window_alpha: 1.0,
+        }
+    }
+}
+
+/// Keep the opacity inside the range the slider offers, at slider precision.
+///
+/// The Appearance pane writes the value through here, and so does the workspace
+/// when it applies it to the window — a `settings.json` hand-edited to `0.05`
+/// would otherwise make the window nearly invisible with no way back through
+/// the pane that clamps what *it* writes.
+pub fn clamp_window_alpha(alpha: f32) -> f32 {
+    let range = AppearanceOptions::WINDOW_ALPHA_RANGE;
+    // NaN would survive `clamp` as NaN and paint a background GPUI cannot
+    // parse. A file with a broken float is not worth taking the window down for.
+    if !alpha.is_finite() {
+        return 1.0;
+    }
+    let alpha = alpha.clamp(*range.start(), *range.end());
+    (alpha * 100.0).round() / 100.0
+}
+
+/// A mode's own indentation, overriding the Edit pane's defaults.
+///
+/// Upstream's `ModeOptions.IndentOptions?`: `None` means the mode follows
+/// *Settings › Edit › Indentation*, and the Mode pane's *Use custom settings*
+/// switch is what fills it in — seeded from the Edit pane's values, never from
+/// zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModeIndent {
+    /// Whether a tab press inserts spaces. Upstream's `expandsTab`.
+    pub expands_tab: bool,
+    /// The width of one indentation step, clamped to the 1–99 the stepper allows.
+    pub width: usize,
+}
+
+impl Default for ModeIndent {
+    /// The Edit pane's defaults, so a hand-written `"indent": {}` still means
+    /// "spaces, four wide" rather than a tab of width zero.
+    fn default() -> Self {
+        Self {
+            expands_tab: true,
+            width: 4,
         }
     }
 }
@@ -556,6 +615,8 @@ pub struct ModeOptions {
     pub completion_document_words: bool,
     pub completion_syntax_words: bool,
     pub automatic_completion: bool,
+    /// The mode's own indentation, or `None` to follow the Edit pane.
+    pub indent: Option<ModeIndent>,
 }
 
 /// The sidebar's selected pane.
@@ -641,11 +702,13 @@ pub struct Settings {
 
     /// The theme applied to the editor. `None` means "follow the system".
     pub theme: Option<String>,
-    pub font_family: Option<String>,
-    pub font_size: f32,
 
-    /// Mirrors `edit.tab_width`; kept so callers that think in terms of the
-    /// document's indentation need not know which pane owns the value.
+    /// Mirrors the indentation in force; kept so callers that think in terms of
+    /// the document's indentation need not know which pane owns the value.
+    ///
+    /// "In force" is the point: a mode with its own [`ModeIndent`] overrides
+    /// the Edit pane, so these follow [`Settings::effective_indentation`], not
+    /// `edit` directly. [`Settings::sync_indentation`] is the only writer.
     pub tab_width: usize,
     pub uses_spaces_for_indentation: bool,
     pub auto_expand_tabs: bool,
@@ -708,6 +771,22 @@ pub struct Settings {
     /// `windowFrameAutosaveName = "Find Panel"`. The panel reopens where the
     /// user left it.
     pub find_panel_frame: Option<[f32; 4]>,
+
+    /// The last content size of a document window, `[width, height]`.
+    ///
+    /// Upstream gives every document window `windowFrameAutosaveName =
+    /// "Document"`, so AppKit reopens the next one at the size the user left
+    /// the last one at; the Window pane's *Width* / *Height* fields then
+    /// override whichever dimension is not set to Auto. This is that autosaved
+    /// frame reduced to the two numbers SubText can apply. The position is left
+    /// to the platform: GPUI has no `set_position`, and its
+    /// `WindowOptions::window_bounds` is only read at creation, in a frame
+    /// convention that would nudge every launch by the title-bar height.
+    ///
+    /// Content size rather than frame size because that is what
+    /// [`Window::resize`](gpui_kit::Window::resize) sets and what the Window
+    /// pane's two fields mean.
+    pub document_window_size: Option<[f32; 2]>,
 
     /// The recent find strings, latest last — upstream's `findHistory`.
     ///
@@ -839,8 +918,6 @@ impl Default for Settings {
             language: crate::localization::Language::default(),
             toolbar_items: crate::toolbar::ToolbarItemId::DEFAULT.to_vec(),
             theme: None,
-            font_family: None,
-            font_size: edit.tab_width as f32 + 9.0,
             tab_width: edit.tab_width,
             uses_spaces_for_indentation: edit.auto_expand_tab,
             auto_expand_tabs: edit.auto_expand_tab,
@@ -864,6 +941,7 @@ impl Default for Settings {
             find_regex_is_multiline: true,
             find_regex_unescapes_replacement: true,
             find_panel_frame: None,
+            document_window_size: None,
             find_history: Vec::new(),
             replace_history: Vec::new(),
             enables_remote_editing: false,
@@ -993,10 +1071,24 @@ impl Settings {
         }
     }
 
+    /// The indentation in force: the mode's own if it has one, the Edit pane's
+    /// otherwise.
+    ///
+    /// This is upstream's `applyIndentOptions`: a document whose mode carries an
+    /// `IndentOptions` ignores the two global defaults while it is open.
+    /// Returns `(expands_tab, width)`.
+    pub fn effective_indentation(&self) -> (bool, usize) {
+        match self.mode.indent {
+            Some(indent) => (indent.expands_tab, indent.width.clamp(1, 99)),
+            None => (self.edit.auto_expand_tab, self.edit.tab_width.clamp(1, 99)),
+        }
+    }
+
     /// The whitespace one indentation step is made of.
     pub fn indent_unit(&self) -> String {
-        if self.uses_spaces_for_indentation {
-            " ".repeat(self.tab_width)
+        let (uses_spaces, width) = self.effective_indentation();
+        if uses_spaces {
+            " ".repeat(width)
         } else {
             "\t".to_string()
         }
@@ -1016,17 +1108,43 @@ impl Settings {
         }
     }
 
-    /// Bring the indentation fields back into agreement.
+    /// Set the Edit pane's indentation defaults.
     ///
-    /// Three fields describe one decision, because three panes and the Format
-    /// menu each need a different name for it. They are written through this
-    /// method so they cannot drift apart.
+    /// This is where *Settings › Edit › Indentation* writes. A mode's custom
+    /// values are deliberately left alone: they are an override, not a second
+    /// copy of the same number, and unchecking the mode's switch should restore
+    /// whatever the user last chose here.
     pub fn set_indentation(&mut self, uses_spaces: bool, tab_width: usize) {
         self.edit.auto_expand_tab = uses_spaces;
         self.edit.tab_width = tab_width.clamp(1, 99);
-        self.uses_spaces_for_indentation = self.edit.auto_expand_tab;
-        self.auto_expand_tabs = self.edit.auto_expand_tab;
-        self.tab_width = self.edit.tab_width;
+        self.sync_indentation();
+    }
+
+    /// Change the indentation the editor actually uses.
+    ///
+    /// The Format menu's *Tab Width* and *Expand Tabs* commands act on the
+    /// document, which in SubText means the effective indentation. When a mode
+    /// overrides it, the mode's copy is what they edit; otherwise the Edit
+    /// pane's. Writing the Edit pane here while a mode overrode it would make
+    /// the command look like it did nothing.
+    pub fn set_effective_indentation(&mut self, uses_spaces: bool, tab_width: usize) {
+        let width = tab_width.clamp(1, 99);
+        if let Some(indent) = &mut self.mode.indent {
+            indent.expands_tab = uses_spaces;
+            indent.width = width;
+        } else {
+            self.edit.auto_expand_tab = uses_spaces;
+            self.edit.tab_width = width;
+        }
+        self.sync_indentation();
+    }
+
+    /// Bring the three mirrors back into agreement with the effective value.
+    pub fn sync_indentation(&mut self) {
+        let (uses_spaces, width) = self.effective_indentation();
+        self.uses_spaces_for_indentation = uses_spaces;
+        self.auto_expand_tabs = uses_spaces;
+        self.tab_width = width;
     }
 
     /// Where the settings file lives.
@@ -1053,7 +1171,58 @@ impl Settings {
         let Ok(bytes) = std::fs::read(&path) else {
             return Self::default();
         };
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        let Ok(mut settings) = serde_json::from_slice::<Self>(&bytes) else {
+            return Self::default();
+        };
+        settings.adopt_legacy_font(&bytes);
+        // The mirrors are persisted, so a file written before a mode had an
+        // indent override — or edited by hand — can name a width the effective
+        // value no longer agrees with. Re-derive instead of trusting them.
+        settings.sync_indentation();
+        settings
+    }
+
+    /// Move the document font out of the two fields an older build wrote at the
+    /// top level and into the Appearance pane's, which now own it.
+    ///
+    /// Until this build `font_family` and `font_size` were the only record of
+    /// the standard font, and nothing else read them. Serde ignores keys it
+    /// does not know, so a file written then still parses — but without this
+    /// pass the face the user chose would silently revert to the theme's on the
+    /// first launch of the new build.
+    ///
+    /// Two guards keep the adoption honest. The appearance section wins where
+    /// it already names the key, so a file written by this build is never
+    /// touched. And the legacy key has to be *present*: `font_size` used to
+    /// default to `tab_width + 9`, so treating a missing one as a choice would
+    /// resize every document that never set it.
+    fn adopt_legacy_font(&mut self, bytes: &[u8]) {
+        let Ok(raw) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+            return;
+        };
+        let Some(object) = raw.as_object() else {
+            return;
+        };
+        let appearance = object.get("appearance").and_then(|value| value.as_object());
+        let appearance_names =
+            |key: &str| appearance.is_some_and(|section| section.contains_key(key));
+
+        if !appearance_names("standard_font_family")
+            && let Some(family) = object.get("font_family").and_then(|value| value.as_str())
+            && !family.is_empty()
+        {
+            self.appearance.standard_font_family = Some(family.to_string());
+        }
+        if !appearance_names("standard_font_size")
+            && let Some(size) = object.get("font_size").and_then(|value| value.as_f64())
+        {
+            let size = size as f32;
+            // The old field was unbounded; a hand-edited file could name a
+            // size no font has. The Appearance pane's range is 1–100.
+            if size.is_finite() && (1.0..=100.0).contains(&size) {
+                self.appearance.standard_font_size = size;
+            }
+        }
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -1093,7 +1262,7 @@ mod tests {
     fn a_partial_nested_object_keeps_the_other_settings() {
         let json = br#"{
             "window": { "show_sidebar": true },
-            "font_size": 18.0,
+            "find_result_font_size": 18.0,
             "encoding_list": ["utf-8"]
         }"#;
 
@@ -1101,7 +1270,7 @@ mod tests {
 
         assert!(settings.window.show_sidebar, "the named field was dropped");
         assert_eq!(
-            settings.font_size, 18.0,
+            settings.find_result_font_size, 18.0,
             "a sibling top-level field was dropped"
         );
         assert_eq!(
@@ -1242,7 +1411,7 @@ mod tests {
         assert!(settings.editor.show_line_numbers);
         assert!(!settings.editor.wrap_lines);
         assert_eq!(settings.editor.page_guide_column, 80);
-        assert_eq!(settings.appearance.line_height, 1.0);
+        assert_eq!(settings.appearance.line_height, 1.3);
         assert_eq!(settings.appearance.window_alpha, 1.0);
         assert_eq!(
             settings.general.no_document_on_launch_option,
@@ -1279,9 +1448,46 @@ mod tests {
     }
 
     #[test]
+    fn a_mode_indent_override_wins_until_it_is_removed() {
+        let mut settings = Settings::default();
+        settings.set_indentation(true, 2);
+        assert_eq!(settings.indent_unit(), "  ");
+
+        settings.mode.indent = Some(ModeIndent {
+            expands_tab: false,
+            width: 8,
+        });
+        settings.sync_indentation();
+        assert_eq!(settings.indent_unit(), "\t");
+        assert_eq!(settings.tab_width, 8);
+
+        // The Format menu edits what is in force — the override — and leaves
+        // the Edit pane's defaults for when the override is removed.
+        settings.set_effective_indentation(true, 4);
+        assert_eq!(settings.indent_unit(), "    ");
+        assert_eq!(settings.edit.tab_width, 2);
+
+        settings.mode.indent = None;
+        settings.sync_indentation();
+        assert_eq!(settings.indent_unit(), "  ");
+    }
+
+    #[test]
+    fn a_hand_written_mode_indent_section_gets_sane_defaults() {
+        let settings: Settings = serde_json::from_str(r#"{"mode": {"indent": {}}}"#).unwrap();
+        assert_eq!(
+            settings.mode.indent,
+            Some(ModeIndent {
+                expands_tab: true,
+                width: 4
+            })
+        );
+    }
+
+    #[test]
     fn settings_round_trip_through_json() {
         let mut settings = Settings {
-            font_size: 15.5,
+            find_result_font_size: 15.5,
             ..Settings::default()
         };
         settings.window.show_sidebar = true;
@@ -1297,8 +1503,52 @@ mod tests {
     fn a_partial_settings_file_keeps_defaults_for_missing_keys() {
         let settings: Settings = serde_json::from_str(r#"{"tab_width": 8}"#).unwrap();
         assert_eq!(settings.tab_width, 8);
-        assert_eq!(settings.font_size, Settings::default().font_size);
+        assert_eq!(
+            settings.find_result_font_size,
+            Settings::default().find_result_font_size
+        );
         assert_eq!(settings.appearance.window_alpha, 1.0);
+    }
+
+    /// A file from the build that kept the document font at the top level is
+    /// read into the Appearance pane's fields, and a file from this build is
+    /// left alone.
+    ///
+    /// Both halves matter. The first is a user's chosen face surviving the
+    /// upgrade; the second is the upgrade not undoing a change they made in the
+    /// Appearance pane since.
+    #[test]
+    fn the_legacy_top_level_font_is_adopted_once() {
+        let legacy = br#"{"font_family": "Menlo", "font_size": 14.0}"#;
+        let mut settings: Settings = serde_json::from_slice(legacy).unwrap();
+        settings.adopt_legacy_font(legacy);
+        assert_eq!(
+            settings.appearance.standard_font_family.as_deref(),
+            Some("Menlo")
+        );
+        assert_eq!(settings.appearance.standard_font_size, 14.0);
+
+        // The Appearance pane's own key wins, whichever order the two appear in.
+        let both = br#"{
+            "font_family": "Menlo",
+            "font_size": 14.0,
+            "appearance": { "standard_font_family": "Helvetica", "standard_font_size": 18.0 }
+        }"#;
+        let mut settings: Settings = serde_json::from_slice(both).unwrap();
+        settings.adopt_legacy_font(both);
+        assert_eq!(
+            settings.appearance.standard_font_family.as_deref(),
+            Some("Helvetica")
+        );
+        assert_eq!(settings.appearance.standard_font_size, 18.0);
+
+        // A missing legacy key is not a choice: `font_size` used to be derived
+        // from the tab width, so adopting a default would resize documents.
+        let bare = br#"{"tab_width": 8}"#;
+        let mut settings: Settings = serde_json::from_slice(bare).unwrap();
+        settings.adopt_legacy_font(bare);
+        assert_eq!(settings.appearance.standard_font_family, None);
+        assert_eq!(settings.appearance.standard_font_size, 13.0);
     }
 
     #[test]

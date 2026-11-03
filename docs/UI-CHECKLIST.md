@@ -110,7 +110,63 @@ v_flex()
 
 **正确写法**：引号用弯引号 `“ ”`，或者直接不加引号。
 
-**本项目踩过**：Integration 页的 command-line 说明（§22.20）。
+**同样的要求适用于「说的对不对」**：说明文字描述的是应用实际做的事，不是上游做的事。上游的
+自动保存说明承诺了版本历史，SubText 没有这个功能，那句话就必须写成「尚未实现」并说清楚现状
+（§22.60）。抄上游文案时，先确认这一句在本项目里成立。
+
+**本项目踩过**：Integration 页的 command-line 说明（§22.20）、General 页的自动保存说明（§22.60）。
+
+---
+
+## 8. 禁用态要覆盖组合控件的每一部分
+
+**症状**：步进器的 − / + 是灰的，中间的数字还是黑的 —— 夹在两个灰按钮中间，读起来像一个
+还活着的输入框。
+
+**原因**：`stepper_when(…, enabled, …)` 把 `enabled` 只传给了两个按钮，值格是另一个 `div`，
+要单独跟着变灰。
+
+**正确写法**：组合控件（步进器、标签 + 字段、复选框 + 说明）的禁用态，把同一份 `enabled`
+作用到**每个**可见部件上；标签与值用 `muted_foreground`，与上游禁用的 `TextField` 一致。
+
+**本项目踩过**：Integration 页的 *Port:* 行（§22.60）。
+
+---
+
+## 9. 图标按名字挑，要打开 SVG 看一眼
+
+**症状**：工具栏的 Share 按钮画出来是三个圆点连成的网络，不是 macOS 那个「方框 + 向上箭头」。
+
+**原因**：`IconName` 的名字来自 Lucide，很多是近义词。`Share` 是方框加向上箭头（与
+`NSImage.shareTemplateName` 同形），`Share2` 是节点网络 —— 两个名字看起来都能当「分享」，
+只有画出来才知道差多远。
+
+**正确写法**：选图标时打开 `gpui-kit-assets-*/assets/icons/<name>.svg` 看 path，或者与参考
+窗口的截图并排比。同一份工具栏里，`toolbar.rs` 的 `ToolbarItemId::Share` 早就映射成
+`Share`，`workspace.rs` 手绘的那个按钮却用了 `Share2`，两处不一致本身就是线索。
+
+**本项目踩过**：工具栏 Share 项（`workspace.rs`）。
+
+---
+
+## 10. 长下拉菜单不加 `scrollable`，下半截既看不见也够不着
+
+**症状**：右上角语法框点开，七十种语法只画到屏幕底为止，后面的没有滚动条、滚轮也没反应，
+只能看到前面的一小段。编码、字体、片段语法等其他长列表是同一个毛病。
+
+**原因**：gpui-kit 的 `PopupMenu` 默认**不裁剪也不滚动**。`.max_h()` 只是把高度记下来，
+真正生效要 `.scrollable(true)` —— 它才加 `max_h` + `overflow_y_scroll` + 竖向滚动条
+（`gpui-component-0.8.1/src/menu/popup_menu.rs:1511`）。只写 `.max_h()` 的菜单看起来
+像「限高了」，其实什么都没发生。AppKit 的 `NSMenu` 超过屏幕会自动滚动，所以这里不加就是
+与上游不一致。
+
+**正确写法**：条目不设上限、会随用户环境增长的下拉菜单，收尾一律 `.scrollable(true)`。
+项目里 `encoding_list_sheet.rs` 的加编码菜单和 `popup_pick_list` 已经是这么做的，可以对照。
+
+**本项目踩过**：工具栏语法框、状态栏编码列表、Appearance 面板的字体族、片段面板的两处语法
+选择（§22.63）。`crates/subtext-app/tests/ui.rs` 的
+`the_syntax_menu_scrolls_to_the_syntaxes_past_the_fold` 会打开菜单并滚轮，去掉
+`scrollable(true)` 就红。
 
 ---
 
@@ -124,7 +180,7 @@ v_flex()
 
 ```bash
 # 打开第 n 个面板并停住（n 的取值见 tools/peek-panel.sh 的注释）
-tools/peek-panel.sh 14 Settings /tmp/shortcuts.png    # 真窗口
+tools/peek-panel.sh 14 Shortcuts /tmp/shortcuts.png   # 真窗口；设置窗口的标题是当前面板名
 tools/peek-overlay.sh 0 /tmp/surround.png             # 对话框（在窗口之上的独立层）
 ```
 

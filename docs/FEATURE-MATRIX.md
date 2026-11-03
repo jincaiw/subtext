@@ -48,6 +48,10 @@
 | 存储 | `save(false)` | ✅ |
 | 存储为… | `save(true)` | ✅ |
 | 复原到已存储 | `revert` | ✅ |
+| 自动保存与版本 | `enables_autosave_in_place` | 🔁 开关在 General 面板里可设、会保存，但没有代码读它：保存仍只发生在 *Save* / *Save As*，没有版本历史，*Revert To* 不列旧版本。界面说明已写明「尚未实现」（§22.60） |
+| 启动时会话与空启动选项 | `quit_always_keeps_windows` / `no_document_on_launch_option` | 🔁 两个选项都可设、会保存，但启动路径不读它们：不还原上次会话，空启动恒为新建文稿（§22.60） |
+| 文稿被其他应用更改时 | `document_conflict_option` | 🔁 三选一可设、会保存，但没有文件监听，因此从不触发（§22.60） |
+| rmate 远程编辑 | `enables_remote_editing` / `remote_editing_port` | 🔁 Integration 面板里可设端口、会保存，但没有监听器：不开套接字、收不到远程文件，界面说明已写明（§22.60） |
 | 在文件管理器中显示 | `show_in_finder` | ✅ |
 | 拷贝路径 | `copy_path` | ✅ |
 | 共享 | — | ⚠️ 上游是 `NSSharingServicePicker`，一个 AppKit 弹出层；GPUI 不暴露 |
@@ -71,7 +75,7 @@
 | 选择包围符号 | `select_enclosing_symbols` | ✅ |
 | 向上/下扩展列选择 | `select_column(true/false)` | ✅ 真多光标：`EditorState::add_selection` 在上一行 / 下一行的同一列加一个插入点，键入落在每一行。上游按**视觉行**（软换行后的行片段）取列，GPUI 没有公开的视觉行接口，这里按**逻辑行 + 字符列**走；未折行时两者一致，见 §22.54 |
 | 按行拆分选区 | `split_selection_by_lines` | ✅ |
-| 菜单校验 | `menu_contract` | ✅ 命令覆盖由 `cargo test` 常设把关（生成表 → bridge 绑定 → dispatch 分支）。**按状态置灰**：三项跟着光标走 —— *Straighten Quotes*（空选区）、*Select Previous/Next Outline Item*（前后有没有条目）。生成器把条件烘进条目，工作区用 `cx.observe(editor)` 跟踪并在翻转时重建菜单栏；大纲那两项读的是文档缓存的抽取结果（§22.46） |
+| 菜单校验 | `menu_contract` | ✅ 命令覆盖由 `cargo test` 常设把关（生成表 → bridge 绑定 → dispatch 分支）。**按状态置灰**：七项跟着状态走 —— *Straighten Quotes*（空选区）、*Select Previous/Next Outline Item*（前后有没有条目）、*Toggle Comment / Inline Comment / Block Comment / Uncomment*（是否可编辑、语法有没有对应分隔符、选区里有没有可去掉的注释 —— `textops::can_uncomment` 复刻上游 `canUncomment(partly: true)`）。生成器把条件烘进条目，工作区用 `cx.observe(editor)` 跟踪并在翻转时重建菜单栏；大纲那两项读的是文档缓存的抽取结果（§22.46），注释四项读 `Syntax::comment_delimiters` 与当前选区所在的整行。*Toggle Comment* 的**标题**也跟着变：整段都注释掉时显示 *Uncomment*、否则 *Comment Out*，照上游 `validateUserInterfaceItem`（标题不看 `isEditable`，见 §22.62） |
 | 括号配对 | `flash_matching_bracket` | ✅ 光标紧跟括号时闪出配对那一个（`matching_symbol_pair` 按对计数嵌套，`()` `{}` `[]`），**每次光标移动都判**，与上游一致：`cx.observe(editor)` 的回调里做，先比选区（一次 range 比较，光标闪烁时不扫配对）再比配对（同一不影响重闪）。见 §22.15 |
 | 补全 | `complete` | ✅ 上游的候选规则（文档里的词 + 语法 `Completion.json` 的词），⌥⎋ 弹出、↑↓ 选、Enter/Tab 插入、Esc/左右取消、继续打字重新过滤；带括号的词插完光标停在括号中间。**自动补全**也做了：打字停顿 250ms 后按上游 `performCompletion` 的四条守卫（选区为空、词长 ≥ 3、光标前非空白、光标后非字母数字）弹列表，Mode 面板的 *Suggest completions while typing* 生效。列表未虚拟化、不判断 IME 合成态、*Standard words* 仍禁用，见缺口表 |
 | 输入反斜杠 / 日元符号 | `insert_text` | ✅ |
@@ -119,8 +123,12 @@
 | 增大 / 减小字号 | `bump_font(±1.0)` | ✅ |
 | 重置字体 | `set_font` + `set_font_size` | ✅ |
 | 字体面板 | Format ▸ Font 的字体族 / 字号 | 🔁 上游的「Show Fonts」是 `NSFontManager.orderFrontFontPanel`（含字体变体与特性开关），GPUI 不暴露；能选的字体族与字号已经都在 Format ▸ Font 里 |
-| 抗锯齿 | `toggle_antialias` | ✅ |
-| 连字 | `toggle_ligatures` | ✅ |
+| 抗锯齿 | `toggle_antialias` | 🔁 开关会保存，但 GPUI 的文字渲染没有抗锯齿接口，不改变绘制（§22.56） |
+| 连字 | `toggle_ligatures` | ✅ 两种字体各一个开关，标准字体默认开、等宽默认关，与上游 `DefaultSettings` 一致 |
+| 行高 | `AppearanceOptions::line_height` | ✅ 设置面板；1.0 为单倍距，默认 1.3 |
+| 外观模式 | `document_appearance` | 🔁 可设置、会保存，但未应用 —— 窗口外观跟随系统（§22.56） |
+| 状态栏底色 | `prefers_opaque_bar_background` | ✅ Tinted / Opaque 单选；Opaque 时状态栏用标题栏底色 |
+| 编辑器不透明度 | `AppearanceOptions::window_alpha` | ✅ 0.2–1.0，圆整到百分位；只有纸与正文变淡，控件保持不透明（§22.56） |
 | 主题 | `apply_theme_by_name` | ✅ 经 Format ▸ Theme 菜单，当前项打勾 |
 | 制表符宽度 | `cycle_tab_width` | ✅ |
 | 自动展开制表符 | `toggle_auto_expand_tabs` | ✅ |
@@ -138,7 +146,7 @@
 | --- | --- | --- |
 | 标签栏 | `update_window_options` | ✅ |
 | 工具栏 | `render_toolbar` + `settings.toolbar_items` | ✅ 默认项与上游文本窗口一致：**Syntax 弹出按钮 · 弹性空隙 · Inspector 开关**（旧版的 新建 / 打开 / 存储 / 标题 一行已删掉——上游工具栏里没有它们）。每一项按上游的 `NSToolbarItem.Identifier` 存进设置（`syntaxStyle` / `flexibleSpace` / `toggleInspector` …）；状态项（换行、不可见字符、缩进参考线、Tab 风格、可编辑、置顶、侧栏、检查器）按下时显示选中态 |
-| 工具栏自定义 | `customize_toolbar` + `toolbar::ToolbarSheet` | ✅ *View ▸ Customize Toolbar…* 打开调色板：左边是当前项（可拖动改序、− 移除），右边是可用项（点击加入），底部 *Default Set* / *Done*。允许项与上游 `toolbarAllowedItemIdentifiers(_:)` 同序；`flexibleSpace` 与 `toggleInspector` 与上游一样不可移除。每次编辑立即写回设置（上游 `NSToolbar` 也是即时 autosave）。手势与上游不同：上游从调色板把项**拖进/拖出**工具栏，GPUI 没有跨列表的落点，改为「点击加入 / − 移除」；拖动只用于改序，见 PLAN §22.52 |
+| 工具栏自定义 | `customize_toolbar` + `toolbar::ToolbarSheet` | ✅ *View ▸ Customize Toolbar…* 打开 AppKit 样式的调色板：说明文字、**四列可用项格子**（每格画的是它变成的控件）、当前工具栏的预览条、底部「显示」弹出按钮 + *Default Set* / *Done*。允许项与上游 `toolbarAllowedItemIdentifiers(_:)` 同序；`flexibleSpace` 与 `toggleInspector` 与上游一样不可移除。手势也与上游一致：从格子把项**拖进真实工具栏**、在工具栏内拖动改序、把工具栏项拖出去放到调色板上移除（点击格子是给不方便拖动的手留的等价操作）。调色板是工作区画的浮动层而非 `Dialog`——`Dialog` 的遮罩让真实工具栏无法成为落点（PLAN §22.52）。每次编辑立即写回设置（上游 `NSToolbar` 也是即时 autosave） |
 | 快速操作 | `show_quick_actions` | ✅ 浮动面板 + 子序列匹配菜单路径；空查询不列结果 |
 | 快速操作的命令来源 | `NSApp.actionCommands`（遍历实时主菜单） | `menus::commands`（重建菜单栏再摊平） | ✅ 含运行时条目；排除打开面板自身那条 |
 | 文件浏览器 | `show_sidebar(FileBrowser)` | ✅ |
@@ -161,7 +169,7 @@
 
 | 功能 | SubText 方法 | 状态 |
 | --- | --- | --- |
-| 切换注释 | `toggle_comment` | ✅ |
+| 切换注释 | `toggle_comment` | ✅ 菜单标题随选区变（*Uncomment* / *Comment Out*，§22.62） |
 | 行内注释 | `toggle_comment(inline only)` | ✅ |
 | 块注释 | `toggle_comment(block only)` | ✅ |
 | 取消注释 | `toggle_comment` | ✅ |
