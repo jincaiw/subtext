@@ -18,7 +18,6 @@ use gpui_kit::{
 };
 
 use crate::localization;
-use crate::resources::Resources;
 
 /// The version SubText reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -123,19 +122,6 @@ impl Render for AboutView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_window_title(localization::t("About SubText"));
 
-        let resources = match Resources::discover() {
-            Some(resources) => localization::tf(
-                "Resources: {} — {}",
-                &[
-                    &format!("{:?}", resources.origin),
-                    &resources.root.display(),
-                ],
-            ),
-            None => {
-                localization::t("Resources: not found; using the built-in fallbacks").to_string()
-            }
-        };
-
         h_flex()
             .size_full()
             .items_stretch()
@@ -184,22 +170,32 @@ impl Render for AboutView {
             .child(div().h_full().w(gpui_kit::px(1.)).bg(cx.theme().border))
             // The 350-point description pane. Upstream's holds its credits and
             // licenses; SubText has no such data, so it says what this build is.
+            //
+            // `min_w_0` is what keeps the pane at its 350 points: without it the
+            // flex item's automatic minimum is the longest unbreakable word, and
+            // an absolute resource path used to push the pane past the window
+            // edge where the sentence beside it was clipped rather than wrapped.
             .child(
                 v_flex()
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .gap_3()
                     .p_6()
-                    .child(div().text_sm().child(localization::t(
+                    .child(div().w_full().text_sm().child(localization::t(
                         "A cross-platform plain-text editor, reimplementing \
                                  CotEditor's menus, key bindings, syntax rules and themes \
                                  on GPUI Kit.",
                     )))
                     .child(
                         div()
+                            .w_full()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(resources),
+                            .child(localization::t(
+                                "SubText is an open source program licensed under the \
+                                 Apache License, Version 2.0.",
+                            )),
                     )
                     .child(
                         div().flex_1().flex().items_end().justify_end().child(

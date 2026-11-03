@@ -59,7 +59,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, DefiniteLength, Div, ElementId, Entity,
     ExternalPaths, Focusable as _, Font, FontFeatures, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Render, SharedString,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement as _, PinchEvent, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, TextRun,
     Transformation, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
     WindowOptions, div, hsla, percentage, px, rems, size,
@@ -5397,6 +5397,19 @@ impl Workspace {
         cx.notify();
     }
 
+    /// A trackpad pinch, as upstream's `magnify(with:)` handles it.
+    ///
+    /// The gesture is a magnification of the text view, not a change to the
+    /// saved Appearance size: it goes through [`Self::scale_font`], so it is
+    /// clamped to the same range and reported in the status bar the way
+    /// *Bigger Font* is. Each event carries the change since the previous one
+    /// (`0.1` is ten percent), which is why the factor is `1 + delta`.
+    fn pinch_zoom(&mut self, delta: f32, cx: &mut Context<Self>) {
+        if let Some(factor) = pinch_factor(delta) {
+            self.scale_font(factor, cx);
+        }
+    }
+
     /// `Format ▸ Reset Font`: back to the Appearance pane's sizes.
     ///
     /// Upstream resets the magnification only — the font type in use is left
@@ -10180,6 +10193,13 @@ impl Workspace {
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| this.focus_pane(pane, window, cx)),
                     )
+                    // A pinch on either pane magnifies the document in front,
+                    // which is the window's scale in upstream's
+                    // `EditorTextView+Scaling`. Without this the gesture stops
+                    // at the editor's scroll view and does nothing at all.
+                    .on_pinch(cx.listener(|this, event: &PinchEvent, _window, cx| {
+                        this.pinch_zoom(event.delta, cx);
+                    }))
                     .on_drop::<ExternalPaths>(move |paths, _, cx| {
                         workspace
                             .update_in(cx, |workspace, window, cx| {
@@ -10236,6 +10256,15 @@ impl Workspace {
             .children(panes.into_iter().map(|pane| resizable_panel().child(pane)))
             .into_any_element()
     }
+}
+
+/// The magnification a pinch event asks for, or `None` when it carries none.
+///
+/// `PinchEvent::delta` is a fraction of the current size — `0.1` means ten
+/// percent — so the factor is `1 + delta`. Zero is a no-op, and a non-finite
+/// delta would poison the document's accumulated scale for good.
+fn pinch_factor(delta: f32) -> Option<f32> {
+    (delta.is_finite() && delta != 0.0).then_some(1.0 + delta)
 }
 
 /// Fixes every digit at one advance width.
@@ -11837,6 +11866,18 @@ fn toolbar_symbol_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pinch is a relative magnification: `0.1` is ten percent in, and the
+    /// events that carry no scale are dropped instead of being applied as 1.
+    #[test]
+    fn a_pinch_delta_is_a_relative_magnification() {
+        let factor = pinch_factor(0.1).expect("a positive delta");
+        assert!((factor - 1.1).abs() < f32::EPSILON);
+        assert_eq!(pinch_factor(-0.25), Some(0.75));
+        assert_eq!(pinch_factor(0.0), None);
+        assert_eq!(pinch_factor(f32::NAN), None);
+        assert_eq!(pinch_factor(f32::INFINITY), None);
+    }
 
     /// The walk a fresh Select Column run starts with at `cursor`.
     fn walk_at(text: &str, cursor: usize) -> ColumnWalk {

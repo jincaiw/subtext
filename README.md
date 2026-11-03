@@ -59,7 +59,7 @@ SubText 保留**用户能看到和能按到的一切** —— 菜单、快捷键
 ```bash
 cargo build            # debug
 cargo build --release  # release
-cargo test --workspace # 791 项测试
+cargo test --workspace # 792 项测试
 ```
 
 要求 Rust 1.99.1（edition 2024；`rust-toolchain.toml` 已钉住，`rustup` 会自己装）。

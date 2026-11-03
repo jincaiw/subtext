@@ -890,8 +890,7 @@ A cross-platform plain-text editor, reimplementing CotEditor's menus, key bindin
 SubText provides all features for free to everyone. You can support the original project this editor reimplements.	SubText 向所有人免费提供所有功能。你可以通过支持本编辑器所重新实现的原项目来支持这项工作。
 The In-App donation feature is available only in CotEditor distributed in the App Store.	App内捐赠功能仅在App Store分发的CotEditor中可用。
 Version {}	版本 {}
-Resources: {} — {}	资源：{} — {}
-Resources: not found; using the built-in fallbacks	未找到资源，正在使用内置的替代项。
+SubText is an open source program licensed under the Apache License, Version 2.0.	SubText 是基于 Apache License 2.0 发布的开源程序。
 # The font picker, its opacity control, and the monospaced warning.
 Select…	选择…
 Transparent	透明

@@ -1177,6 +1177,58 @@ fn typing_then_saving_writes_the_file(cx: &mut TestAppContext) {
     );
 }
 
+/// Backspace, Enter and the arrows reach the document from the keyboard.
+///
+/// Ordinary characters arrive through the input method, so a
+/// `window.input("x")` test passes even when the keymap is empty. Backspace,
+/// Enter and the arrows are looked up in the keymap instead, and the menu
+/// rebuild used to clear the framework's editor bindings along with its own —
+/// which left a document that could type but not erase a character. This test
+/// presses the keys the way a person does, and reads the buffer afterwards.
+#[gpui_kit::test]
+fn backspace_enter_and_arrows_edit_the_document(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "editing-keys", "abc");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+
+        // Type one character: "xabc", caret after the x.
+        window.input("x", cx);
+        window.render_frame(cx);
+
+        // Backspace deletes it again, and the caret is back at the start.
+        window.press("backspace", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("abc".to_owned()),
+            "Backspace should delete the character before the caret"
+        );
+
+        // Right arrow moves over the "a", so the next character lands between
+        // the first letter and the rest.
+        window.press("right", cx);
+        window.render_frame(cx);
+        window.input("Z", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("aZbc".to_owned()),
+            "Right should move the caret one character to the right"
+        );
+
+        // Enter splits the line at the caret.
+        window.press("enter", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("aZ\nbc".to_owned()),
+            "Enter should insert a line break at the caret"
+        );
+    })
+    .expect("editing keys");
+}
+
 /// Closing a sheet gives the keyboard back to the document.
 ///
 /// The design guide's rule is that an overlay returns focus to what opened it.

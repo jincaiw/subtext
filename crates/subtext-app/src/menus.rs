@@ -17,8 +17,9 @@
 //! item that this module re-creates as part of its list — *Insert Snippet*'s
 //! *Edit Snippets…*, *Open Recent*'s *Clear Menu* — and *Script* has none.
 //! [`install`] is the only place the bar is set: it clears the keymap,
-//! lays the built-in bindings back down, adds the snippets' own, and sets the
-//! menu bar with every submenu filled in.
+//! restores the framework's own (context-scoped) bindings, lays the built-in
+//! bindings back down, adds the snippets' own, and sets the menu bar with every
+//! submenu filled in.
 //!
 //! # When it runs
 //!
@@ -90,7 +91,7 @@
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{Action, App, Menu, MenuItem};
+use gpui_kit::{Action, App, KeyBinding, Menu, MenuItem};
 
 use subtext_core::encoding::EncodingList;
 use subtext_core::line_ending::ALL as LINE_ENDINGS;
@@ -394,7 +395,32 @@ pub fn install(cx: &mut App, state: &MenuState) {
     // platform takes it.
     let menus = crate::localization::localize_menus(build(state));
 
+    // `clear_key_bindings` clears the whole keymap, not just the bindings this
+    // function laid down last time. The framework registers the editor's own
+    // keys once at start-up — `gpui-base` binds backspace, Enter, the arrows,
+    // Tab and the word-deletion variants under the `Input` context — and a
+    // rebuild happens every time a document opens, closes or switches, so
+    // without this the first rebuild leaves a document that can type ordinary
+    // characters (those arrive through the input method) but cannot erase or
+    // split a line.
+    //
+    // The framework's bindings are exactly the ones carrying a context:
+    // `keymap::default_bindings`, the snippets and the scripts all register
+    // theirs without one. Restoring them first also keeps the order the
+    // start-up keymap had, where the context-free application bindings come
+    // after and therefore win their key.
+    let framework: Vec<KeyBinding> = {
+        let keymap = cx.key_bindings();
+        let keymap = keymap.borrow();
+        keymap
+            .bindings()
+            .filter(|binding| binding.predicate().is_some())
+            .cloned()
+            .collect()
+    };
+
     cx.clear_key_bindings();
+    cx.bind_keys(framework);
     cx.bind_keys(keymap::default_bindings());
 
     // The shortcuts are checked against the keymap the built-in bindings have
