@@ -42,6 +42,10 @@
   不再依赖手写的线性扫描。
 - **Shell Script 的高亮查询**。查询目录按语法名映射到 `queries/Bash/`，与 CotEditor 的
   `TreeSitterSyntax(name:)` 一致。
+- **Windows / Linux 上的 workspace 测试编译失败**。`subtext-app` 把 macOS 专属的
+  `cocoa` 放进了通用 `dev-dependencies`，`cargo test --workspace` 在非 Apple 平台上会先
+  编译 `core-foundation` 并报 `std::os::unix` 缺失。改为 `cfg(target_os = "macos")` 下的
+  开发依赖；macOS Intel 的发布构建同时改为给 `rust-toolchain.toml` 钉住的工具链安装目标。
 
 ### 验证
 

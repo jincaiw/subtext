@@ -35,10 +35,17 @@ clap.workspace = true
 jiff.workspace = true
 
 [dev-dependencies]
-# `gpui-fast-macos` pins `cocoa = 0.26.0` exactly, while the rest of the graph
-# takes 0.26.1. Naming the version here is what lets both resolve to one.
-cocoa = "=0.26.0"
 # The UI tests build fixtures out of the model types — the encoding list editor
 # is handed an `EncodingList` rather than reading one from the settings — and an
 # integration test can only name a crate the package itself depends on.
 subtext-core.workspace = true
+
+# `gpui-fast-macos` pins `cocoa = 0.26.0` exactly, while the rest of the graph
+# takes 0.26.1. Naming the version here is what lets both resolve to one.
+#
+# macOS only: `cocoa` pulls `core-foundation`, whose `std::os::unix` and
+# `link(kind = "framework")` are Apple-only, so an unconditional dev-dependency
+# made `cargo test --workspace` fail to build on Windows and Linux before a
+# single test ran.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+cocoa = "=0.26.0"

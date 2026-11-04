@@ -145,8 +145,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # `dtolnay/rust-toolchain`'s `targets` input installs the target for the
+      # toolchain it sets up (stable), but `rust-toolchain.toml` overrides the
+      # active toolchain to 1.99.1 inside the checkout — and that is the one
+      # cargo builds with. Run without `--toolchain` so rustup resolves the
+      # override and adds the target where the build will look for it.
+      - name: Install the target for the pinned toolchain
+        run: rustup target add "${{ matrix.target }}"
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-${{ matrix.arch }}
