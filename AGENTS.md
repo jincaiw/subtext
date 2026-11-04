@@ -83,11 +83,11 @@ crates/subtext-app      GPUI 应用，默认 member，产出 subtext 可执行�
 
 | 文件 | 行数 | 边界 | 覆盖它的检查 |
 | --- | --- | --- | --- |
-| `crates/subtext-app/src/workspace.rs` | ~10k | 文档生命周期、窗口框架、面板开关 | `--features ui-tests --test ui` |
+| `crates/subtext-app/src/workspace.rs` | ~12k | 文档生命周期、窗口框架、面板开关 | `--features ui-tests --test ui` |
 | `crates/subtext-app/src/settings_window.rs` | ~2.8k | 5 个设置面板，只读写 `Settings` | `tests/ui.rs` 的 `settings_buttons_keep_their_width`、`mode_pane_switches_stay_on_one_line`、`the_ui_harness_writes_settings_into_a_temporary_directory` |
 | `crates/subtext-app/src/menus.rs` | ~2k | 菜单门控（`MenuGates`）与命令查找 | 文件内 47 条测试 + `menu_contract.rs` 的 6 条契约测试 |
 | `crates/subtext-app/src/outline.rs` | ~2k | 大纲提取，复刻 CotEditor 的隐式语义 | 文件内 57 条测试 |
-| `crates/subtext-core/src/textops.rs` | ~3.3k | 全部文本操作，纯函数 | 文件内单元测试 |
+| `crates/subtext-core/src/textops.rs` | ~3.7k | 全部文本操作，纯函数 | 文件内单元测试 |
 
 这几个文件大是有意为之，不是待拆的债：一个文件对应一条 CotEditor 的语义边界。
 真要拆，先确认边界本身已经清楚了，再动。

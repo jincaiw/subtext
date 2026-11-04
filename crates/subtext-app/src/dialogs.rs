@@ -157,8 +157,12 @@ impl Render for AboutView {
                     )
                     .child(
                         gpui_kit::base::Link::new("about-site")
-                            .href("https://coteditor.com")
-                            .child("coteditor.com"),
+                            .href("https://github.com/jincaiw/subtext")
+                            // One step down from the version line: the full
+                            // URL is 26 characters, and at `text_sm` it came
+                            // within a few pixels of the 200-point column.
+                            .text_xs()
+                            .child("github.com/jincaiw/subtext"),
                     )
                     .child(
                         div()
@@ -183,9 +187,9 @@ impl Render for AboutView {
                     .gap_3()
                     .p_6()
                     .child(div().w_full().text_sm().child(localization::t(
-                        "A cross-platform plain-text editor, reimplementing \
-                                 CotEditor's menus, key bindings, syntax rules and themes \
-                                 on GPUI Kit.",
+                        "A cross-platform plain-text editor with 70 syntax \
+                                 definitions, 14 themes and full keyboard control, built on \
+                                 GPUI Kit.",
                     )))
                     .child(
                         div()

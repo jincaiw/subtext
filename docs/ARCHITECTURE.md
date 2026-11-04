@@ -19,11 +19,11 @@ subtext (workspace)
 
 | Crate | 文件 | 行数 | 测试 | 职责 |
 | --- | --- | --- | --- | --- |
-| `subtext-core` | 22 | 24,126 | 430 | 编码、BOM、换行符、文档模型、文本操作、查找、字符统计 |
+| `subtext-core` | 22 | 24,221 | 432 | 编码、BOM、换行符、文档模型、文本操作、查找、字符统计 |
 | `subtext-syntax` | 5 | 3,136 | 53 | `.cotsyntax` 解析、语法管理器、高亮规则与优先级 |
 | `subtext-theme` | 1 | 482 | 7 | `.cottheme` 解析、颜色解析、主题管理器 |
-| `subtext-app` | 33 | 41,703 | 302 | 窗口、菜单、快捷键、视图、动作分发 |
-| **合计** | **61** | **69,447** | **792** | |
+| `subtext-app` | 33 | 42,005 | 310 | 窗口、菜单、快捷键、视图、动作分发 |
+| **合计** | **61** | **69,844** | **802** | |
 
 表里的数字会随代码漂移，别当契约读。要重新数：
 
@@ -48,8 +48,8 @@ grep -rc '#\[test\]' crates/subtext-*/src/*.rs | awk -F: '{s+=$2} END {print s}'
    ┌────▼─────┐            ┌───────▼───────┐         ┌────────▼────────┐
    │ 数据层    │            │  接线层        │         │  视图层          │
    ├──────────┤            ├───────────────┤         ├─────────────────┤
-   │ actions  │ 168 个动作  │ bridge        │         │ workspace       │
-   │ menu     │ 258 条记录  │ dispatch      │         │ settings_window │
+   │ actions  │ 169 个动作  │ bridge        │         │ workspace       │
+   │ menu     │ 259 条记录  │ dispatch      │         │ settings_window │
    │ keymap   │ 75 条绑定   │               │         │ dialogs         │
    │ settings │ 配置持久化  │               │         │                 │
    │ resources│ 资源发现    │               │         │                 │
@@ -74,7 +74,7 @@ grep -rc '#\[test\]' crates/subtext-*/src/*.rs | awk -F: '{s+=$2} END {print s}'
         │
         ▼
 ② GPUI 按 focus path 找到对应 action 类型
-   （actions.rs 里 168 个类型之一）
+   （actions.rs 里 169 个类型之一）
         │
         ▼
 ③ bridge.rs 的 cx.on_action 收到该类型
@@ -184,24 +184,25 @@ cannot update Entity<Workspace> while it is already being updated
 
 | 模块 | 行数 | 内容 |
 | --- | --- | --- |
-| `actions.rs` | 403 | 168 个动作，分 12 个命名空间（app/file/edit/spelling/format/view/text/find/window/help/snippet/script） |
-| `menu.rs` | 1,384 | 生成物。`app_menus() -> Vec<Menu>` |
+| `actions.rs` | 404 | 169 个动作，分 12 个命名空间（app/file/edit/spelling/format/view/text/find/window/help/snippet/script） |
+| `menu.rs` | 1,394 | 生成物。`app_menus() -> Vec<Menu>` |
 | `keymap.rs` | 816 | 生成物。`default_bindings()` 75 条 + `SHORTCUTS` 显示表 75 行 |
 | `settings.rs` | 1,568 | `Settings`、`SettingsPane`、`EditorOptions`、`WindowOptions`、JSON 持久化 |
+| `update.rs` | 422 | GitHub Releases 查询：版本比较、平台压缩包选择、24 小时间隔，判定逻辑都是纯函数 |
 | `resources.rs` | 161 | 资源目录发现（内置 + 用户目录） |
 
 ### 接线层
 
 | 模块 | 行数 | 内容 |
 | --- | --- | --- |
-| `bridge.rs` | 519 | `Workspaces` 全局注册表、`bind_actions!` 宏为 168 个动作注册 `on_action` |
-| `dispatch.rs` | 486 | `dispatch(name)` 的单一 match，把命令名变成行为 |
+| `bridge.rs` | 520 | `Workspaces` 全局注册表、`bind_actions!` 宏为 169 个动作注册 `on_action` |
+| `dispatch.rs` | 492 | `dispatch(name)` 的单一 match，把命令名变成行为 |
 
 ### 视图层
 
 | 模块 | 行数 | 内容 |
 | --- | --- | --- |
-| `workspace.rs` | 12,178 | `Workspace`：文档管理、工具栏、标签栏、侧栏、检查器、状态栏、查找条 |
+| `workspace.rs` | 12,482 | `Workspace`：文档管理、工具栏、标签栏、侧栏、检查器、状态栏、查找条 |
 | `settings_window.rs` | 4,157 | 5 个设置面板（General / Appearance / Editor / Format / Key Bindings） |
 | `dialogs.rs` | 213 | `AboutView`、`VERSION` |
 
@@ -278,16 +279,16 @@ pub struct Workspace {
 
 ## 7. 测试策略
 
-792 项测试分布如下：
+802 项测试分布如下：
 
 | 位置 | 数量 | 测什么 |
 | --- | --- | --- |
-| `subtext-core` | 430 | 编码探测、BOM 往返、换行符转换、30+ 文本操作、查找、字符统计 |
+| `subtext-core` | 432 | 编码探测、BOM 往返、换行符转换、30+ 文本操作、查找、字符统计 |
 | `subtext-syntax` | 53 | `.cotsyntax` 解析、优先级、终止符、规则匹配 |
 | `subtext-theme` | 7 | 主题解析、颜色回退、深色判定、全部内置主题可加载 |
-| `subtext-app` | 302 | 大纲提取、高亮样式、设置往返、**菜单/快捷键守卫** |
+| `subtext-app` | 310 | 大纲提取、高亮样式、设置往返、**菜单/快捷键守卫** |
 
-另有 43 条 UI 集成测试在 `crates/subtext-app/tests/ui.rs`，默认不跑（`--features ui-tests`）。
+另有 47 条 UI 集成测试在 `crates/subtext-app/tests/ui.rs`，默认不跑（`--features ui-tests`）。
 
 ### 守卫测试（生成的）
 
@@ -302,7 +303,7 @@ fn the_shortcut_table_matches_the_bindings()  // 显示表与绑定表一致
 // menu.rs
 fn the_bar_has_every_top_level_menu()  // 10 个顶层菜单都在
 fn every_item_has_an_action()          // 每个菜单项都映射到了已声明的动作
-fn the_command_table_is_the_whole_menu()  // 168 条命令与菜单表同源
+fn the_command_table_is_the_whole_menu()  // 169 条命令与菜单表同源
 ```
 
 `every_binding_parses` 的存在理由见 [评估报告 §4.1](EVALUATION.md)：

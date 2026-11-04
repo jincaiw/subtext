@@ -3378,11 +3378,13 @@ pub trait DismissOnEscape: InteractiveElement + Sized {
 
 **取列按逻辑行，不按视觉行。** 上游问 `NSLayoutManager` 要同一 wrapped row 上的 glyph 列；
 GPUI 只公开 `visible_row_range`，没有「某偏移在第几个显示行」的查询，display map 是私有的。
-于是 `column_target` 用逻辑行的字符列，短行夹到行尾。未折行时两者完全一致；开了自动折行的长
-行上，上游会沿同一显示行继续，SubText 会走到上一 / 下一**逻辑行**的同列。这条差异写进矩阵，
-不假装没有。四条第单元测试覆盖下移、上移、短行夹取、按字符而非字节取列；UI 测试
+于是 `column_target` 走逻辑行，用**显示列**取位置：制表符展开到下一个 Tab 停靠点，东亚宽字符
+记 2 列，组合字符记 0 列，与编辑器画出来的一致；短行夹到行尾。未折行时两者完全一致；开了自动
+折行的长行上，上游会沿同一显示行继续，SubText 会走到上一 / 下一**逻辑行**的同列。这条差异写进
+矩阵，不假装没有。五条单元测试覆盖下移、上移、短行夹取、宽字符与制表符；UI 测试
 `select_column_down_adds_a_caret_on_each_line` 连按两次再键入 `X`，断言三行都在同一列插入了
-字符 —— 多光标真的生效，而不只是选区数量变了。
+字符 —— 多光标真的生效，而不只是选区数量变了；`select_column_lines_up_wide_characters_with_what_is_painted`
+用「名称 状态 / Alpha ready」证明中英文混排时停靠的是画出来的第 4 列，而不是第 2 个字符。
 
 **LaTeX 大纲换了一条路。** 上游的 LaTeX 大纲来自 `1024jp/tree-sitter-latex` 的 `swiftPackage`
 分支；crates.io 的 `tree-sitter-latex` 0.1.0 在打包时漏了 `src/scanner.c`，parser 引用的 12 个
@@ -4756,7 +4758,7 @@ theme 7、UI 41。
 | tabbing 首项不显示系统当前偏好 | 上游在 *Respect System Setting* 后用次要颜色附上 `NSWindow.userTabbingPreference.label`；读它要 AppKit 的 `NSUserDefaults`，SubText 没有绑定 objc2。选择本身照常生效（§22.58）。 |
 | 不透明度滑块没有刻度 | 上游轨道下有 0.1 步长的刻度；gpui-component 的 `Slider` 没有刻度槽。宽度已对齐上游的 260 pt 上限（Appearance 面板用 7.5 rem 标签列，§22.56）；精确值也可走 64 pt 的百分比输入框。 |
 | 书写方向与竖排布局不可设置 | 上游分别设 `NSTextView.baseWritingDirection` 与 `NSLayoutManager.TextLayoutOrientation.vertical`。GPUI 的 bidi shaping 只按字符排列，没有段落基准方向；排版只有横向。菜单与工具栏项保留，触发时说明原因（§22.54）。 |
-| 列选择按逻辑行而不是视觉行 | 上游 `addSelectedColumn` 用 `NSLayoutManager` 的 wrapped row 与 glyph 列；GPUI 只公开 `visible_row_range`，没有「偏移 → 显示行」的查询。`select_column` 按逻辑行 + 字符列，短行夹到行尾；未折行时与上游一致（§22.54）。 |
+| 列选择按逻辑行而不是视觉行 | 上游 `addSelectedColumn` 用 `NSLayoutManager` 的 wrapped row 与 glyph 列；GPUI 只公开 `visible_row_range`，没有「偏移 → 显示行」的查询。`select_column` 按逻辑行 + 显示列（Tab 停靠点、宽字符 2 列），短行夹到行尾；未折行时与上游一致（§22.54）。 |
 | 编码注册表与上游默认列表的残余差异 | 已逐条对齐（§8.9f）：上游 60 条默认列表里 **40 条照搬**——名字按 Foundation 的 `localizedName` 校正（12 条改名）、新补 1 条（Russian (DOS) / cp866）、把 4 对重复条目合并成 4 条（windows-1250、ISO 8859-2、8859-4、8859-9 各有一对被拆在两组里）、另有 6 条降级出菜单；**22 条如实缺席**（11 条 Mac OS codec：MacJapanese、MacChineseTrad/Simp、MacKorean、macArabic、macGreek、macHebrew、macCyrillic、macCentralEurRoman、macTurkish、macIcelandic；Latin-US (DOS) 的 cp437；NextStep Latin；ASCII；EUC-TW；5 条被超集 codec 覆盖的 DOS/Big5-E：DOSJapanese/DOSKorean/DOSChineseTrad/DOSChineseSimplif/Big5-E；）。§17 补上了 Unicode (UTF-16)/(UTF-32) 两条。菜单另有 **5 条是超集近似**（§19 之后）：两条 Shift JIS → cp932、GB 2312 → GBK、Korean (EUC) → cp949、Big 5 HKSCS → WHATWG Big 5（HKSCS 映射到真实码点而非 PUA）。名字说一套、codec 是另一套这件事无法消除——`encoding_rs` 只有 WHATWG 的 codec 集合——但每一项都在 §8.9f 的表里写明。 |
 | Quick Actions 的行字形是替代品 | 上游给菜单命令画 SF Symbol `filemenu.and.selection`、给脚本画 AppleScript 字形；SubText 用组件库里最近的一对 `SquareMenu` / `SquareTerminal`，同一个方框。详见 §8.9e。 |
 | `Script` 菜单的四处偏差 | 无修饰键行为（上游 Option 打开 / Option+Shift 显示，GPUI 菜单项不带修饰键状态，点击恒为运行）；无 tooltip（上游的 `"Option-click to open script in editor."`）；`tell application "CotEditor"` 无处可去（SubText 不暴露 scripting dictionary）；事件脚本（`CotEditorHandlers` 的 `documentOpened` / `documentSaved`）未实现。目录变化由 2 秒轮询代替 `NSFilePresenter`。详见 §8.9d。 |

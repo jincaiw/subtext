@@ -6,7 +6,12 @@
 //! reading it directly is what keeps the two applications' menus identical
 //! rather than merely similar.
 //!
-//! 258 items: 27 submenus, 168 commands,
+//! One item is not in the storyboard: *Check for Updates…*, which
+//! `UpdaterManager.swift` inserts into the application menu at launch.
+//! The generator adds it in the same place, so this bar is the one
+//! CotEditor actually shows rather than the one its storyboard declares.
+//!
+//! 259 items: 27 submenus, 169 commands,
 //! 52 separators and 11 placeholders. The placeholders
 //! are the items CotEditor fills in from the system or at runtime — Services,
 //! the Format popups, the Script menu — and they stay visible and greyed
@@ -32,6 +37,7 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
             name: "SubText".into(),
             items: vec![
                 MenuItem::action("About SubText", actions::app::ShowAboutPanel),
+                MenuItem::action("Check for Updates…", actions::app::CheckForUpdates),
                 MenuItem::action("Donate to SubText…", actions::app::ShowDonationWindow),
                 MenuItem::separator(),
                 MenuItem::action("Settings…", actions::app::ShowSettingsWindow),
@@ -596,9 +602,9 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
 /// brings the runtime items with it. See [`crate::menus::commands`].
 ///
 /// This table is the compile-time record of that bar: every command the
-/// storyboard names, and the action each one runs. It is what makes the
-/// two applications' menus comparable at a glance, and a test holds the
-/// live bar against it.
+/// storyboard names, plus the ones its own code inserts, and the action
+/// each one runs. It is what makes the two applications' menus
+/// comparable at a glance, and a test holds the live bar against it.
 pub struct Command {
     /// Where the command sits, e.g. `Format > Syntax`.
     ///
@@ -618,17 +624,21 @@ pub struct Command {
 /// than the one the storyboard was copied from.
 pub const APP_MENU_TITLE: &str = "SubText";
 
-/// Every command the storyboard names, in menu order.
+/// Every command the bar offers, in menu order.
 ///
 /// The greyed placeholders are not here: CotEditor fills those in from the
 /// system or at runtime, and a placeholder has no action to run. This is
-/// the storyboard's own record, not the list the Quick Actions bar reads —
+/// the bar's own record, not the list the Quick Actions bar reads —
 /// that one is [`crate::menus::commands`], and the two are held together
 /// by a test.
 pub const COMMANDS: &[Command] = &[
     Command {
         path: "SubText > About SubText",
         action: "ShowAboutPanel",
+    },
+    Command {
+        path: "SubText > Check for Updates…",
+        action: "CheckForUpdates",
     },
     Command {
         path: "SubText > Donate to SubText…",
@@ -1345,7 +1355,7 @@ mod tests {
             .iter()
             .map(count)
             .sum();
-        assert_eq!(total, 172);
+        assert_eq!(total, 173);
     }
 
     /// Every command the bar can offer is one the menu bar has.
@@ -1354,7 +1364,7 @@ mod tests {
     /// missing from either would be a generator bug rather than a typo.
     #[test]
     fn the_command_table_is_the_whole_menu() {
-        assert_eq!(COMMANDS.len(), 168);
+        assert_eq!(COMMANDS.len(), 169);
         let mut paths: Vec<_> = COMMANDS.iter().map(|c| c.path).collect();
         paths.sort_unstable();
         paths.dedup();

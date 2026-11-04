@@ -10,11 +10,11 @@
 
 | 维度 | CotEditor | SubText | 状态 |
 | --- | --- | --- | --- |
-| 菜单结构 | `Main.storyboard` 258 项 | `menu.rs` 258 项 | ✅ 逐项一致 |
+| 菜单结构 | `Main.storyboard` 258 项 | `menu.rs` 259 项（258 项 + Sparkle 在启动时插入应用菜单的 *Check for Updates…*） | ✅ 逐项一致 |
 | 顶层菜单 | 28 个路径 | 28 个路径 | ✅ |
-| 命令项 | 168 | 168 | ✅ |
+| 命令项 | 168 | 169 | ✅ |
 | 快捷键 | 75 条 | 75 条 | ✅ 键位一致（storyboard 里三条 base64 键位在 §8.20 补上） |
-| 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 176 个类型化动作（`actions.rs`：168 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
+| 动作类型 | 155 个 `@objc` selector（storyboard 实测：170 个 `<action>` 元素、去重 155 个） | 177 个类型化动作（`actions.rs`：169 个单元动作 + 8 个带载荷的动作） | 🔁 拆分更细 |
 | 语法定义 | 70 个 `.cotsyntax` | 同一批文件 | ✅ 直接复用 |
 | 语法着色 | `Highlighter` | ✅ 两条来源：47 个语法用 `Highlights.json` 的正则规则；**21 个用 tree-sitter 查询**（`queries/<Name>/highlights.scm`；19 种生效，SQL 与 Kotlin 的查询与公开语法对不上）。颜色经 `highlight::project_theme` 投影进组件主题 —— 面板渲染的 `Editor` 每帧都从那里取样式，在编辑器状态上设的样式会被覆盖（§22.6） |
 | 主题 | 14 个 `.cottheme` | 同一批文件 | ✅ 直接复用 |
@@ -27,6 +27,7 @@
 | 功能 | CotEditor 实现 | SubText | 状态 |
 | --- | --- | --- | --- |
 | 关于面板 | `orderFrontStandardAboutPanel:` | `AboutView`（`dialogs.rs`） | 🔁 |
+| 检查更新 | Sparkle（`UpdaterManager` 在启动时把菜单项插到 *About* 之后，每 24 小时查一次 appcast） | `crate::update`：读 GitHub Releases，启动时按 Settings 里的时间戳决定是否查询，*General* 面板的两个开关同时生效；对话框给出版本号，*Download* 打开本平台压缩包的下载地址 | 🔁 上游由 Sparkle 就地替换 `SubText.app`；本应用未签名，不静默替换正在运行的 bundle，改为交浏览器下载 |
 | 设置窗口 | `SettingsWindowController`（9 面板） | `SettingsWindow`（9 面板，标签 / 顺序 / 分组逐项对齐） | ✅ |
 | 服务 | `NSMenu` Services | `MenuItem::os_submenu(_, SystemMenuType::Services)` | ✅ 交系统填 |
 | 隐藏 / 隐藏其他 / 全部显示 | `NSApplication` | 交窗口系统处理 | 🔁 |
@@ -73,7 +74,8 @@
 | 选择单词 | `select_word` | ✅ |
 | 选择段落 | `select_line` | ✅ |
 | 选择包围符号 | `select_enclosing_symbols` | ✅ |
-| 向上/下扩展列选择 | `select_column(true/false)` | ✅ 真多光标：`EditorState::add_selection` 在上一行 / 下一行的同一列加一个插入点，键入落在每一行。上游按**视觉行**（软换行后的行片段）取列，GPUI 没有公开的视觉行接口，这里按**逻辑行 + 字符列**走；未折行时两者一致，见 §22.54 |
+| Option 拖拽矩形选择 | `gpui-base` 的 `EditorState`：⌥ 按下定位列、拖动扩展成块，键入落在块内每一行的同一列 | ✅ 与上游 `EditorTextView` 的 `.option` 分支一致（⌥⇧ 同效）；UI 测试 `option_dragging_selects_a_block_and_typing_fills_it`。⌥ 单击加插入点由同一状态机提供。上游的 ⌘+单击切换插入点**未做**：引擎没有公开的“位置 → 文本偏移”接口，见文末缺口 |
+| 向上/下扩展列选择 | `select_column(true/false)` | ✅ 真多光标：`EditorState::add_selection` 在上一行 / 下一行的同一列加一个插入点，键入落在每一行。列号是**显示列**（制表符展开到 Tab 停靠点、东亚宽字符记 2 列），与画出来的一致；上游按**视觉行**（软换行后的行片段）取列，GPUI 没有公开的视觉行接口，这里按**逻辑行**走；未折行时两者一致，见 §22.54 |
 | 按行拆分选区 | `split_selection_by_lines` | ✅ |
 | 菜单校验 | `menu_contract` | ✅ 命令覆盖由 `cargo test` 常设把关（生成表 → bridge 绑定 → dispatch 分支）。**按状态置灰**：七项跟着状态走 —— *Straighten Quotes*（空选区）、*Select Previous/Next Outline Item*（前后有没有条目）、*Toggle Comment / Inline Comment / Block Comment / Uncomment*（是否可编辑、语法有没有对应分隔符、选区里有没有可去掉的注释 —— `textops::can_uncomment` 复刻上游 `canUncomment(partly: true)`）。生成器把条件烘进条目，工作区用 `cx.observe(editor)` 跟踪并在翻转时重建菜单栏；大纲那两项读的是文档缓存的抽取结果（§22.46），注释四项读 `Syntax::comment_delimiters` 与当前选区所在的整行。*Toggle Comment* 的**标题**也跟着变：整段都注释掉时显示 *Uncomment*、否则 *Comment Out*，照上游 `validateUserInterfaceItem`（标题不看 `isEditable`，见 §22.62） |
 | 括号配对 | `flash_matching_bracket` | ✅ 光标紧跟括号时闪出配对那一个（`matching_symbol_pair` 按对计数嵌套，`()` `{}` `[]`），**每次光标移动都判**，与上游一致：`cx.observe(editor)` 的回调里做，先比选区（一次 range 比较，光标闪烁时不扫配对）再比配对（同一不影响重闪）。见 §22.15 |

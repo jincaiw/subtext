@@ -12,6 +12,7 @@ use crate::line_ending::line_ending_at;
 use crate::unicode_tables;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthChar;
 
 /// A buffer replacement: the new text and where the selection lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2384,6 +2385,62 @@ pub fn offset_of_line(text: &str, line: usize) -> usize {
     text.len()
 }
 
+/// How wide `line[..offset]` looks on screen, in columns.
+///
+/// Tabs advance to the next multiple of `tab_width`, East Asian wide
+/// characters count two, combining marks count zero. *Select Column Up/Down*
+/// uses this rather than a character count so the carets it adds line up
+/// visually: a line of Chinese and a line of Latin text have the same
+/// character column long before they have the same displayed column.
+///
+/// `offset` is a byte offset into `line`; a value past the end (a caret at the
+/// line ending) is clamped to the line. Zero-width joiners are not collapsed,
+/// so an emoji sequence can count wider than the glyph it paints as — the
+/// approximation upstream avoids by asking the layout manager for a glyph
+/// index. See §22.54 in `docs/PLAN.md`.
+pub fn display_column(line: &str, offset: usize, tab_width: usize) -> usize {
+    let tab_width = tab_width.max(1);
+    let end = offset.min(line.len());
+    let mut column = 0;
+    for (index, ch) in line.char_indices() {
+        if index >= end {
+            break;
+        }
+        column += char_display_width(ch, column, tab_width);
+    }
+    column
+}
+
+/// The byte offset in `line` that sits at display `column`.
+///
+/// The inverse of [`display_column`], clamped to the end of the line: a target
+/// column past the last character is the line's end, which is where upstream's
+/// line-fragment placement puts a caret on a line too short for the run.
+/// A column that falls inside a wide character resolves to its start, so the
+/// caret never splits a glyph.
+pub fn offset_for_display_column(line: &str, column: usize, tab_width: usize) -> usize {
+    let tab_width = tab_width.max(1);
+    let mut current = 0;
+    for (index, ch) in line.char_indices() {
+        if current >= column {
+            return index;
+        }
+        let width = char_display_width(ch, current, tab_width);
+        if current + width > column {
+            return index;
+        }
+        current += width;
+    }
+    line.len()
+}
+
+fn char_display_width(ch: char, column: usize, tab_width: usize) -> usize {
+    match ch {
+        '\t' => tab_width - column % tab_width,
+        _ => ch.width().unwrap_or(0),
+    }
+}
+
 /// Line geometry for a whole text, computed once.
 ///
 /// This is the **six-terminator** view — `\r\n`, `\r`, `\n`, NEL, LS, PS —
@@ -3437,6 +3494,44 @@ mod tests {
         assert_eq!(line_and_column(text, 5), (2, 3));
         assert_eq!(offset_of_line(text, 2), 3);
         assert_eq!(offset_of_line(text, 3), 7);
+    }
+
+    #[test]
+    fn display_columns_count_tabs_and_wide_characters() {
+        // Tabs land on the next stop, not one column further.
+        assert_eq!(display_column("\tab", 0, 4), 0);
+        assert_eq!(display_column("\tab", 1, 4), 4);
+        assert_eq!(display_column("\tab", 3, 4), 6);
+        assert_eq!(display_column("a\tb", 3, 8), 9);
+        assert_eq!(display_column("\t", 1, 1), 1, "a one-column tab is a space");
+        // East Asian characters take two columns each.
+        assert_eq!(display_column("名称", "名".len(), 4), 2);
+        assert_eq!(display_column("名称状态", "名称".len(), 4), 4);
+        // Combining marks take none.
+        assert_eq!(display_column("e\u{301}x", "e\u{301}".len(), 4), 1);
+        // An offset past the end is a caret at the line's end.
+        assert_eq!(display_column("abc", 99, 4), 3);
+    }
+
+    #[test]
+    fn display_column_offsets_round_trip_and_clamp() {
+        assert_eq!(offset_for_display_column("abcdef", 2, 4), 2);
+        assert_eq!(offset_for_display_column("\tab", 4, 4), 1);
+        assert_eq!(offset_for_display_column("\tab", 3, 4), 0, "inside a tab");
+        assert_eq!(offset_for_display_column("名称状态", 4, 4), "名称".len());
+        assert_eq!(offset_for_display_column("名称状态", 3, 4), "名".len());
+        assert_eq!(offset_for_display_column("abc", 99, 4), 3, "clamped to end");
+
+        let line = "a\tb名称\n";
+        for offset in [0, 1, 2, 3, 4, 7, 10, 11] {
+            let column = display_column(line, offset, 4);
+            let back = offset_for_display_column(line, column, 4);
+            assert_eq!(
+                display_column(line, back, 4),
+                column,
+                "offset {offset} should keep its column"
+            );
+        }
     }
 
     #[test]

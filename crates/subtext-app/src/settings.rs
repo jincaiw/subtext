@@ -473,6 +473,14 @@ pub struct GeneralOptions {
     pub suppresses_inconsistent_line_ending_alert: bool,
     pub enable_automatic_update_checks: bool,
     pub checks_updates_for_beta: bool,
+    /// When the last update check *finished*, in seconds since the Unix epoch.
+    ///
+    /// This is Sparkle's `SULastCheckTime`, kept for the same reason: a daily
+    /// automatic check has to survive the application being restarted, and the
+    /// settings file is the only thing here that outlives a launch. `None` —
+    /// never checked, including every settings file written before this
+    /// existed — is due immediately.
+    pub last_update_check: Option<u64>,
 }
 
 impl Default for GeneralOptions {
@@ -491,6 +499,7 @@ impl GeneralOptions {
             suppresses_inconsistent_line_ending_alert: false,
             enable_automatic_update_checks: true,
             checks_updates_for_beta: false,
+            last_update_check: None,
         }
     }
 }

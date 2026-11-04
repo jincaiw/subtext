@@ -59,6 +59,7 @@ pub mod snippets;
 pub mod sort_sheet;
 pub mod surround_sheet;
 pub mod toolbar;
+pub mod update;
 pub mod workspace;
 
 use std::path::PathBuf;
@@ -247,6 +248,13 @@ fn open_main_window(
     let _ = handle.update(cx, |_, window, _| {
         workspace::resize_window_to_saved_size(window, &saved_size, last_size);
     });
+
+    // The daily update check, started where the application starts rather than
+    // in the workspace constructor: `Workspace::new_with_paths` is also what
+    // every UI test builds, and a test must not reach the network. The check
+    // itself is throttled against the settings file, so launching twice in one
+    // day asks GitHub once — the same schedule Sparkle keeps.
+    workspace.update(cx, |workspace, cx| workspace.check_for_updates(true, cx));
 
     // A manual smoke for the panels no test can reach; see
     // `Workspace::panel_sweep`. `SUBTEXT_PANEL_PEEK=<n>` opens panel n and

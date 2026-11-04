@@ -57,9 +57,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, AnyElement, App, AppContext as _, Context, DefiniteLength, Div, ElementId, Entity,
-    ExternalPaths, Focusable as _, Font, FontFeatures, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement as _, PinchEvent, Render, SharedString,
+    Anchor, AnyElement, App, AppContext as _, Context, Div, ElementId, Entity, ExternalPaths,
+    Focusable as _, Font, FontFeatures, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement as _, PinchEvent, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, TextRun,
     Transformation, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
     WindowOptions, div, hsla, percentage, px, rems, size,
@@ -903,7 +903,12 @@ pub struct Workspace {
 struct ColumnWalk {
     /// The document the run belongs to.
     document: DocumentId,
-    /// Character column, counted from the start of the line.
+    /// Display column from the start of the line: tabs expanded to the
+    /// document's tab width, East Asian wide characters counted as two.
+    ///
+    /// Counting what the editor paints is what upstream gets by asking for a
+    /// glyph column; counting characters lined carets up only on text with a
+    /// single character width.
     column: usize,
     /// 1-based line numbers of the topmost and bottommost carets.
     top: usize,
@@ -917,10 +922,16 @@ struct ColumnWalk {
 ///
 /// CotEditor asks the layout manager for the same glyph column on the visual
 /// row above or below. SubText has no public visual-row API, so this walks
-/// logical lines and counts characters; on unwrapped text the two agree, and
-/// on a wrapped line this lands at the same character column of the previous
-/// logical line instead of the same wrapped row. See §22.54.
-fn column_target(text: &str, walk: ColumnWalk, up: bool) -> Option<(usize, ColumnWalk)> {
+/// logical lines and uses the display column — the same one the editor paints
+/// — rather than a character count. On unwrapped text the two agree, and on a
+/// wrapped line this lands at the same display column of the previous logical
+/// line instead of the same wrapped row. See §22.54.
+fn column_target(
+    text: &str,
+    walk: ColumnWalk,
+    tab_width: usize,
+    up: bool,
+) -> Option<(usize, ColumnWalk)> {
     let line_count = text.matches('\n').count() + 1;
     let target = if up {
         walk.top.checked_sub(1)?
@@ -937,10 +948,8 @@ fn column_target(text: &str, walk: ColumnWalk, up: bool) -> Option<(usize, Colum
         .map_or(text.len(), |index| start + index);
     // A shorter line takes the caret at its end, which is what upstream's
     // line-fragment placement does.
-    let offset = text[start..end]
-        .char_indices()
-        .nth(walk.column)
-        .map_or(end, |(index, _)| start + index);
+    let offset =
+        start + textops::offset_for_display_column(&text[start..end], walk.column, tab_width);
 
     let mut walk = walk;
     if up {
@@ -2842,6 +2851,7 @@ impl Workspace {
         let editor = document.editor().clone();
         let cursor = editor.read(cx).cursor().min(text.len());
 
+        let tab_width = self.settings.tab_width;
         let walk = match self.column_walk {
             Some(walk)
                 if walk.document == document_id
@@ -2855,7 +2865,11 @@ impl Workspace {
                 let line_start = text[..cursor].rfind('\n').map_or(0, |index| index + 1);
                 ColumnWalk {
                     document: document_id,
-                    column: text[line_start..cursor].chars().count(),
+                    column: textops::display_column(
+                        &text[line_start..],
+                        cursor - line_start,
+                        tab_width,
+                    ),
                     top: text[..cursor].matches('\n').count() + 1,
                     bottom: text[..cursor].matches('\n').count() + 1,
                     top_offset: cursor,
@@ -2864,7 +2878,7 @@ impl Workspace {
             }
         };
 
-        let Some((offset, walk)) = column_target(&text, walk, up) else {
+        let Some((offset, walk)) = column_target(&text, walk, tab_width, up) else {
             return;
         };
         editor.update(cx, |state, cx| state.add_selection(offset..offset, cx));
@@ -6645,6 +6659,168 @@ impl Workspace {
         }
     }
 
+    /// Look for a newer release — *Check for Updates…*, and the launch check.
+    ///
+    /// `automatic` is the launch path. It honours the General pane's *Check for
+    /// updates automatically* switch and the one-day interval, and it does not
+    /// turn a failed request into a dialog: a launch is not a question, and a
+    /// laptop without a network would otherwise answer it with an alert every
+    /// morning. Asking for the check explicitly ignores both — that is what
+    /// asking means — but still reads the beta channel, which is a choice about
+    /// *what* to offer rather than about *when* to look.
+    pub fn check_for_updates(&mut self, automatic: bool, cx: &mut Context<Self>) {
+        if crate::update::is_checking(cx) {
+            if !automatic {
+                self.notice(localization::t("Checking for updates…"), cx);
+            }
+            return;
+        }
+        if automatic {
+            if !self.settings.general.enable_automatic_update_checks {
+                return;
+            }
+            if !crate::update::check_is_due(
+                self.settings.general.last_update_check,
+                crate::update::now_seconds(),
+            ) {
+                return;
+            }
+        } else {
+            self.notice(localization::t("Checking for updates…"), cx);
+        }
+
+        crate::update::begin(cx);
+        let http = cx.http_client();
+        let allow_prerelease = self.settings.general.checks_updates_for_beta;
+        cx.spawn(async move |this, cx| {
+            let result = crate::update::check(http, allow_prerelease).await;
+            // Clear the application-wide flag before reporting: the workspace
+            // that asked may have closed while the request was in flight, and
+            // the flag belongs to the application, not to the window.
+            cx.update(crate::update::finish);
+            this.update_in(cx, |workspace, window, cx| {
+                workspace.finish_update_check(result, automatic, window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Report what [`Self::check_for_updates`] found.
+    ///
+    /// A successful answer — update or not — records the time, which is what
+    /// makes the daily interval start again; a failed one records nothing, so
+    /// the next launch asks again. Sparkle's `SULastCheckTime` is the same
+    /// field with the same meaning.
+    fn finish_update_check(
+        &mut self,
+        result: anyhow::Result<Option<crate::update::Update>>,
+        automatic: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let found = match result {
+            Ok(found) => {
+                self.settings.general.last_update_check = Some(crate::update::now_seconds());
+                let _ = self.settings.save();
+                found
+            }
+            Err(error) => {
+                log::warn!("could not check for updates: {error:#}");
+                if !automatic {
+                    self.show_alert(
+                        localization::t("Couldn’t check for updates."),
+                        &error.to_string(),
+                        window,
+                        cx,
+                    );
+                }
+                return;
+            }
+        };
+
+        match found {
+            Some(update) => self.announce_update(update, window, cx),
+            None if automatic => {}
+            None => {
+                let installed = crate::update::current_version().to_string();
+                self.show_alert(
+                    localization::t("You’re up to date!"),
+                    &localization::tf("SubText {} is the latest version.", &[&installed]),
+                    window,
+                    cx,
+                );
+            }
+        }
+    }
+
+    /// The dialog that offers a newer release.
+    ///
+    /// The button opens the archive for this platform in the default browser.
+    /// It does not install anything: see the boundary at the top of
+    /// [`crate::update`] for why an unsigned bundle is not something this
+    /// window may replace underneath the running process.
+    fn announce_update(
+        &mut self,
+        update: crate::update::Update,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let installed = crate::update::current_version().to_string();
+        // The tag, not the parsed version: a prerelease is `0.5.0-beta.1`, and
+        // `Version` keeps only the numbers it compares by. Offering "0.5.0"
+        // for a beta would name a release that does not exist.
+        let released = update
+            .tag
+            .strip_prefix('v')
+            .or_else(|| update.tag.strip_prefix('V'))
+            .unwrap_or(&update.tag)
+            .to_owned();
+        let title = SharedString::from(localization::t("A new version of SubText is available."));
+        let description = SharedString::from(localization::tf(
+            "SubText {} is available. The installed version is {}.",
+            &[&released, &installed],
+        ));
+        let download = SharedString::from(localization::t("Download"));
+        let later = SharedString::from(localization::t("Later"));
+        let url = update.download_url;
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            // Cloned per call: the builder is `Fn` because a window may lay the
+            // same dialog out more than once, and `on_ok` below consumes its
+            // own copy.
+            let url = url.clone();
+            alert
+                .title(title.clone())
+                .description(description.clone())
+                .show_cancel(true)
+                .ok_text(download.clone())
+                .cancel_text(later.clone())
+                .on_ok(move |_, _, cx| {
+                    cx.open_url(&url);
+                    true
+                })
+        });
+    }
+
+    /// A one-button alert that only says something.
+    fn show_alert(
+        &mut self,
+        title: &str,
+        description: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = SharedString::from(title.to_owned());
+        let description = SharedString::from(description.to_owned());
+        let ok = SharedString::from(localization::t("OK"));
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            alert
+                .title(title.clone())
+                .description(description.clone())
+                .ok_text(ok.clone())
+        });
+    }
+
     /// Show the Donation panel — CotEditor's *CotEditor ▸ Donate…*.
     ///
     /// Upstream's panel is a fixed 560-point `NSPanel` that stays visible when
@@ -10162,10 +10338,19 @@ impl Workspace {
         // Magnification is the window's own multiple on the type size — what
         // Format ▸ Bigger Font changes — not a change to the saved size.
         let text_size = px(base_size * document.font_scale);
-        // CotEditor's `lineHeightMultiple`: a multiple of the font's own
-        // leading, which is exactly what `Fraction` means to GPUI.
-        let line_height =
-            DefiniteLength::Fraction(self.settings.appearance.line_height.clamp(0.1, 10.0));
+        // CotEditor's `lineHeightMultiple` multiplies the font's own line
+        // height — `NSLayoutManager.defaultLineHeight(for:)`, its ascent plus
+        // descent — not its point size. GPUI's `DefiniteLength::Fraction`
+        // multiplies the point size, so a 13-point font at 1.3 came out at
+        // 16.9 points instead of the 19.5–20.8 AppKit gives, and the document
+        // read as cramped. Resolve the multiple against the metrics here and
+        // hand over pixels.
+        let line_height = line_height_pixels(
+            cx,
+            &font_family,
+            text_size,
+            self.settings.appearance.line_height,
+        );
         let document_id = document.id;
 
         let panes: Vec<gpui_kit::AnyElement> = document
@@ -10265,6 +10450,53 @@ impl Workspace {
 /// delta would poison the document's accumulated scale for good.
 fn pinch_factor(delta: f32) -> Option<f32> {
     (delta.is_finite() && delta != 0.0).then_some(1.0 + delta)
+}
+
+/// The drawn line height for `font`, in pixels.
+///
+/// CotEditor's Appearance setting is a multiple of the font's *default line
+/// height*, which AppKit takes from the font's ascent and descent. GPUI has no
+/// "natural line height" of its own — a `Fraction` line height multiplies the
+/// point size — so the natural height is read from the text system and the
+/// multiple applied here. A font whose metrics this platform cannot report
+/// falls back to the point size, which is the old behaviour rather than zero.
+fn line_height_pixels(
+    cx: &App,
+    family: &str,
+    font_size: gpui_kit::Pixels,
+    multiple: f32,
+) -> gpui_kit::Pixels {
+    let text_system = cx.text_system();
+    let font = Font {
+        family: family.to_owned().into(),
+        ..Font::default()
+    };
+    let font_id = text_system.resolve_font(&font);
+    // Platforms disagree on the sign of `descent` — Apple reports the distance
+    // below the baseline, the headless one reports a negative value — and only
+    // the distance matters here.
+    let natural =
+        text_system.ascent(font_id, font_size) + text_system.descent(font_id, font_size).abs();
+    px(scaled_line_height(
+        f32::from(natural),
+        f32::from(font_size),
+        multiple,
+    ))
+}
+
+/// Apply CotEditor's `lineHeightMultiple` to a font's natural line height.
+fn scaled_line_height(natural: f32, font_size: f32, multiple: f32) -> f32 {
+    let natural = if natural.is_finite() && natural > 0.0 {
+        natural.max(font_size)
+    } else {
+        font_size
+    };
+    let multiple = if multiple.is_finite() {
+        multiple.clamp(0.1, 10.0)
+    } else {
+        1.3
+    };
+    (natural * multiple).round()
 }
 
 /// Fixes every digit at one advance width.
@@ -11879,13 +12111,30 @@ mod tests {
         assert_eq!(pinch_factor(f32::INFINITY), None);
     }
 
+    /// The Appearance setting multiplies the font's own line height, the way
+    /// CotEditor's `lineHeightMultiple` does — not its point size.
+    #[test]
+    fn the_line_height_multiple_is_taken_from_the_font_metrics() {
+        // Menlo at 13 points: ascent 12.07 + descent 3.07, and CotEditor's
+        // default 1.3 therefore draws rows 19.5 points apart, not 16.9.
+        assert_eq!(scaled_line_height(15.14, 13.0, 1.3), 20.0);
+        // A font whose metrics the platform cannot report keeps the old
+        // point-size behaviour instead of collapsing to zero.
+        assert_eq!(scaled_line_height(0.0, 13.0, 1.3), 17.0);
+        assert_eq!(scaled_line_height(f32::NAN, 13.0, 1.3), 17.0);
+        // A broken multiple falls back to CotEditor's default rather than
+        // painting unbounded rows.
+        assert_eq!(scaled_line_height(15.14, 13.0, f32::NAN), 20.0);
+        assert_eq!(scaled_line_height(15.14, 13.0, 100.0), 151.0);
+    }
+
     /// The walk a fresh Select Column run starts with at `cursor`.
     fn walk_at(text: &str, cursor: usize) -> ColumnWalk {
         let line_start = text[..cursor].rfind('\n').map_or(0, |index| index + 1);
         let line = text[..cursor].matches('\n').count() + 1;
         ColumnWalk {
             document: DocumentId(1),
-            column: text[line_start..cursor].chars().count(),
+            column: textops::display_column(&text[line_start..], cursor - line_start, 4),
             top: line,
             bottom: line,
             top_offset: cursor,
@@ -11960,42 +12209,56 @@ mod tests {
     fn column_selection_steps_down_at_the_same_column() {
         let text = "alpha\nbeta\ngamma";
         // Caret after "al".
-        let (offset, walk) = column_target(text, walk_at(text, 2), false).expect("one line down");
+        let (offset, walk) =
+            column_target(text, walk_at(text, 2), 4, false).expect("one line down");
         assert_eq!(offset, 8, "line two, column two: 6 + 2");
         assert_eq!((walk.top, walk.bottom), (1, 2));
 
         // A second press grows from the new bottom, not from the caret it
         // started with.
-        let (offset, walk) = column_target(text, walk, false).expect("another line down");
+        let (offset, walk) = column_target(text, walk, 4, false).expect("another line down");
         assert_eq!(offset, 13, "line three, column two: 11 + 2");
         assert_eq!((walk.top, walk.bottom), (1, 3));
 
-        assert_eq!(column_target(text, walk, false), None, "no fourth line");
+        assert_eq!(column_target(text, walk, 4, false), None, "no fourth line");
     }
 
     #[test]
     fn column_selection_steps_up_and_stops_at_the_top() {
         let text = "alpha\nbeta\ngamma";
-        let (offset, walk) = column_target(text, walk_at(text, 8), true).expect("one line up");
+        let (offset, walk) = column_target(text, walk_at(text, 8), 4, true).expect("one line up");
         assert_eq!(offset, 2, "line one, column two");
         assert_eq!((walk.top, walk.bottom), (1, 2));
 
-        assert_eq!(column_target(text, walk, true), None, "no line above");
+        assert_eq!(column_target(text, walk, 4, true), None, "no line above");
     }
 
     #[test]
     fn column_selection_clamps_to_a_shorter_line() {
         let text = "abcdef\nxy\n";
-        let (offset, walk) = column_target(text, walk_at(text, 4), false).expect("one line down");
+        let (offset, walk) =
+            column_target(text, walk_at(text, 4), 4, false).expect("one line down");
         assert_eq!(offset, 9, "the end of \"xy\", not past the newline");
         assert_eq!(walk.bottom, 2);
     }
 
     #[test]
-    fn column_selection_counts_characters_not_bytes() {
+    fn column_selection_uses_display_columns() {
+        // Two wide glyphs are four columns, so the caret after them lines up
+        // with the fourth character of the Latin line — not with its second,
+        // which is where a character count used to put it.
         let text = "🐱🐱x\nabcd\n";
-        let (offset, _) = column_target(text, walk_at(text, 8), false).expect("one line down");
-        assert_eq!(offset, 12, "two characters into \"abcd\": 10 + 2");
+        let (offset, _) = column_target(text, walk_at(text, 8), 4, false).expect("one line down");
+        assert_eq!(offset, 14, "four display columns into \"abcd\": 10 + 4");
+    }
+
+    #[test]
+    fn column_selection_expands_tabs_to_their_stop() {
+        // The caret after a tab is at display column four, so the caret added
+        // on the next line takes four characters of it.
+        let text = "\tab\nabcdef\n";
+        let (offset, _) = column_target(text, walk_at(text, 1), 4, false).expect("one line down");
+        assert_eq!(offset, 8, "line two at column four: 4 + 4");
     }
 
     #[test]

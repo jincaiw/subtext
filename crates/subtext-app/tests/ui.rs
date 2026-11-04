@@ -22,9 +22,9 @@
 use gpui_kit::component::button::Button;
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
 use gpui_kit::{
-    AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, WindowBounds,
-    WindowOptions, div, point, px, size,
+    AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
+    Window, WindowBounds, WindowOptions, div, point, px, size,
 };
 
 /// A minimal view with one button and one label, so this file can prove the
@@ -1146,6 +1146,237 @@ fn select_column_down_adds_a_caret_on_each_line(cx: &mut TestAppContext) {
         );
     })
     .expect("select a column");
+}
+
+/// A column run lines carets up by what is painted, not by character count.
+///
+/// Two Chinese characters are four columns wide, so the caret that starts
+/// after them must land after four characters of the Latin line below. A run
+/// that counted characters instead would stop after two, which is the bug this
+/// test exists for.
+#[gpui_kit::test]
+fn select_column_lines_up_wide_characters_with_what_is_painted(cx: &mut TestAppContext) {
+    let (window, workspace) =
+        open_workspace_with_document(cx, "column-wide", "名称 状态\nAlpha ready");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let editor = workspace
+            .read_with(cx, |workspace, _| workspace.active_editor().cloned())
+            .expect("the opening document should have an editor");
+        // Right after "名称", which is display column four.
+        let after_name = "名称".len();
+        editor.update(cx, |state, cx| {
+            state.set_selected_range(after_name..after_name, cx)
+        });
+
+        workspace.update(cx, |workspace, cx| workspace.select_column(false, cx));
+        window.render_frame(cx);
+        window.input("X", cx);
+        window.render_frame(cx);
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some("名称X 状态\nAlphXa ready".to_owned()),
+            "the caret should land after four painted columns, not two characters"
+        );
+    })
+    .expect("select a column across wide characters");
+}
+
+/// Option-dragging down the text paints a block selection, and typing fills
+/// it on every row.
+///
+/// This is the gesture itself, not the *Select Column* commands: upstream's
+/// `EditorTextView` starts a rectangular selection when Option is held during
+/// a drag. The block is invisible to this test, so it is proved the same way
+/// as the command test — by typing into it and reading the buffer back. The
+/// column is read from a plain click at the same point first, so the assertion
+/// does not have to guess which character the drag started on.
+#[gpui_kit::test]
+fn option_dragging_selects_a_block_and_typing_fills_it(cx: &mut TestAppContext) {
+    let (window, workspace) =
+        open_workspace_with_document(cx, "option-drag", "abcdefghij\nabcdefghij\nabcdefghij");
+
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let editor = workspace
+            .read_with(cx, |workspace, _| workspace.active_editor().cloned())
+            .expect("the opening document should have an editor");
+        let (text_bounds, line_height) = editor.read_with(cx, |state, _| {
+            (
+                state.text_bounds().expect("the editor should be laid out"),
+                state.line_height().expect("the editor should be laid out"),
+            )
+        });
+
+        // A point inside the first row, far enough from the gutter that the
+        // column is not zero.
+        let x = text_bounds.origin.x + line_height * 3.0;
+        let first_row = text_bounds.origin.y + line_height * 0.5;
+        let last_row = first_row + line_height * 2.0;
+        let start = point(x, first_row);
+        let end = point(x, last_row);
+
+        // Where a plain click at that point puts the caret: the column the
+        // block should use. Nothing is typed, so the document is untouched.
+        let click = |window: &mut Window, cx: &mut gpui_kit::App| {
+            let _ = window.dispatch_event(
+                gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                    position: start,
+                    modifiers: Modifiers::default(),
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            let _ = window.dispatch_event(
+                gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent {
+                    position: start,
+                    modifiers: Modifiers::default(),
+                    button: MouseButton::Left,
+                    click_count: 1,
+                }),
+                cx,
+            );
+        };
+        click(window, cx);
+        window.render_frame(cx);
+        let column = editor.read_with(cx, |state, _| state.cursor());
+        assert!(
+            column > 0,
+            "the block must start inside the first row to prove the gesture; got column {column}"
+        );
+
+        // Option alone, which is the modifier upstream's `EditorTextView`
+        // reads for a rectangular selection. Nothing is typed between the
+        // click and the drag, so the caret is the block's own start point.
+        let block = Modifiers {
+            alt: true,
+            ..Modifiers::default()
+        };
+        let _ = window.dispatch_event(
+            gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                position: start,
+                modifiers: block,
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        let _ = window.dispatch_event(
+            gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent {
+                position: end,
+                modifiers: block,
+                pressed_button: Some(MouseButton::Left),
+            }),
+            cx,
+        );
+        let _ = window.dispatch_event(
+            gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent {
+                position: end,
+                modifiers: block,
+                button: MouseButton::Left,
+                click_count: 1,
+            }),
+            cx,
+        );
+        window.render_frame(cx);
+        window.input("X", cx);
+        window.render_frame(cx);
+
+        let expected = ["abcdefghij", "abcdefghij", "abcdefghij"]
+            .map(|line| {
+                let column = column.min(line.len());
+                format!("{}X{}", &line[..column], &line[column..])
+            })
+            .join("\n");
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| workspace.active_text(cx)),
+            Some(expected),
+            "one keystroke should fill the block on every dragged row"
+        );
+    })
+    .expect("option-drag a block");
+}
+
+/// CotEditor multiplies the font's own line height, not the point size.
+///
+/// `lineHeightMultiple` at 1.3 over a 13-point font is 19.5–20.8 points on
+/// macOS, because AppKit multiplies `ascent + descent`. GPUI's
+/// `DefiniteLength::Fraction` multiplies the point size instead, which gave
+/// 16.9 — visibly tighter than the same setting upstream. The editor now
+/// receives pixels computed the way AppKit computes them.
+///
+/// The harness resolves a fallback font whose natural line height is 16.9
+/// points, so the editor measures 22 pixels here; the same multiplication with
+/// the point size would give 16.9, which is what the bound rules out.
+#[gpui_kit::test]
+fn the_line_height_is_the_fonts_own_height_times_the_multiple(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "line-height", "one\ntwo\nthree");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let editor = workspace
+            .read_with(cx, |workspace, _| workspace.active_editor().cloned())
+            .expect("the opening document should have an editor");
+        let line_height = editor.read_with(cx, |state, _| {
+            state.line_height().expect("the editor should be laid out")
+        });
+        assert!(
+            f32::from(line_height) > 17.5,
+            "13pt at a multiple of 1.3 is 16.9 when the point size is multiplied \
+             and 22 when the font's own line height is; got {line_height:?}"
+        );
+    })
+    .expect("measure the line height");
+}
+
+/// A check that cannot reach the server reports itself when the user asked for
+/// it, and stays silent when the launch asked instead.
+///
+/// The test application's HTTP client answers every request with a 404, so both
+/// paths run without a network. That is deliberate: an automatic check that
+/// popped a dialog would greet a laptop with no connection with an alert every
+/// morning, and the difference between the two calls is the whole point.
+#[gpui_kit::test]
+fn a_manual_update_check_reports_a_failed_request_but_the_launch_check_does_not(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::component::WindowExt as _;
+
+    let (window, workspace) = open_workspace_with_document(cx, "update-check", "hello");
+
+    // The launch path: it runs, fails, and says nothing.
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        workspace.update(cx, |workspace, cx| workspace.check_for_updates(true, cx));
+    })
+    .expect("start the launch check");
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        assert!(
+            !window.has_active_dialog(cx),
+            "a failed automatic check must not interrupt the user"
+        );
+    })
+    .expect("read the automatic result");
+
+    // The menu path: the same failure, reported.
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        workspace.update(cx, |workspace, cx| workspace.check_for_updates(false, cx));
+    })
+    .expect("start the manual check");
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| {
+        assert!(
+            window.has_active_dialog(cx),
+            "a check the user asked for must say what went wrong"
+        );
+    })
+    .expect("read the manual result");
 }
 
 /// Typing then saving writes the new text to the file.

@@ -28,7 +28,7 @@
 //! [`Workspace::refresh_menus`](crate::workspace::Workspace::refresh_menus) is
 //! the caller for that: it compares a [`MenuSignature`] and returns early when
 //! nothing it cares about has moved, because a rebuild is a full
-//! `App::set_menus` over 258 items and every tab switch goes through it.
+//! `App::set_menus` over 259 items and every tab switch goes through it.
 //! [`Workspace::rebuild_menus`](crate::workspace::Workspace::rebuild_menus) is
 //! for the other case — the settings themselves changed, so there is nothing
 //! worth comparing.

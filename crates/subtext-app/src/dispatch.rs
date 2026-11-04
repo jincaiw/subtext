@@ -74,6 +74,12 @@ impl Workspace {
             // version; the release notes for that same version are the same
             // text, so the page it links to is the honest equivalent.
             "ShowWhatsNew" => cx.open_url(RELEASES_URL),
+            // Sparkle's item, which CotEditor's updater inserts into the
+            // application menu. A manual check ignores the daily interval and
+            // the automatic-check switch — asking for it is the consent — but
+            // it does read the beta channel, which is a choice about *what* to
+            // offer rather than *when* to look.
+            "CheckForUpdates" => self.check_for_updates(false, cx),
             "ShowDonationWindow" => self.show_donation(cx),
             "Hide" => cx.hide(),
             "HideOtherApplications" => cx.hide_other_apps(),
@@ -462,7 +468,7 @@ impl Workspace {
 /// send a SubText bug to the wrong place.
 const PROJECT_URL: &str = "https://github.com/jincaiw/subtext";
 const ISSUES_URL: &str = "https://github.com/jincaiw/subtext/issues";
-const RELEASES_URL: &str = "https://github.com/jincaiw/subtext/releases";
+const RELEASES_URL: &str = crate::update::RELEASES_URL;
 pub(crate) const DOCS_URL: &str = "https://github.com/jincaiw/subtext/tree/main/docs";
 
 /// A deterministic stand-in for a random source, so `Shuffle Lines` is

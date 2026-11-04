@@ -351,6 +351,7 @@ pub fn install(cx: &mut App) {
         actions::app::ShowDonationWindow => "ShowDonationWindow",
         actions::app::ShowSettingsWindow => "ShowSettingsWindow",
         actions::app::ShowWhatsNew => "ShowWhatsNew",
+        actions::app::CheckForUpdates => "CheckForUpdates",
         actions::app::Hide => "Hide",
         actions::app::HideOtherApplications => "HideOtherApplications",
         actions::app::UnhideAllApplications => "UnhideAllApplications",

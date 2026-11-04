@@ -6,6 +6,45 @@
 
 ---
 
+## [0.5.0] — 2026-11-04
+
+### 新增
+
+- **软件更新检查**。*SubText ▸ 检查更新…* 位于 *关于* 之后，正是 Sparkle 在 CotEditor 启动时
+  插入该菜单项的位置。它读本项目的 GitHub Releases，按版本号比较；启动时另有一次自动检查，遵守
+  *General* 面板的“自动检查更新”与“有预发布版本时更新”两个开关，并把上次检查的时间写进设置——
+  与 Sparkle 的 24 小时间隔同义。手动检查不受间隔与自动开关限制，失败时弹窗说明原因；自动检查
+  失败只记日志，不打断启动。发现新版本时对话框给出版本号，*Download* 打开本平台压缩包的下载地址；
+  本应用未签名，不静默替换正在运行的 bundle（`update.rs` 开头写了这条边界）。
+- **列编辑**。⌥ 拖拽画出矩形选区，随后键入的内容落在块内每一行的同一列；*Edit ▸ Select Column
+  Up/Down* 的多光标扩展照旧。UI 测试 `option_dragging_selects_a_block_and_typing_fills_it` 用真实
+  鼠标事件覆盖拖拽与输入。
+- **列选择按显示列对齐**。*Select Column Up/Down* 以前按字符数取列：中文与英文混排时，从
+  “名称 状态”里取的列落到 “Alpha ready” 上会偏两个字符。现在列号按编辑器画出来的宽度计算——制表符
+  展开到 Tab 停靠点、东亚宽字符记两列、组合字符记零列——两行文字看起来在第几列，插入点就落在第几列。
+  UI 测试 `select_column_lines_up_wide_characters_with_what_is_painted` 覆盖中英混排。
+
+### 修复
+
+- **行距不再过窄**。CotEditor 的 `lineHeightMultiple` 乘的是字体自身的行高（ascent + descent），
+  而 GPUI 的 `DefiniteLength::Fraction` 乘的是字号：13pt × 1.3 得 16.9pt，上游是 19.5–20.8pt，
+  同一设置在本应用里明显更挤。现在先向文本系统取字体的自然行高再乘倍率，按像素交给编辑器。
+- **关于窗口不再显示上游站点**。左栏的 `coteditor.com` 换成本项目的仓库地址
+  `github.com/jincaiw/subtext`；右栏的描述改成介绍 SubText 自身（语法定义、主题、键盘操作与
+  GPUI Kit），不再出现 CotEditor 字样。
+
+### 验证
+
+- 单元测试与 UI 集成测试全部通过，clippy 零自有警告；新增
+  `option_dragging_selects_a_block_and_typing_fills_it`、
+  `select_column_lines_up_wide_characters_with_what_is_painted`、
+  `the_line_height_is_the_fonts_own_height_times_the_multiple`、
+  `a_manual_update_check_reports_a_failed_request_but_the_launch_check_does_not`、
+  `update` 模块的六条纯函数测试（版本比较、平台压缩包选择、24 小时间隔、GitHub 返回体的解析）
+  与 `display_column` / `offset_for_display_column` 的两条往返测试。
+
+---
+
 ## [0.4.1] — 2026-11-04
 
 0.4.0 发布后发现的三个缺陷的修复版。

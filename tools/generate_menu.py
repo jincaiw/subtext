@@ -63,6 +63,26 @@ SYSTEM_MENUS = {
     "CotEditor > Services": ("Services", "Services"),
 }
 
+# The one item that is not in the storyboard.
+#
+# CotEditor's updater is Sparkle, and `UpdaterManager.swift` inserts its
+# "Check for Updates…" item into the application menu at index 1 — right after
+# About — because the menu belongs to the application and the updater is
+# installed from code. SubText's updater is `crate::update`, and this is the
+# same item in the same place. It is added here rather than to `menu.json` so
+# that table stays the storyboard dump it is documented to be; a row invented
+# there would be indistinguishable from one CotEditor actually has.
+RUNTIME_MENU_ITEMS = [
+    {
+        "path": SOURCE_APP_MENU_TITLE,
+        "after": "About CotEditor",
+        "title": "Check for Updates…",
+        "mods": [],
+        "key": "",
+        "action": "checkForUpdates:",
+    },
+]
+
 # Cocoa compares a key equivalent against the character a key produces, so a
 # shortcut is stored as the character, not as the key. GPUI compares physical
 # keys. These are the characters a US layout only produces with Shift held.
@@ -323,6 +343,28 @@ def rebrand(text: str) -> str:
     return text.replace(SOURCE_APP_MENU_TITLE, APP_MENU_TITLE)
 
 
+def with_runtime_items(entries: list[dict]) -> list[dict]:
+    """The storyboard dump plus the items CotEditor's own code inserts."""
+    entries = list(entries)
+    for item in RUNTIME_MENU_ITEMS:
+        anchor = next(
+            (
+                index
+                for index, entry in enumerate(entries)
+                if entry["path"] == item["path"] and entry["title"] == item["after"]
+            ),
+            None,
+        )
+        if anchor is None:
+            fail(
+                f"no {item['after']!r} in {item['path']!r} to put "
+                f"{item['title']!r} after"
+            )
+        row = {key: value for key, value in item.items() if key != "after"}
+        entries.insert(anchor + 1, row)
+    return entries
+
+
 def item_key(path: str, title: str) -> str:
     """The chain an entry's own children would sit under."""
     if path == "":
@@ -459,6 +501,11 @@ class Renderer:
             "//! storyboard *is* the source of truth for CotEditor's menu structure, so",
             "//! reading it directly is what keeps the two applications' menus identical",
             "//! rather than merely similar.",
+            "//!",
+            "//! One item is not in the storyboard: *Check for Updates…*, which",
+            "//! `UpdaterManager.swift` inserts into the application menu at launch.",
+            "//! The generator adds it in the same place, so this bar is the one",
+            "//! CotEditor actually shows rather than the one its storyboard declares.",
             "//!",
             f"//! {len(self.entries)} items: {submenus} submenus, {commands} commands,",
             f"//! {separators} separators and {placeholders} placeholders. The placeholders",
@@ -604,9 +651,9 @@ class Renderer:
             "/// brings the runtime items with it. See [`crate::menus::commands`].",
             "///",
             "/// This table is the compile-time record of that bar: every command the",
-            "/// storyboard names, and the action each one runs. It is what makes the",
-            "/// two applications' menus comparable at a glance, and a test holds the",
-            "/// live bar against it.",
+            "/// storyboard names, plus the ones its own code inserts, and the action",
+            "/// each one runs. It is what makes the two applications' menus",
+            "/// comparable at a glance, and a test holds the live bar against it.",
             "pub struct Command {",
             "    /// Where the command sits, e.g. `Format > Syntax`.",
             "    ///",
@@ -626,11 +673,11 @@ class Renderer:
             "/// than the one the storyboard was copied from.",
             f"pub const APP_MENU_TITLE: &str = {rust_string(APP_MENU_TITLE)};",
             "",
-            "/// Every command the storyboard names, in menu order.",
+            "/// Every command the bar offers, in menu order.",
             "///",
             "/// The greyed placeholders are not here: CotEditor fills those in from the",
             "/// system or at runtime, and a placeholder has no action to run. This is",
-            "/// the storyboard's own record, not the list the Quick Actions bar reads —",
+            "/// the bar's own record, not the list the Quick Actions bar reads —",
             "/// that one is [`crate::menus::commands`], and the two are held together",
             "/// by a test.",
             "pub const COMMANDS: &[Command] = &[",
@@ -842,7 +889,7 @@ class Renderer:
 
 
 def main() -> None:
-    entries = json.loads(MENU_JSON.read_text(encoding="utf-8"))
+    entries = with_runtime_items(json.loads(MENU_JSON.read_text(encoding="utf-8")))
     namespaces = load_action_namespaces()
     renderer = Renderer(entries, namespaces)
 

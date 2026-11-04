@@ -886,7 +886,7 @@ Drag your favorite items into the toolbar…	将喜爱的项目拖入工具栏�
 # (`Localizables/Panels/Donation.xcstrings`) with the project renamed where
 # SubText's own sentence already differs; the version line is upstream's
 # `Version %@ (%@)` without the build number SubText does not have.
-A cross-platform plain-text editor, reimplementing CotEditor's menus, key bindings, syntax rules and themes on GPUI Kit.	一个跨平台纯文本编辑器，用 GPUI Kit 重新实现 CotEditor 的菜单、快捷键、语法规则与主题。
+A cross-platform plain-text editor with 70 syntax definitions, 14 themes and full keyboard control, built on GPUI Kit.	一个跨平台纯文本编辑器，内置 70 种语法定义与 14 套主题，支持完整的键盘操作，由 GPUI Kit 构建。
 SubText provides all features for free to everyone. You can support the original project this editor reimplements.	SubText 向所有人免费提供所有功能。你可以通过支持本编辑器所重新实现的原项目来支持这项工作。
 The In-App donation feature is available only in CotEditor distributed in the App Store.	App内捐赠功能仅在App Store分发的CotEditor中可用。
 Version {}	版本 {}
@@ -898,3 +898,15 @@ Font: {}	字体：{}
 The selected font doesn’t seem to be monospaced.	所选字体似乎不是等宽字体。
 Do you want to use it for the monospaced font?	要在等宽字体中使用它吗？
 File size	文件尺寸
+# The updater. "Check for Updates…" is a menu item Sparkle inserts at launch,
+# so its translation is upstream's own (`MainMenu.xcstrings`); the rest are the
+# sentences this implementation writes, with SubText's name in them.
+Check for Updates…	检查更新…
+Checking for updates…	正在检查更新…
+A new version of SubText is available.	SubText 有新版本可用。
+SubText {} is available. The installed version is {}.	SubText {} 已可下载，当前版本为 {}。
+Download	下载
+Later	稍后
+You’re up to date!	已是最新版本！
+SubText {} is the latest version.	SubText {} 是最新版本。
+Couldn’t check for updates.	无法检查更新。

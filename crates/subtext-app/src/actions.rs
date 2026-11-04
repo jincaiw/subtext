@@ -25,6 +25,7 @@ pub mod app {
             ShowDonationWindow,
             ShowSettingsWindow,
             ShowWhatsNew,
+            CheckForUpdates,
             Hide,
             HideOtherApplications,
             UnhideAllApplications,
