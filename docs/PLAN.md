@@ -2751,7 +2751,7 @@ CotEditor 的那份，不翻译、不重写。分工与上游一致 —— **查
 | 20.3 | 格式器移植：Markdown（去 `#`）、CSS（截到 `{`/`;`）、HTML（取文本节点、跨标签的空隙算空格）、Bash（补 `()`）、C/C++（从声明子里挖出名字与参数表）、Python（只认类体里的赋值，函数带参数） | ✅ |
 | 20.4 | 层级归一化 `normalize_levels`：**两条路径都跑**（正则与 tree-sitter），跳级标题压缩、`title` 排在标题下一层、分隔符用临时栈不打断嵌套 | ✅ |
 | 20.5 | 去掉 SubText 自己的「同跨度同标签合并」——上游不去重 | ✅ |
-| 20.6 | 常设门禁 `every_bundled_query_parses_against_its_grammar`：逐个跑 21 份查询，解析失败即测试失败；唯一的例外（SQL）**写进测试**而不是跳过，语法追上那天测试会提醒 | ✅ |
+| 20.6 | 常设门禁 `every_bundled_query_parses_against_its_grammar`：逐个跑 22 份查询，解析失败即测试失败；门禁先断言语法存在，缺语法不再算「通过」（§22.64）。历史上的唯一例外 SQL 已随语法版本消失，`NOT_YET` 是空数组 | ✅ |
 
 **顺手抓到的一条真 bug**：`SyntaxKind` 被写成 `code` / `markup` / `none`，而上游只有
 `general` / `code`。七个说 `"kind": "general"` 的语法（Markdown、LaTeX、BibTeX、BBCode、
@@ -2817,7 +2817,7 @@ CotEditor 剩下的十四个全部搬完，于是每一行都按它自己语言�
 ## 阶段 22 — 二十一种语言的着色，与「着色从来没画出来」这件事
 
 §20 接上 tree-sitter 时只做了一半：查 `resources/queries/` 是为了大纲，但同一个目录里还有
-`highlights.scm`。核对之后才看清一件事 —— **70 个语法里有 23 个根本没有 `Highlights.json`**（其中 21 个有 tree-sitter 查询，另外三个 —— Plain Text、Git Ignore、Shell Script —— 本来就不需要）。
+`highlights.scm`。核对之后才看清一件事 —— **70 个语法里有 23 个根本没有 `Highlights.json`**（其中 21 个有 tree-sitter 查询；Plain Text 与 Git Ignore 两种本来就不需要。Shell Script 当时被误算进「不需要」，见 §22.64）。
 SubText 的 `Syntax::load` 在这种情况下只剩 `Edit.json` 里的注释与字面量分隔符，于是
 Rust、Python、JavaScript、TypeScript、C、C++、Java、Go、Ruby、PHP、Swift、Kotlin、Scala、
 Lua、Bash、SQL、Makefile、C#、HTML、CSS 这些语言的缓冲区里，**关键字、类型、数字、函数名
@@ -2841,14 +2841,15 @@ capture 名不用翻译：`highlights.scm` 用的就是 CotEditor 的十个 toke
 | 22.2 | `Highlighter` 变成两种来源：`Source::Rules`（正则）与 `Source::Query`（tree-sitter），`rehighlight` 各走各的；两种来源的冲突规则相反，注释里写清了为什么 | ✅ |
 | 22.3 | `Syntax::highlight_query()`，与 `outline_query()` 共用 `query_file()` | ✅ |
 | 22.4 | `CotHighlighter::new` 按 `has_highlight_file` 选择来源；没有规则文件的语法走查询 | ✅ |
-| 22.5 | 常设门禁 `every_bundled_highlight_query_parses`：21 份查询逐个跑，SQL 与 Kotlin 作为具名例外写进测试 | ✅ |
+| 22.5 | 常设门禁 `every_bundled_highlight_query_parses`：21 份 highlight 查询逐个跑；SQL 与 Kotlin 曾经是具名例外，当前钉住的语法版本下两者都能解析（§22.64 复核） | ✅ |
 
 **语法版本又换了一次**：Lua 从 0.4.1 升到 0.5.0 —— 0.4.1 的节点表里没有 `global`，高亮查询
 解析不了；0.5.0 有，而大纲查询在两个版本下都通过。Kotlin 没有这个运气：上游用
 `fwcd/tree-sitter-kotlin` 0.3.8，crates.io 上只发布到 0.3.5（依赖 tree-sitter 0.20 的 API，
 与本仓的 0.26 不是同一个类型）；`-sg` 与 `-ng` 两个替代品都把查询要的节点名改了
 （`type_identifier`、`break`）。所以 Kotlin 的**大纲**能用（`-sg` 解析得动 outline 查询），
-**高亮**用不了，仍只有注释与字面量 —— 写进了缺口表。
+**高亮**用不了，仍只有注释与字面量 —— 写进了缺口表。（§22.64 复核时这条已经不成立：
+当前 `tree-sitter-kotlin-sg` 0.4 两套查询都能解析，`fun` / `val` 都有颜色。）
 
 ### 22.6 顺带发现：编辑器**从来没画过**任何着色
 
@@ -2880,7 +2881,7 @@ capture 名不用翻译：`highlights.scm` 用的就是 CotEditor 的十个 toke
 Zed 主题里 `syntax` 块那样的 JSON 再解析。`set_theme` 与启动路径都调一次（启动时若用户没有
 保存过主题，也要用默认主题投影，否则就是黑字白底）。
 
-**验证**：718 项测试全绿（710 → 718）。21 种语言里有 19 种真的画得出来（SQL 与 Kotlin 的查询与公开语法对不上，见缺口表）。新增 7 条：Rust 的关键字/类型/字符串/注释/数字各就各位、
+**验证**：718 项测试全绿（710 → 718）。21 种语言里有 19 种真的画得出来（SQL 与 Kotlin 的查询与公开语法对不上，见缺口表；§22.64 复核时两者都已能着色）。新增 7 条：Rust 的关键字/类型/字符串/注释/数字各就各位、
 span 互不重叠且字符串里的 `//` 不变成注释、点号后缀取一级名、同节点取后声明的 pattern、
 21 份查询的解析门禁、两个词汇表各就各位、以及投影出来的调色板能在组件的名字下取到颜色。
 **截图确认**（这是本轮唯一能证明它真的画出来的方式）：
@@ -4743,12 +4744,122 @@ theme 7、UI 41。
 
 ---
 
+### 22.64 语法高亮复核：LaTeX 一个颜色都没有，Shell Script 只剩注释
+
+**复核方式**：把 70 个 `.cotsyntax` 按 `Regex/Highlights.json` 分成两群（47 个有、23 个没有），
+对每个有 `queries/<Name>/highlights.scm` 的语法跑真实文本，打印 `Highlighter` 的每个 span。
+查出三处：
+
+1. **LaTeX 零着色。** 查询里 148 个 capture 写清了命令、环境、数学与注释，但
+   `ts_outline::language` 没有 `LaTeX` 分支：`highlights()` 在 `language()` 返回 `None` 时
+   直接 `Ok(空)`，于是连 `%` 注释都是正文色。crates.io 的 `tree-sitter-latex` 0.1.0 装不上
+   （§22.54），但 `codebook-tree-sitter-latex` 0.6.1 可以：它只依赖 `tree-sitter-language`，
+   与 0.26 的 ABI 兼容，`highlights.scm` 与 `outline.scm` 都能解析。
+2. **Shell Script 只有注释与字符串。** 上游 `TreeSitterSyntax.init?(name:)` 把
+   `"Shell Script"` 映射到 `.bash`，查询目录因此读 `queries/Bash/`；SubText 既没有这个别名，
+   也没有 `queries/Shell Script/`，`queries/Bash/` 于是一直是死数据。现在别名只在
+   `ts_outline::grammar_name()` 定义一次，`Syntax::query_file`、`language()` 与 `extract()`
+   共用它。
+3. **两扇查询门禁都在空转。** 没有语法时 `highlights()` / `extract()` 返回 `Ok(空)`，而
+   `every_bundled_*_query_parses` 只断言 `Ok` —— LaTeX 的查询就是这样「通过」了 22 个版本。
+   门禁现在先断言 `language(name).is_some()`，缺语法的查询会被点名。
+
+**LaTeX 大纲一并换回查询。** 语法接上后，§22.54 的线性扫描（`outline.rs::latex_entries`，
+212 行）没有存在理由，删掉。`LaTeXOutlineFormatter` 的两条规则移进 `ts_outline`：标题取命令
+节点的 `text` 字段（`\caption` 取 `long`），剥掉外层花括号后折叠空白；原有 5 条大纲测试
+原样通过，其中 `\section[Short]{Long title}`、`\%` 转义与 `subfigure` 排除都由查询本身负责。
+
+**顺带确认**：文档把 SQL 与 Kotlin 列为「查询跑不起来」的例外已经过期 —— 当前钉住的语法版本
+两者都能解析并产出颜色（`SELECT` / `FROM` / `WHERE` 是关键字，`fun` / `val` 是关键字），
+门禁里的 `NOT_YET` 也早就是空数组。
+
+**仍缺的**：内嵌语言（injections）没有跟随。上游对 HTML 里的 `<script>` / `<style>`、PHP 里的
+HTML、Makefile 的 recipe 与 Rust 宏的 token tree 会再跑一次内层语法；SubText 只跑外层查询，
+这些区域按外层颜色画。记进缺口表。
+
+**验证**：`tools/check.sh` 全绿（含 47 条 UI 测试）；新增 3 条测试（LaTeX 高亮、Shell Script
+借用 Bash 查询、Shell Script 大纲），两扇门禁补上语法存在性断言，删除 212 行线性扫描。
+
+---
+
+### 22.65 检查更新从来没有成功过：桌面端拿到的是 NullHttpClient
+
+**现象**：*SubText ▸ Check for Updates…* 弹窗「无法检查更新。」，正文只有
+`error fetching latest release`。
+
+**根因**：不是网络。`gpui_kit::application()` 只在 Web 上装 HTTP 客户端；桌面路径走
+`Application::with_platform(...)`，`gpui-pre` 给它的是 `NullHttpClient`，`send` 恒返回
+`No HttpClient available`。`latest_github_release` 把这个错误包成
+`error fetching latest release`，而 `workspace::finish_update_check` 用 `error.to_string()`
+只印最外层，于是无论网络多好都失败，且看不到原因。模块注释里「reached through the
+application's own HTTP client」这句在当时就是错的。
+
+**修复**：
+
+1. `http::install(cx)` 在 `env_logger` 之后、第一扇窗口之前安装
+   `reqwest_client::ReqwestClient`（GPUI Kit 自己的示例用的就是这个客户端，
+   `gpui-pre-reqwest-client = "=0.3.10"`，与 gpui-kit 0.8.1 钉的 gpui-pre 同版）。
+   User-Agent 是 `SubText/<版本>`，GitHub API 要求它。
+2. API 的匿名配额是**按地址**每小时 60 次，共享出口可能早已用完（本机实测
+   `x-ratelimit-remaining: 0`）。两个通道都失败时改问公开的
+   `releases.atom`（静态页面，无配额），读每个 `<entry>` 的第一个 `<link>` 与
+   `/releases/tag/` 后缀；稳定通道跳过带 `-` 的 tag，beta 通道取较新者。feed 不列
+   assets，所以下载目标是发布页——与「release 没有匹配 asset」时同一条回退。API 与
+   feed 都失败才报错。
+3. 弹窗正文不再印传输层原文：403 / rate limit →「GitHub 暂时限制了发布检查的访问」，
+   其余 →「无法连接 GitHub」。两句都进了 `zh-Hans.tsv`。
+
+**验证**：`tools/check.sh` 全绿；新增 4 条测试（feed 解析、通道选择、403 回退、失败文案），
+并用真实客户端对真实 GitHub 跑过两条路径（API 200 与强制 403 → feed）都为
+`up to date`（0.5.0 即最新）。临时探针已删除。
+
+---
+
+### 22.66 三平台打包与发布：补上 .dmg、.deb/.rpm/AppImage 与统一的 Release workflow
+
+**之前的状态**：macOS 只出 `.app` 与 `.zip`；Linux 只出一个 tar.gz；Windows 的打包步骤写在
+workflow 的 YAML 里，和 macOS 的脚本各说各话；没有 `.dmg`、`.deb`、`.rpm`、`.AppImage`，
+没有 SHA256SUMS，没有统一的发布流程，版本号也只能手改。
+
+**改动**：
+
+1. `tools/package-macos.sh` 增加 `--target`（`aarch64-apple-darwin` / `x86_64-apple-darwin`），
+   用 `hdiutil` 出 UDZO `.dmg`（内含 `/Applications` 符号链接），保留 `ditto` 出的 `.zip`。
+   `APPLE_SIGNING_IDENTITY` 存在时做 hardened-runtime 签名；再加上 `APPLE_ID` /
+   `APPLE_TEAM_ID` / `APPLE_APP_PASSWORD` 时用 `notarytool` 公证并 `stapler` 装订，票据
+   装订后重建两个归档。没有身份时仍做 ad-hoc 签名，并在输出里说明 Gatekeeper 会拦。
+2. `tools/package-linux.sh` 重写：一个安装树（`/usr/bin/subtext` +
+   `/usr/share/subtext/resources` + `.desktop` + hicolor 256px 图标 + 文档）同时喂给
+   `dpkg-deb`、`rpmbuild` 和 appimagetool；`--strict` 让 CI 在缺工具时失败，普通开发机
+   缺 `rpmbuild` 就只出能出的那几种。`Resources::discover` 增加
+   `<exe>/../share/subtext/resources`，让系统安装与 AppImage 找到同一份数据。
+3. `tools/package-windows.ps1`：`target/release/subtext.exe` + 旁边的 `resources/` + 文档
+   打成 `SubText-<版本>-windows-x86_64.zip`。不做安装程序，避免引入 MSI 工具链和注册表写入。
+4. `.github/workflows/release.yml`：tag push 或手动触发。手动不给 tag 时用
+   `tools/bump-version.sh` 只递增补丁号、提交并打 tag；给 tag 时校验它与 `Cargo.toml`
+   一致。macOS 两个架构、Windows、Linux 各自 build/test/package，`publish` 汇总后写
+   `SHA256SUMS`、`gh release create --generate-notes` 并上传。旧的
+   `release-other-platforms.yml` 被它取代，已删除。
+5. `THIRD-PARTY-NOTICES.md` 由 `tools/generate-notices.py` 从 `cargo metadata` 生成，
+   三个平台的包都会带上它。
+
+**验证**：macOS 产物在本机构建并检查了 plist、arch 与包内资源；另外用隔离的 `HOME`
+从 `dist/SubText.app` 启动、打开一份中文 Markdown，确认了资源加载（语法识别为 Markdown）、
+UTF-8 状态栏与中文渲染。`tools/package-linux.sh` 在 Ubuntu 22.04 容器里用同一套安装树
+产出过 `.deb`、`.rpm`、`.AppImage` 与 tar.gz，检查了 control/spec、文件清单与 AppRun
+结构（用占位二进制，不能证明真实二进制可运行）。Linux/Windows 的正式构建与安装只能由
+workflow 的 runner 完成，本机没有对应的系统与工具链。**因此本文不声称
+Linux/Windows 已实际运行**，workflow 里先跑 `cargo test --workspace` 再打包，能证明的
+只是编译与测试通过。
+
+---
+
 ## 已知缺口（不阻塞，但需记账）
 
 | 缺口 | 说明 |
 | --- | --- |
 | 文档窗口只还原尺寸，不还原位置 | 上游 `windowFrameAutosaveName = "Document"` 连位置一起还原。GPUI 的 `window_bounds()` 是翻转坐标（左上原点）的整窗 frame，`MacWindowState::open` 把它交给 `initWithContentRect:` 时没有换算 y，喂回去会整窗下移一个标题栏高；且没有 `set_position`。位置留给 `default_bounds` 的 25pt 级联（对应上游 `cascadeTopLeft`）。另：尺寸在拖拽停手 250 ms 后才落盘，拖完立刻退出会丢这一次（§22.55）。 |
-| LaTeX 大纲由线性扫描提供，不是 tree-sitter | 上游用 `1024jp/tree-sitter-latex` 的分支；crates.io 上的 `tree-sitter-latex` 0.1.0 缺外部扫描器符号，装不上，而 1024jp fork 的 parser.c 有 44 MB。`outline.rs::latex_entries` 按 `outline.scm` 的语义扫描标题、`\title` 与 `\caption`，测试覆盖层级 / 排除 / 注释 / 可选参数。差异：语法上不成立的参数里的 `\section` 也会被收进来（§22.54）。 |
+| 内嵌语言（injections）没有跟随 | 上游对 HTML 的 `<script>` / `<style>`、PHP 里的 HTML、Makefile 的 recipe、Rust 宏的 token tree 用 `injections.scm` 再跑内层语法；SubText 只跑外层查询，这些区域按外层颜色画（HTML 里的 JS 是 HTML 的颜色），`queries/*/injections.scm` 已在资源里但未接（§22.64）。 |
 | 打印 / 页面设置没有实现 | 上游用 AppKit 的 `NSPrintOperation` 与 `PrintTextView`；GPUI 不暴露打印面板或页面布局模型，没有可交给系统的对象。菜单保留，触发时说明原因（§22.54）。 |
 | 抗锯齿开关只存不用 | `AppearanceOptions::standard_antialias` / `monospaced_antialias` 与菜单项 `toggle_antialias` 都会翻转并保存，但 GPUI 的文字渲染没有抗锯齿开关，开关不改变绘制。上游对应 `NSTextView.shouldAntialias`（§22.56）。 |
 | 外观模式只存不用 | `document_appearance`（System / Light / Dark）可设置、会保存，但窗口外观仍跟随系统，`.cottheme` 的调色板不按它分叉。上游用它设 `NSAppearance`（§22.56）。 |

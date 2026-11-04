@@ -586,6 +586,60 @@ mod tests {
     }
 
     #[test]
+    fn latex_highlights_through_its_bundled_query() {
+        let syntax = syntax("LaTeX");
+        assert!(!syntax.has_highlight_file, "LaTeX must have no rule file");
+        assert!(
+            syntax.highlight_query().is_some(),
+            "queries/LaTeX/highlights.scm must reach the highlighter"
+        );
+        let mut highlighter = CotHighlighter::new(&syntax);
+        let text = "% note\n\\section{Intro}\n";
+        highlighter.rehighlight_text(text);
+
+        let resolver = CotStyleResolver::new(&Theme::builtin_light());
+        let runs = highlighter.styled_runs(&(0..text.len()), &resolver);
+        let plain = HighlightStyle::default();
+        let styled: Vec<&str> = runs
+            .iter()
+            .filter(|(_, style)| *style != plain)
+            .map(|(range, _)| &text[range.clone()])
+            .collect();
+        assert!(
+            styled.contains(&"% note") && styled.contains(&"\\section{"),
+            "the comment and the command should be coloured, got {styled:?}"
+        );
+    }
+
+    /// CotEditor aliases Shell Script to Bash, and `queries/Bash` is the only
+    /// query directory the bundle can use. Without the alias the bundle's
+    /// colours stopped at the comment and string delimiters.
+    #[test]
+    fn shell_script_borrows_the_bash_queries() {
+        let syntax = syntax("Shell Script");
+        assert!(!syntax.has_highlight_file, "Shell Script has no rule file");
+        assert!(syntax.highlight_query().is_some(), "Bash highlights.scm");
+        assert!(syntax.outline_query().is_some(), "Bash outline.scm");
+
+        let mut highlighter = CotHighlighter::new(&syntax);
+        let text = "# note\nfoo() { echo \"hi\"; }\n";
+        highlighter.rehighlight_text(text);
+
+        let resolver = CotStyleResolver::new(&Theme::builtin_light());
+        let runs = highlighter.styled_runs(&(0..text.len()), &resolver);
+        let plain = HighlightStyle::default();
+        let styled: Vec<&str> = runs
+            .iter()
+            .filter(|(_, style)| *style != plain)
+            .map(|(range, _)| &text[range.clone()])
+            .collect();
+        assert!(
+            styled.contains(&"# note") && styled.contains(&"echo"),
+            "the comment and the command should be coloured, got {styled:?}"
+        );
+    }
+
+    #[test]
     fn styles_tile_the_requested_range() {
         let syntax = syntax("YAML");
         let mut highlighter = CotHighlighter::new(&syntax);

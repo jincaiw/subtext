@@ -63,13 +63,24 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The name CotEditor's tree-sitter registry uses for `syntax`'s grammar.
+///
+/// `TreeSitterSyntax.init?(name:)` aliases "Shell Script" to Bash. The bundle
+/// ships no queries of its own under that name, so `queries/Bash` serves it;
+/// query lookup applies the same alias.
+pub fn grammar_name(syntax: &str) -> &str {
+    match syntax {
+        "Shell Script" => "Bash",
+        other => other,
+    }
+}
+
 /// The grammar for a syntax, by the name CotEditor gives it.
 ///
-/// `None` for the syntaxes whose outline is a regex rule — and for LaTeX, whose
-/// outline is a tree-sitter query too but whose grammar this build does not
-/// carry.
+/// `None` for the syntaxes whose outline and highlighting are regex rules, and
+/// for the ones with neither.
 pub fn language(syntax: &str) -> Option<Language> {
-    Some(match syntax {
+    Some(match grammar_name(syntax) {
         "Bash" => tree_sitter_bash::LANGUAGE.into(),
         "C" => tree_sitter_c::LANGUAGE.into(),
         "C#" => tree_sitter_c_sharp::LANGUAGE.into(),
@@ -80,6 +91,7 @@ pub fn language(syntax: &str) -> Option<Language> {
         "Java" => tree_sitter_java::LANGUAGE.into(),
         "JavaScript" => tree_sitter_javascript::LANGUAGE.into(),
         "Kotlin" => tree_sitter_kotlin_sg::LANGUAGE.into(),
+        "LaTeX" => codebook_tree_sitter_latex::LANGUAGE.into(),
         "Lua" => tree_sitter_lua::LANGUAGE.into(),
         "Makefile" => tree_sitter_make::LANGUAGE.into(),
         "Markdown" => tree_sitter_md::LANGUAGE.into(),
@@ -111,6 +123,7 @@ pub fn supports(syntax: &str) -> bool {
 /// that. An incremental layer would be state to keep correct for a gain nobody
 /// would see on the files this editor is for.
 pub fn extract(syntax: &str, text: &str, query_source: &str) -> Result<Vec<TsItem>, Error> {
+    let syntax = grammar_name(syntax);
     let Some(language) = language(syntax) else {
         return Ok(Vec::new());
     };
@@ -342,6 +355,10 @@ fn format(item: &Item<'_, '_>) -> Option<(String, Range<usize>)> {
         // `HTMLOutlineFormatter`: the item is an element, and its title is the
         // text inside it, not its markup.
         "HTML" => html_title(item.node, text)?,
+        // `LaTeXOutlineFormatter`: the capture is the command node, and the
+        // title is the inside of its braced group — the `text` field for a
+        // heading or `\title`, the `long` field for a `\caption`.
+        "LaTeX" => latex_title(item),
         // `BashOutlineFormatter`: a shell function's name carries no
         // parentheses in the source, so the row adds them.
         "Bash" if function => {
@@ -411,6 +428,35 @@ fn format(item: &Item<'_, '_>) -> Option<(String, Range<usize>)> {
     // does — Markdown only trims, CSS and HTML collapse. Collapsing again here
     // would quietly rewrite a heading's own spacing, which upstream keeps.
     (!title.is_empty()).then_some((title, range))
+}
+
+/// `LaTeXOutlineFormatter.titleRange`: the inside of the braced group named by
+/// the command's field, or the capture itself when the grammar found no group.
+fn latex_title(item: &Item<'_, '_>) -> (String, Range<usize>) {
+    let Some(range) = latex_title_range(item) else {
+        return (
+            collapse(&item.text[item.capture.clone()]),
+            item.capture.clone(),
+        );
+    };
+    (collapse(&item.text[range.clone()]), range)
+}
+
+fn latex_title_range(item: &Item<'_, '_>) -> Option<Range<usize>> {
+    let field = match item.node.kind() {
+        "title_declaration" | "part" | "chapter" | "section" | "subsection" | "subsubsection"
+        | "paragraph" | "subparagraph" => "text",
+        "caption" => "long",
+        _ => return None,
+    };
+    let range = item.node.child_by_field_name(field)?.byte_range();
+    // `innerRange(of:)` strips the braces only when there are two bytes to
+    // strip; a malformed one-byte group keeps its range.
+    Some(if range.len() >= 2 {
+        range.start + 1..range.end - 1
+    } else {
+        range
+    })
 }
 
 /// A name followed by its parameter list.
@@ -1325,6 +1371,13 @@ mod tests {
                 continue;
             }
             let source = std::fs::read_to_string(directory.join("outline.scm")).expect("query");
+            // A missing grammar makes `extract` return an empty list rather
+            // than an error, so without this the gate passes vacuously — the
+            // shape of the LaTeX hole this test now closes.
+            assert!(
+                language(&name).is_some(),
+                "{name} has an outline.scm but no grammar mapped"
+            );
             let result = extract(&name, "", &source);
 
             if NOT_YET.contains(&name.as_str()) {
@@ -1345,9 +1398,5 @@ mod tests {
     #[test]
     fn a_syntax_without_a_grammar_has_no_outline_and_no_complaint() {
         assert_eq!(extract("Plain Text", "text", "").expect("no grammar"), []);
-        assert_eq!(
-            extract("LaTeX", "\\section{One}", "").expect("no grammar"),
-            []
-        );
     }
 }

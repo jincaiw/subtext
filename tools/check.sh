@@ -37,6 +37,12 @@ cargo test -p subtext-app --features ui-tests --test ui --locked
 step "clippy"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
+# The notices file is generated from the lockfile. If a dependency moved, the
+# file a release ships is stale, and stale licence information is worse than
+# none — it looks checked.
+step "third-party notices"
+python3 tools/generate-notices.py --check
+
 if [ "$full" = 1 ]; then
     step "check for linux"
     cargo check --locked --target x86_64-unknown-linux-gnu -p subtext-core

@@ -9,7 +9,7 @@ members = [
 default-members = ["crates/subtext-app"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/jincaiw/subtext"
@@ -28,6 +28,13 @@ subtext-theme = { path = "crates/subtext-theme" }
 # exactly. GPUI Kit supplies the editor widget and the `InputHighlighter`
 # seam we plug into.
 gpui-kit = { version = "0.8.1", default-features = true }
+# The desktop half of the same family: Zed's reqwest-backed `HttpClient`.
+# `gpui_kit::application()` leaves a desktop app with `NullHttpClient`, which
+# fails every request, so the application has to install this one itself. The
+# version is pinned to the `gpui-pre` release GPUI Kit 0.8.1 ships (0.3.10);
+# the crate's own dependencies are pinned just as tightly.
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
+futures = "0.3"
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

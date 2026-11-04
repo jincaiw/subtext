@@ -38,6 +38,10 @@ jobs:
         run: cargo test -p subtext-app --features ui-tests --test ui --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # A dependency change without a regenerated notices file ships stale
+      # licence information. The file is generated from Cargo.lock.
+      - name: Third-party notices
+        run: python3 tools/generate-notices.py --check
       # `cargo check` does not link, so a crate's platform branches
       # (`cfg(unix)`, `cfg(target_os = "macos")` and the fallbacks) can be
       # type-checked for Linux and Windows from a Mac runner.

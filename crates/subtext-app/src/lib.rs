@@ -42,6 +42,7 @@ pub mod find_panel;
 pub mod folder_find;
 pub mod fonts;
 pub mod highlighter;
+pub mod http;
 pub mod keymap;
 pub mod localization;
 pub mod menu;
@@ -107,6 +108,10 @@ pub fn run() {
         .run(move |cx| {
             gpui_kit::init(cx);
             env_logger::try_init().ok();
+            // Before anything can ask for a URL: the platform's default client
+            // refuses every request on desktop, so the update check would fail
+            // with "No HttpClient available" no matter what the network says.
+            http::install(cx);
 
             let resources = resources::Resources::discover();
             let syntaxes = load_syntaxes(resources.as_ref());

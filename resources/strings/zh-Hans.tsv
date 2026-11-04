@@ -910,3 +910,5 @@ Later	稍后
 You’re up to date!	已是最新版本！
 SubText {} is the latest version.	SubText {} 是最新版本。
 Couldn’t check for updates.	无法检查更新。
+GitHub is limiting release checks right now. Try again later.	GitHub 暂时限制了发布检查的访问，请稍后重试。
+Couldn’t reach GitHub. Check the network and try again.	无法连接 GitHub，请检查网络后重试。

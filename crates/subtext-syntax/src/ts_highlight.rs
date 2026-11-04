@@ -1,11 +1,12 @@
 //! Tree-sitter highlighting.
 //!
-//! Twenty-one of CotEditor's seventy syntaxes have no `Highlights.json` at all:
-//! their colours come from a tree-sitter query beside the bundle,
-//! `queries/<Name>/highlights.scm`. SubText used to fall back to the comment and
-//! string delimiters from `Edit.json` for those languages, so a Rust or Python
-//! buffer showed keywords, types, numbers and functions in the plain text
-//! colour — everything but comments and literals.
+//! Twenty-one of CotEditor's seventy syntaxes have no `Regex/Highlights.json`
+//! and take their colours from a tree-sitter query beside the bundle,
+//! `queries/<Name>/highlights.scm`. (Two more, Plain Text and Git Ignore, have
+//! neither and correctly show no colours.) SubText used to fall back to the
+//! comment and string delimiters from `Edit.json` for those languages, so a
+//! Rust or Python buffer showed keywords, types, numbers and functions in the
+//! plain text colour — everything but comments and literals.
 //!
 //! The capture names in those queries are CotEditor's own token names —
 //! `@keywords`, `@types`, `@commands.method` — which is why this module needs no
@@ -304,6 +305,14 @@ mod tests {
             // Both are listed rather than skipped, so the day a grammar catches
             // up the test fails and says so.
             const NOT_YET: [&str; 0] = [];
+            // Without a grammar the query would "parse" against nothing and
+            // this gate would pass on an empty result — which is how LaTeX's
+            // highlight query once shipped unread. The grammar must exist
+            // before the query is worth checking.
+            assert!(
+                ts_outline::language(&name).is_some(),
+                "{name} has a highlights.scm but no grammar mapped"
+            );
             let result = highlights(&name, "", &source);
             if NOT_YET.contains(&name.as_str()) {
                 assert!(result.is_err(), "{name} parses now — wire it up");

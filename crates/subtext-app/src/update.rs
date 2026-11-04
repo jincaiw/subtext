@@ -27,14 +27,25 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use gpui_kit::http_client::HttpClient;
+use anyhow::Context as _;
+use futures::AsyncReadExt as _;
 use gpui_kit::http_client::github::{GithubRelease, latest_github_release};
+use gpui_kit::http_client::{AsyncBody, HttpClient, HttpRequestExt as _, RedirectPolicy, Request};
 use gpui_kit::{App, BorrowAppContext as _, Global};
 
 /// Where the releases are, as `owner/repository` for the API and as a page for
 /// a reader. `dispatch.rs` opens the same page for *What's New*.
 pub const REPOSITORY: &str = "jincaiw/subtext";
 pub const RELEASES_URL: &str = "https://github.com/jincaiw/subtext/releases";
+
+/// The public feed of the same releases.
+///
+/// GitHub's API allows 60 anonymous requests an hour per address, and a shared
+/// address — an office, a carrier NAT — can use them up before this application
+/// asks. The feed is a plain page with no such quota, so a rate-limited check
+/// falls back to it. It lists tags and release pages but not asset names, which
+/// is why a release found here opens its page rather than downloading directly.
+pub const RELEASES_ATOM_URL: &str = "https://github.com/jincaiw/subtext/releases.atom";
 
 /// How long an automatic check waits after the last one.
 ///
@@ -178,6 +189,10 @@ fn platform_asset_suffix() -> &'static str {
 /// stable must not hide a newer stable, and vice versa. `Ok(None)` means the
 /// request worked and this build is current; `Err` is a network or API failure
 /// and is only reported when the user asked for the check.
+///
+/// When the API answers neither channel — a rate-limited address, or an API
+/// host that is unreachable while `github.com` is not — the public release feed
+/// is asked instead. Only when that fails too is the check reported as failed.
 pub async fn check(
     http: Arc<dyn HttpClient>,
     allow_prerelease: bool,
@@ -186,27 +201,148 @@ pub async fn check(
     // still a release, and the page is a usable fallback target.
     let stable = latest_github_release(REPOSITORY, false, false, http.clone()).await;
     let beta = if allow_prerelease {
-        latest_github_release(REPOSITORY, false, true, http)
+        latest_github_release(REPOSITORY, false, true, http.clone())
             .await
             .ok()
     } else {
         None
     };
 
-    // Both channels empty is only an error when neither request answered: a
-    // beta channel with no prerelease is normal, and `latest_github_release`
-    // reports it as an error.
-    if stable.is_err() && beta.is_none() {
-        return Err(stable.expect_err("checked above"));
+    // One answered channel is enough: a beta channel with no prerelease is
+    // normal, and `latest_github_release` reports it as an error.
+    if stable.is_ok() || beta.is_some() {
+        return Ok([stable.ok(), beta]
+            .into_iter()
+            .flatten()
+            .filter_map(Update::new)
+            .max_by_key(|update| update.version));
     }
 
-    let update = [stable.ok(), beta]
-        .into_iter()
-        .flatten()
-        .filter_map(Update::new)
-        .max_by_key(|update| update.version);
+    let api_error = stable.expect_err("neither channel answered");
+    match fetch_feed(http).await {
+        Ok(feed) => Ok(newest_feed_update(&parse_feed(&feed), allow_prerelease)),
+        Err(feed_error) => Err(anyhow::anyhow!(
+            "{api_error:#}; the release feed failed too: {feed_error:#}"
+        )),
+    }
+}
 
-    Ok(update)
+/// One release as [`RELEASES_ATOM_URL`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FeedRelease {
+    /// The tag's own spelling, such as `v0.5.0` or `v0.6.0-beta.1`.
+    tag: String,
+    /// The release page, which is where the assets are.
+    page_url: String,
+}
+
+/// Read the `<entry>` elements of a GitHub releases feed.
+///
+/// Only two things are read from each entry — the first `<link>` inside it and
+/// the tag at the end of its `href` — because those are the facts the update
+/// dialog needs and the feed's HTML-escaped `<content>` is not one of them.
+fn parse_feed(xml: &str) -> Vec<FeedRelease> {
+    let mut releases = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find("<entry>") {
+        let entry_and_after = &rest[start..];
+        let Some(end) = entry_and_after.find("</entry>") else {
+            break;
+        };
+        let entry = &entry_and_after[..end];
+        rest = &entry_and_after[end..];
+
+        let Some(link) = element_attribute(entry, "<link", "href") else {
+            continue;
+        };
+        let Some((_, tag)) = link.rsplit_once("/releases/tag/") else {
+            continue;
+        };
+        releases.push(FeedRelease {
+            tag: tag.to_owned(),
+            page_url: link.to_owned(),
+        });
+    }
+    releases
+}
+
+/// The value of `attribute` in the first `element` start tag inside `text`.
+fn element_attribute<'a>(text: &'a str, element: &str, attribute: &str) -> Option<&'a str> {
+    let start = text.find(element)?;
+    let tag = &text[start..];
+    let tag = &tag[..tag.find('>')?];
+    let key = format!("{attribute}=\"");
+    let value = &tag[tag.find(&key)? + key.len()..];
+    Some(&value[..value.find('"')?])
+}
+
+/// Turn the feed's entries into the newest update this channel allows.
+fn newest_feed_update(releases: &[FeedRelease], allow_prerelease: bool) -> Option<Update> {
+    releases
+        .iter()
+        .filter(|release| allow_prerelease || !release.tag.contains('-'))
+        .filter_map(Update::from_feed)
+        .max_by_key(|update| update.version)
+}
+
+impl Update {
+    /// A release found in the feed. It has no asset list, so its download is
+    /// the release page — the same fallback a GitHub release without a
+    /// matching archive uses.
+    fn from_feed(release: &FeedRelease) -> Option<Self> {
+        let version = Version::parse(&release.tag)?;
+        if !version.is_newer_than(current_version()) {
+            return None;
+        }
+        Some(Self {
+            version,
+            tag: release.tag.clone(),
+            page_url: release.page_url.clone(),
+            download_url: release.page_url.clone(),
+            prerelease: release.tag.contains('-'),
+        })
+    }
+}
+
+/// Fetch [`RELEASES_ATOM_URL`].
+async fn fetch_feed(http: Arc<dyn HttpClient>) -> anyhow::Result<String> {
+    let request = Request::get(RELEASES_ATOM_URL)
+        .follow_redirects(RedirectPolicy::FollowAll)
+        .timeout(Duration::from_secs(10))
+        .header("Accept", "application/atom+xml")
+        .body(AsyncBody::empty())
+        .context("building the release feed request")?;
+
+    let mut response = http
+        .send(request)
+        .await
+        .context("error fetching the release feed")?;
+    if response.status().is_client_error() || response.status().is_server_error() {
+        anyhow::bail!("release feed status {}", response.status().as_u16());
+    }
+
+    let mut body = String::new();
+    response
+        .body_mut()
+        .read_to_string(&mut body)
+        .await
+        .context("error reading the release feed")?;
+    Ok(body)
+}
+
+/// The sentence a failed check puts in its dialog, in the source language.
+///
+/// The raw error is a transport detail — "error fetching latest release" says
+/// nothing a reader can act on. A rate-limited address is worth naming, because
+/// waiting is the fix; everything else is a network problem, and asking the
+/// reader to check the network is the only step that helps.
+pub fn failure_message(error: &anyhow::Error) -> &'static str {
+    let chain = format!("{error:#}").to_ascii_lowercase();
+    if chain.contains("status error 403") || chain.contains("rate limit") {
+        "GitHub is limiting release checks right now. Try again later."
+    } else {
+        "Couldn’t reach GitHub. Check the network and try again."
+    }
 }
 
 /// When the last check finished, in seconds since the Unix epoch.
@@ -288,6 +424,7 @@ pub fn finish(cx: &mut App) {
 mod tests {
     use super::*;
     use gpui_kit::http_client::github::GithubReleaseAsset;
+    use gpui_kit::http_client::{Response, Url};
 
     fn release(tag: &str, prerelease: bool) -> GithubRelease {
         GithubRelease {
@@ -418,5 +555,125 @@ mod tests {
         // A recorded time in the future cannot postpone the check forever.
         assert!(!check_is_due(Some(10_000), 1_000));
         assert!(check_is_due(Some(10_000), 10_000 + day));
+    }
+
+    /// A GitHub releases feed, including the feed-level `<link>` that must not
+    /// be mistaken for a release.
+    ///
+    /// The versions are deliberately far ahead of any real release: these
+    /// tests compare against `current_version()`, so a fixture that tracked
+    /// the workspace version would start failing on every bump.
+    const FEED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/jincaiw/subtext/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/jincaiw/subtext/releases"/>
+  <title>Release notes from subtext</title>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v9.9.9-beta.1</id>
+    <link rel="alternate" type="text/html" href="https://github.com/jincaiw/subtext/releases/tag/v9.9.9-beta.1"/>
+    <title>SubText 9.9.9-beta.1</title>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v9.9.8</id>
+    <link rel="alternate" type="text/html" href="https://github.com/jincaiw/subtext/releases/tag/v9.9.8"/>
+    <title>SubText 9.9.8</title>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v9.9.7</id>
+    <link rel="alternate" type="text/html" href="https://github.com/jincaiw/subtext/releases/tag/v9.9.7"/>
+    <title>SubText 9.9.7</title>
+  </entry>
+</feed>"#;
+
+    #[test]
+    fn the_release_feed_yields_tags_and_pages() {
+        let releases = parse_feed(FEED);
+        assert_eq!(
+            releases,
+            vec![
+                FeedRelease {
+                    tag: "v9.9.9-beta.1".to_owned(),
+                    page_url: "https://github.com/jincaiw/subtext/releases/tag/v9.9.9-beta.1"
+                        .to_owned(),
+                },
+                FeedRelease {
+                    tag: "v9.9.8".to_owned(),
+                    page_url: "https://github.com/jincaiw/subtext/releases/tag/v9.9.8".to_owned(),
+                },
+                FeedRelease {
+                    tag: "v9.9.7".to_owned(),
+                    page_url: "https://github.com/jincaiw/subtext/releases/tag/v9.9.7".to_owned(),
+                },
+            ]
+        );
+    }
+
+    /// The stable channel skips the prerelease; the beta channel takes the
+    /// newer of the two. A feed entry has no asset list, so its download is
+    /// the release page.
+    #[test]
+    fn the_feed_fallback_honours_the_channel() {
+        let releases = parse_feed(FEED);
+        let stable = newest_feed_update(&releases, false).expect("a newer stable");
+        assert_eq!(stable.tag, "v9.9.8");
+        assert!(!stable.prerelease);
+        assert_eq!(stable.download_url, stable.page_url);
+
+        let beta = newest_feed_update(&releases, true).expect("a newer prerelease");
+        assert_eq!(beta.tag, "v9.9.9-beta.1");
+        assert!(beta.prerelease);
+    }
+
+    /// The API's anonymous quota is shared per address, so a 403 must not turn
+    /// into "couldn't check for updates" while the public feed still answers.
+    #[test]
+    fn a_rate_limited_api_falls_back_to_the_public_feed() {
+        let update = futures::executor::block_on(check(Arc::new(RateLimitedClient), false))
+            .expect("the feed answers");
+        let update = update.expect("the feed lists a newer stable release");
+        assert_eq!(update.tag, "v9.9.8");
+    }
+
+    /// Neither source answering is the only case that reports a failure, and
+    /// the sentence names the cause rather than echoing the transport error.
+    #[test]
+    fn a_failed_check_says_what_went_wrong() {
+        let limited = anyhow::anyhow!(
+            "status error 403, response: \"API rate limit exceeded for 203.0.113.1\""
+        );
+        assert!(failure_message(&limited).contains("limiting"));
+
+        let offline = anyhow::anyhow!("error fetching latest release: dns error");
+        assert!(failure_message(&offline).contains("reach GitHub"));
+    }
+
+    /// Every API request is refused and the feed answers.
+    struct RateLimitedClient;
+
+    impl HttpClient for RateLimitedClient {
+        fn send(
+            &self,
+            request: Request<AsyncBody>,
+        ) -> futures::future::BoxFuture<'static, anyhow::Result<Response<AsyncBody>>> {
+            let url = request.uri().to_string();
+            Box::pin(async move {
+                let response = if url == RELEASES_ATOM_URL {
+                    Response::builder().status(200).body(AsyncBody::from(FEED))
+                } else {
+                    Response::builder().status(403).body(AsyncBody::from(
+                        r#"{"message":"API rate limit exceeded for 203.0.113.1."}"#,
+                    ))
+                };
+                Ok(response.expect("a well-formed response"))
+            })
+        }
+
+        fn user_agent(&self) -> Option<&gpui_kit::http_client::http::HeaderValue> {
+            None
+        }
+
+        fn proxy(&self) -> Option<&Url> {
+            None
+        }
     }
 }

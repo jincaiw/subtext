@@ -324,9 +324,14 @@ impl Syntax {
     /// reads one level up from `syntaxes`. A syntax the user installed in their
     /// own folder has no `queries` directory next to it and gets no query,
     /// which is also what CotEditor does.
+    ///
+    /// The directory is named by the grammar, not the bundle: "Shell Script" is
+    /// aliased to Bash by `TreeSitterSyntax.init?(name:)`, so it reads
+    /// `queries/Bash/`.
     fn query_file(&self, name: &str) -> Option<String> {
         let queries = self.directory.parent()?.parent()?.join("queries");
-        std::fs::read_to_string(queries.join(&self.name).join(name)).ok()
+        let directory = queries.join(crate::ts_outline::grammar_name(&self.name));
+        std::fs::read_to_string(directory.join(name)).ok()
     }
 
     /// A bare Plain Text syntax, with no rules at all.

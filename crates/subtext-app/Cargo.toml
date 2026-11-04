@@ -19,6 +19,10 @@ subtext-syntax.workspace = true
 subtext-theme.workspace = true
 
 gpui-kit.workspace = true
+# GPUI Kit leaves a desktop app with a client that refuses every request; this
+# is the reqwest-backed one its own examples install.
+reqwest_client.workspace = true
+futures.workspace = true
 anyhow.workspace = true
 regex.workspace = true
 serde.workspace = true

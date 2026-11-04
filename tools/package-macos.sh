@@ -2,10 +2,20 @@
 #
 # Build a macOS application bundle for SubText.
 #
-#     tools/package-macos.sh            # release build, then bundle
-#     tools/package-macos.sh --no-build # bundle the binary that is already there
+#     tools/package-macos.sh                     # release build for the host, bundle, zip, dmg
+#     tools/package-macos.sh --no-build          # package the binary that is already there
+#     tools/package-macos.sh --target x86_64-apple-darwin
+#     tools/package-macos.sh --target aarch64-apple-darwin --no-build
 #
-# The result is dist/SubText.app, plus dist/SubText-<version>-<arch>.zip.
+# The result is dist/SubText.app, dist/SubText-<version>-<arch>.zip and
+# dist/SubText-<version>-<arch>.dmg.
+#
+# Signing and notarization are opt-in through the environment; without them the
+# bundle is ad-hoc signed, which is enough to run it locally but not enough for
+# Gatekeeper on another Mac:
+#
+#     APPLE_SIGNING_IDENTITY="Developer ID Application: …"
+#     APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD   (for notarytool)
 #
 # Why a bundle at all: GPUI's macOS backend is an AppKit application, and AppKit
 # only gives an application a menu bar, a Dock icon and the ability to take
@@ -28,23 +38,48 @@ APP="$DIST/$BUNDLE_NAME.app"
 CONTENTS="$APP/Contents"
 
 BUILD=1
-for argument in "$@"; do
-    case "$argument" in
-        --no-build) BUILD=0 ;;
-        -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "unknown option: $argument" >&2; exit 2 ;;
+TARGET=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-build) BUILD=0; shift ;;
+        --target)
+            if [ $# -lt 2 ]; then
+                echo "error: --target needs a triple, e.g. --target aarch64-apple-darwin" >&2
+                exit 2
+            fi
+            TARGET="$2"; shift 2 ;;
+        --target=*) TARGET="${1#--target=}"; shift ;;
+        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
-ARCH="$(uname -m)"
-TARGET="$(rustc -vV | sed -n 's/^host: //p')"
-
-if [ "$BUILD" = 1 ]; then
-    echo "==> building $BINARY_NAME $VERSION for $TARGET (release)"
-    cargo build --release --bin "$BINARY_NAME"
+if [ -n "$TARGET" ]; then
+    BINARY="$ROOT/target/$TARGET/release/$BINARY_NAME"
+    case "$TARGET" in
+        *aarch64*) ARCH="arm64" ;;
+        *x86_64*) ARCH="x86_64" ;;
+        *) echo "error: cannot name the architecture of $TARGET" >&2; exit 2 ;;
+    esac
+    # The update checker matches assets by this suffix; see update.rs.
+else
+    BINARY="$ROOT/target/release/$BINARY_NAME"
+    case "$(uname -m)" in
+        arm64|aarch64) ARCH="arm64" ;;
+        x86_64) ARCH="x86_64" ;;
+        *) echo "error: unsupported host architecture $(uname -m)" >&2; exit 2 ;;
+    esac
 fi
 
-BINARY="$ROOT/target/release/$BINARY_NAME"
+if [ "$BUILD" = 1 ]; then
+    echo "==> building $BINARY_NAME $VERSION for ${TARGET:-the host} (release)"
+    if [ -n "$TARGET" ]; then
+        cargo build --release --bin "$BINARY_NAME" --target "$TARGET"
+    else
+        cargo build --release --bin "$BINARY_NAME"
+    fi
+fi
+
 if [ ! -f "$BINARY" ]; then
     echo "error: $BINARY does not exist — run without --no-build" >&2
     exit 1
@@ -72,10 +107,11 @@ cp "$ROOT/resources/menu.json" "$CONTENTS/Resources/menu.json"
 # user who has the .app has no other way to read them.
 cp "$ROOT/LICENSE" "$CONTENTS/Resources/LICENSE"
 cp "$ROOT/CHANGELOG.md" "$CONTENTS/Resources/CHANGELOG.md"
+[ -f "$ROOT/THIRD-PARTY-NOTICES.md" ] && cp "$ROOT/THIRD-PARTY-NOTICES.md" "$CONTENTS/Resources/"
 
 if [ -f "$ROOT/dist/icon/SubText.icns" ]; then
     ICON_READY=1
-elif [ "$(uname -s)" = "Darwin" ] && command -v python3 >/dev/null 2>&1; then
+elif command -v python3 >/dev/null 2>&1; then
     # The icon is drawn, not stored: make_icon.py renders it from geometry, so
     # there is no reason to keep a binary blob in the repository.
     echo "==> drawing the icon (tools/make_icon.py)"
@@ -85,7 +121,7 @@ else
     ICON_READY=0
 fi
 
-if [ "$ICON_READY" = 1 ]; then
+if [ "$ICON_READY" = 1 ] && [ -f "$ROOT/dist/icon/SubText.icns" ]; then
     cp "$ROOT/dist/icon/SubText.icns" "$CONTENTS/Resources/SubText.icns"
     ICON_ENTRY='    <key>CFBundleIconFile</key>
     <string>SubText</string>'
@@ -153,12 +189,20 @@ $ICON_ENTRY
 </plist>
 PLIST
 
-# An ad-hoc signature is enough for local use and keeps macOS from treating the
-# bundle as damaged. A real release would sign with a Developer ID instead.
+# A Developer ID signature with the hardened runtime is what Gatekeeper wants;
+# without an identity, an ad-hoc signature keeps macOS from calling the bundle
+# damaged, but it will still be refused on a machine that did not build it.
+SIGN_ID="${APPLE_SIGNING_IDENTITY:-}"
 if command -v codesign >/dev/null 2>&1; then
-    echo "==> ad-hoc signing"
-    codesign --force --deep --sign - "$APP" 2>/dev/null \
-        || echo "    (codesign failed; the bundle still runs, but Gatekeeper may complain)"
+    if [ -n "$SIGN_ID" ]; then
+        echo "==> signing with $SIGN_ID"
+        codesign --force --deep --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+        codesign --verify --deep --strict "$APP"
+    else
+        echo "==> ad-hoc signing (set APPLE_SIGNING_IDENTITY for a distributable build)"
+        codesign --force --deep --sign - "$APP" 2>/dev/null \
+            || echo "    (codesign failed; the bundle still runs, but Gatekeeper may complain)"
+    fi
 fi
 
 echo "==> verifying"
@@ -167,15 +211,56 @@ if [ -d "$CONTENTS/Resources/syntaxes" ]; then
 fi
 echo "    themes:   $(find "$CONTENTS/Resources/themes" -name '*.cottheme' -maxdepth 1 | wc -l | tr -d ' ')"
 echo "    binary:   $(du -h "$CONTENTS/MacOS/$BINARY_NAME" | cut -f1)"
+echo "    arch:     $(lipo -archs "$CONTENTS/MacOS/$BINARY_NAME" 2>/dev/null || echo unknown)"
 echo "    plist:    $(plutil -lint "$CONTENTS/Info.plist" >/dev/null 2>&1 && echo ok || echo 'CHECK FAILED')"
 
-ARCHIVE="$DIST/$BUNDLE_NAME-$VERSION-$ARCH.zip"
-echo "==> archiving $ARCHIVE"
-rm -f "$ARCHIVE"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+ZIP="$DIST/$BUNDLE_NAME-$VERSION-$ARCH.zip"
+DMG="$DIST/$BUNDLE_NAME-$VERSION-$ARCH.dmg"
+
+# The zip first: a notarization ticket is stapled to the bundle, so the archive
+# that ships has to be made after the stapling step.
+make_zip() {
+    echo "==> archiving $ZIP"
+    rm -f "$ZIP"
+    ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+}
+
+make_dmg() {
+    local stage="$DIST/dmg-root"
+    echo "==> building $DMG"
+    rm -rf "$stage" "$DMG"
+    mkdir -p "$stage"
+    cp -R "$APP" "$stage/"
+    ln -s /Applications "$stage/Applications"
+    hdiutil create -quiet -volname "$BUNDLE_NAME" -srcfolder "$stage" -ov -format UDZO "$DMG"
+    rm -rf "$stage"
+}
+
+make_zip
+make_dmg
+
+if [ -n "$SIGN_ID" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
+        && [ -n "${APPLE_APP_PASSWORD:-}" ]; then
+    echo "==> notarizing (this can take a few minutes)"
+    xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+        --password "$APPLE_APP_PASSWORD" --wait
+    xcrun stapler staple "$APP"
+    # Rebuild both archives from the stapled bundle, then notarize the DMG too,
+    # because a user who downloads the DMG gets the ticket with it.
+    make_zip
+    make_dmg
+    xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+        --password "$APPLE_APP_PASSWORD" --wait
+    xcrun stapler staple "$DMG"
+    spctl --assess --type execute --verbose=2 "$APP" || true
+else
+    echo "note: not notarized (set APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_TEAM_ID,"
+    echo "      APPLE_APP_PASSWORD to sign and notarize a distributable build)"
+fi
 
 echo
 echo "done."
 echo "  bundle:  $APP"
-echo "  archive: $ARCHIVE"
+echo "  archive: $ZIP"
+echo "  disk:    $DMG"
 echo "  run:     open '$APP'"

@@ -11,15 +11,17 @@ serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
 
-# Tree-sitter, for the outline only.
+# Tree-sitter, for the outline and for the syntaxes CotEditor highlights from a
+# query rather than from `Regex/Highlights.json`.
 #
 # CotEditor gets the outline of 22 of its 70 syntaxes from a tree-sitter query
 # (`queries/<Name>/outline.scm`) rather than from `Regex/Outlines.json`, and
 # those bundles carry no regex rules at all — Markdown, Python, JavaScript,
-# Rust and the rest. Without a parser their outline is empty, which is why the
-# grammars are here. Highlighting still comes from `.cotsyntax` regex rules;
-# this dependency does not change a single colour.
+# Rust and the rest. Twenty-one of them also have no highlight rules: their
+# colours come from `queries/<Name>/highlights.scm`. Without the grammars both
+# lists are empty, so the grammars must stay paired with the queries.
 tree-sitter = "0.26"
+codebook-tree-sitter-latex = "0.6.1"
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
 tree-sitter-c-sharp = "0.23"

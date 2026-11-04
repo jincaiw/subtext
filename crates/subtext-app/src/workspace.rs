@@ -6730,7 +6730,7 @@ impl Workspace {
                 if !automatic {
                     self.show_alert(
                         localization::t("Couldn’t check for updates."),
-                        &error.to_string(),
+                        localization::t(crate::update::failure_message(&error)),
                         window,
                         cx,
                     );

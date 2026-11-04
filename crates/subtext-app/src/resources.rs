@@ -47,6 +47,14 @@ impl Resources {
             candidates.push((directory.join("resources"), ResourceOrigin::Bundled));
             if let Some(contents) = directory.parent() {
                 candidates.push((contents.join("Resources"), ResourceOrigin::Bundled));
+                // A Linux system install: `/usr/bin/subtext` finds its data in
+                // `/usr/share/subtext/resources`. The same relative path is
+                // harmless in a macOS bundle (`Contents/share/…` does not
+                // exist) and in a Windows build tree.
+                candidates.push((
+                    contents.join("share").join("subtext").join("resources"),
+                    ResourceOrigin::Bundled,
+                ));
             }
         }
 

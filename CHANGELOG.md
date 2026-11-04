@@ -6,6 +6,56 @@
 
 ---
 
+## [0.5.1] — 2026-11-04
+
+首个带完整三平台发布产物的版本。
+
+### 新增
+
+- **macOS 磁盘映像**。`tools/package-macos.sh` 现在同时产出 `.app`、`.zip` 与 UDZO `.dmg`
+  （窗口内带 `/Applications` 符号链接），并接受 `--target` 以分别构建 Apple 芯片与 Intel
+  两种架构。提供 `APPLE_SIGNING_IDENTITY` 时做 hardened-runtime 签名；再提供 `APPLE_ID` /
+  `APPLE_TEAM_ID` / `APPLE_APP_PASSWORD` 时走 `notarytool` 公证并装订票据。未提供身份时仍是
+  ad-hoc 签名，README 写明了 Gatekeeper 的操作。
+- **Linux 系统包**。`tools/package-linux.sh` 除便携 tar.gz 外，产出 `.deb`、`.rpm` 与
+  `.AppImage`；安装树包含 `/usr/bin/subtext`、`/usr/share/subtext/resources`、
+  `subtext.desktop` 与 hicolor 256px 图标，装好后出现在应用菜单里。
+- **Windows 便携包**。`tools/package-windows.ps1` 产出
+  `SubText-<版本>-windows-x86_64.zip`，二进制旁边带完整的资源目录。
+- **统一发布流程**。`.github/workflows/release.yml` 在 tag push 或手动触发时，于 macOS
+  （arm64 / x86_64）、Windows、Linux 三个平台分别测试、构建、打包，汇总后生成
+  `SHA256SUMS` 并上传到同一个 GitHub Release。手动触发不指定 tag 时用
+  `tools/bump-version.sh` 只递增补丁号。
+- **第三方许可清单**。`THIRD-PARTY-NOTICES.md` 由 `tools/generate-notices.py` 从
+  `cargo metadata` 生成，随各平台发布包分发。
+
+### 修复
+
+- **检查更新在桌面端从未成功**。`gpui_kit::application()` 在桌面只装 `NullHttpClient`，
+  每次请求都返回 `No HttpClient available`。启动时改为安装 `reqwest_client`；GitHub API
+  的匿名配额用尽或返回 403 时回退到无配额的 `releases.atom`；弹窗改为说明「被限流」或
+  「连不上 GitHub」，而不是传输层原文。
+- **Linux 系统安装找不到资源**。`Resources::discover` 增加
+  `<exe>/../share/subtext/resources`，`/usr/bin/subtext` 与 AppImage 里的二进制都能找到
+  同一份语法与主题。
+- **LaTeX 大纲与高亮**。接入 `codebook-tree-sitter-latex`，大纲改回 `outline.scm` 查询，
+  不再依赖手写的线性扫描。
+- **Shell Script 的高亮查询**。查询目录按语法名映射到 `queries/Bash/`，与 CotEditor 的
+  `TreeSitterSyntax(name:)` 一致。
+
+### 验证
+
+- macOS 产物在本机构建，检查了 `Info.plist`、架构与包内资源；另用隔离的 `HOME` 从
+  `dist/SubText.app` 启动并打开一份中文 Markdown，确认资源加载、语法识别、UTF-8 状态栏
+  与中文渲染。`tools/check.sh` 全绿。
+- Linux 的 `.deb` / `.rpm` / `.AppImage` / tar.gz 在 Ubuntu 22.04 容器里用同一套安装树
+  产出并检查了元数据与文件清单（占位二进制，不证明真实二进制的运行）。
+- Linux 与 Windows 的正式构建、测试与打包由 CI runner 完成，本机没有对应系统与工具链。
+  workflow 先跑 `cargo test --workspace` 再打包；这不等于在真机上安装并运行过，README 的
+  平台状态表按这个事实写。
+
+---
+
 ## [0.5.0] — 2026-11-04
 
 ### 新增
