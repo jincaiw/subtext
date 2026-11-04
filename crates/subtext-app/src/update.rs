@@ -519,24 +519,30 @@ mod tests {
 
     /// GitHub's own payload shape is what this module reads, so the test parses
     /// one rather than only building the structs by hand.
+    ///
+    /// The asset is named with [`platform_asset_suffix`], because that is what
+    /// the updater looks for: a hard-coded macOS name would pass on the machine
+    /// this was written on and fail on the two platforms that name their
+    /// archives differently.
     #[test]
     fn githubs_release_json_is_what_we_read() {
-        let body = br#"[
-            {
+        let body = format!(
+            r#"[{{
                 "tag_name": "v0.9.0-beta.2",
                 "prerelease": true,
                 "assets": [
-                    {
-                        "name": "SubText-0.9.0-beta.2-arm64.zip",
+                    {{
+                        "name": "SubText-0.9.0-beta.2{}",
                         "browser_download_url": "https://example.test/beta.zip"
-                    }
+                    }}
                 ],
                 "tarball_url": "https://api.github.test/tarball",
                 "zipball_url": "https://api.github.test/zipball"
-            }
-        ]"#;
+            }}]"#,
+            platform_asset_suffix()
+        );
         let releases: Vec<GithubRelease> =
-            serde_json::from_slice(body).expect("GitHub's shape should parse");
+            serde_json::from_str(&body).expect("GitHub's shape should parse");
         assert_eq!(releases.len(), 1);
         let update = Update::new(releases.into_iter().next().expect("one release"))
             .expect("a newer version");

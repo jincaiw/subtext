@@ -344,7 +344,10 @@ mod tests {
             .as_any()
             .downcast_ref::<actions::script::RunScript>()
             .expect("a script item runs a script");
-        assert_eq!(run.path, "/scripts/Save.@s.sh");
+        // Joined rather than spelled out: the item is built by joining the
+        // folder, so a literal `/scripts/...` would only be equal on a platform
+        // whose separator happens to be `/`.
+        assert_eq!(run.path, Path::new("/scripts").join("Save.@s.sh"));
     }
 
     // ---- running one -----------------------------------------------------

@@ -292,13 +292,29 @@ def physical_key(character: str) -> tuple[str, bool]:
     return character, False
 
 
-def binding_string(mods: list[str], character: str, secondary: str = "secondary") -> str:
+def binding_string(
+    mods: list[str],
+    character: str,
+    secondary: str = "secondary",
+    control: str = "ctrl",
+) -> str:
+    """The GPUI keystroke for a storyboard shortcut.
+
+    `secondary` is the spelling of Cocoa's Command and `control` the spelling
+    of Cocoa's Control. On macOS they are `cmd` and `ctrl`; on Windows and
+    Linux Command becomes `ctrl`, so Control has to move somewhere or the two
+    collapse into one chord. It becomes `alt`, the only modifier left.
+    """
     key, implied_shift = physical_key(character)
     wanted = set(mods)
     if implied_shift:
         wanted.add("shift")
     parts = [
-        secondary if name == "command" else MODIFIERS[name][0]
+        secondary
+        if name == "command"
+        else control
+        if name == "control"
+        else MODIFIERS[name][0]
         for name in GPUI_ORDER
         if name in wanted
     ]
@@ -717,11 +733,13 @@ class Renderer:
             "//! Linux, chosen by `cfg!` at compile time. That is the one deliberate",
             "//! divergence: a Command-only shortcut would be unreachable on the other",
             "//! two platforms, and CotEditor has no Windows or Linux build to copy",
-            "//! from. It is not written as GPUI's platform-neutral `secondary`, because",
-            "//! `KeyBinding::new` parses with `Keystroke::parse`, which refuses to",
-            "//! resolve `secondary` without an operating system and panics on the",
-            "//! refusal. `SHORTCUTS` keeps the neutral spelling; nothing there reaches",
-            "//! `KeyBinding::new`.",
+            "//! from. For the same reason Cocoa's `control` becomes `alt-` there: once",
+            "//! `command` is `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into",
+            "//! plain Ctrl+F and lets it shadow Find. It is not written as GPUI's",
+            "//! platform-neutral `secondary`, because `KeyBinding::new` parses with",
+            "//! `Keystroke::parse`, which refuses to resolve `secondary` without an",
+            "//! operating system and panics on the refusal. `SHORTCUTS` keeps the",
+            "//! neutral spelling; nothing there reaches `KeyBinding::new`.",
             "//!",
             "//! Cocoa matches a shortcut on the *character* a key produces, so CotEditor's",
             "//! `Cmd+:` is really `Cmd+Shift+;` on a US layout; that translation is done",
@@ -733,22 +751,17 @@ class Renderer:
             "",
             "use crate::actions;",
             "",
-            "/// A keystroke with `command` written the way the host spells it.",
+            "/// The keystroke as macOS spells it, or the one the other platforms use.",
             "///",
-            "/// `secondary` is GPUI's platform-neutral name for that modifier, and it",
-            "/// would be the right thing to write — except that since gpui-pre 0.3.10",
-            "/// `Keystroke::parse` refuses to resolve it without an operating system,",
-            "/// and `KeyBinding::new` turns that refusal into a panic at launch. The",
-            "/// substitution `secondary` would have made is made here instead, at",
-            "/// compile time, so the table below still reads like the storyboard it",
-            "/// came from. `$mods` is everything before the key — `\"alt-\"` for ⌥⌘H.",
-            "macro_rules! secondary {",
-            "    ($mods:literal, $key:literal) => {",
-            "        if cfg!(target_os = \"macos\") {",
-            "            concat!($mods, \"cmd-\", $key)",
-            "        } else {",
-            "            concat!($mods, \"ctrl-\", $key)",
-            "        }",
+            "/// The generator writes both because the translation is not a rename:",
+            "/// Command is `cmd` on macOS and `ctrl` elsewhere, and Control moves to",
+            "/// `alt` so that a ⌃⌘ chord does not collapse into a ⌘ one. `$mac` and",
+            "/// `$other` are whole keystrokes, so each can be read on its own. The",
+            "/// expansion is `if cfg!` rather than `#[cfg]` because `KeyBinding::new`",
+            "/// takes a `&'static str`, and both literals are just strings.",
+            "macro_rules! shortcut {",
+            "    ($mac:literal, $other:literal) => {",
+            "        if cfg!(target_os = \"macos\") { $mac } else { $other }",
             "    };",
             "}",
             "",
@@ -774,14 +787,16 @@ class Renderer:
             else:
                 seen[binding] = label
             lines.append(f"    // {label}")
-            mac = binding_string(entry["mods"], entry["key"], "cmd")
-            other = binding_string(entry["mods"], entry["key"], "ctrl")
-            if mac == other:
-                # No `command` in this one: nothing to resolve, so no macro.
-                keystroke = rust_string(mac)
+            mac = binding_string(entry["mods"], entry["key"], "cmd", "ctrl")
+            other = binding_string(entry["mods"], entry["key"], "ctrl", "alt")
+            if "command" in entry["mods"] or "control" in entry["mods"]:
+                # Command and Control are the two modifiers whose spelling
+                # changes per platform, so the pair is written out and chosen
+                # at compile time.
+                keystroke = f"shortcut!({rust_string(mac)}, {rust_string(other)})"
             else:
-                prefix, key = mac.split("cmd-")
-                keystroke = f"secondary!({rust_string(prefix)}, {rust_string(key)})"
+                # No `command` and no `control`: the two platforms agree.
+                keystroke = rust_string(mac)
             lines.append(
                 f"    KeyBinding::new({keystroke}, "
                 f"actions::{namespace}::{name}, None),"
@@ -804,17 +819,27 @@ class Renderer:
         lines.append("/// would give, and name the command in the message. It is kept here rather")
         lines.append("/// than derived from the two fields before it because the translation from a")
         lines.append("/// character to a key lives in the generator, and a second copy of it in Rust")
-        lines.append("/// would be a second thing to get wrong.")
+        lines.append("/// would be a second thing to get wrong. The string is chosen at compile")
+        lines.append("/// time, like the binding it mirrors.")
         lines.append("pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[")
         for entry in rows:
             label = rebrand(f"{entry['path']} > {entry['title']}")
+            mac = binding_string(entry["mods"], entry["key"], "cmd", "ctrl")
+            other = binding_string(entry["mods"], entry["key"], "ctrl", "alt")
+            if mac == other:
+                keystroke = rust_string(mac)
+            else:
+                keystroke = (
+                    f"if cfg!(target_os = \"macos\") "
+                    f"{{ {rust_string(mac)} }} else {{ {rust_string(other)} }}"
+                )
             lines.append(
                 "    ("
                 f"{rust_string(label)}, "
                 f"{rust_string(shortcut_label(entry['mods'], entry['key']))}, "
                 f"{rust_string(modifier_words(entry['mods'], entry['key']))}, "
                 f"{rust_string(KEY_GLYPHS.get(physical_key(entry['key'])[0], entry['key']))}, "
-                f"{rust_string(binding_string(entry['mods'], entry['key']))}"
+                f"{keystroke}"
                 "),"
             )
         lines.append("];")
@@ -881,6 +906,35 @@ class Renderer:
         lines.append("                row.0,")
         lines.append("                row.4")
         lines.append("            );")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    /// No two commands answer to one keystroke on this platform.")
+        lines.append("    ///")
+        lines.append("    /// The storyboard has no duplicates on macOS, but the translation to")
+        lines.append("    /// Windows and Linux is not a rename — Command becomes Control there,")
+        lines.append("    /// so a Cocoa Control left alone would fold into it (⌃⌘F into ⌘F, which")
+        lines.append("    /// would shadow Find). This is the test that fails when that happens,")
+        lines.append("    /// on whichever platform runs it.")
+        lines.append("    #[test]")
+        lines.append("    fn no_two_shortcuts_share_a_keystroke_here() {")
+        lines.append("        let parsed: Vec<_> = SHORTCUTS")
+        lines.append("            .iter()")
+        lines.append("            .map(|row| {")
+        lines.append("                gpui_kit::Keystroke::parse_with_os(row.4, crate::host_os())")
+        lines.append("                    .expect(row.4)")
+        lines.append("            })")
+        lines.append("            .collect();")
+        lines.append("        for (index, first) in parsed.iter().enumerate() {")
+        lines.append("            for (other, second) in parsed.iter().enumerate().skip(index + 1) {")
+        lines.append("                assert_ne!(")
+        lines.append("                    first, second,")
+        lines.append("                    \"{} and {} both answer to {}\",")
+        lines.append("                    SHORTCUTS[index].0,")
+        lines.append("                    SHORTCUTS[other].0,")
+        lines.append("                    SHORTCUTS[index].4")
+        lines.append("                );")
+        lines.append("            }")
         lines.append("        }")
         lines.append("    }")
         lines.append("}")

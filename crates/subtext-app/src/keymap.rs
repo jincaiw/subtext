@@ -10,11 +10,13 @@
 //! Linux, chosen by `cfg!` at compile time. That is the one deliberate
 //! divergence: a Command-only shortcut would be unreachable on the other
 //! two platforms, and CotEditor has no Windows or Linux build to copy
-//! from. It is not written as GPUI's platform-neutral `secondary`, because
-//! `KeyBinding::new` parses with `Keystroke::parse`, which refuses to
-//! resolve `secondary` without an operating system and panics on the
-//! refusal. `SHORTCUTS` keeps the neutral spelling; nothing there reaches
-//! `KeyBinding::new`.
+//! from. For the same reason Cocoa's `control` becomes `alt-` there: once
+//! `command` is `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into
+//! plain Ctrl+F and lets it shadow Find. It is not written as GPUI's
+//! platform-neutral `secondary`, because `KeyBinding::new` parses with
+//! `Keystroke::parse`, which refuses to resolve `secondary` without an
+//! operating system and panics on the refusal. `SHORTCUTS` keeps the
+//! neutral spelling; nothing there reaches `KeyBinding::new`.
 //!
 //! Cocoa matches a shortcut on the *character* a key produces, so CotEditor's
 //! `Cmd+:` is really `Cmd+Shift+;` on a US layout; that translation is done
@@ -26,21 +28,20 @@ use gpui_kit::KeyBinding;
 
 use crate::actions;
 
-/// A keystroke with `command` written the way the host spells it.
+/// The keystroke as macOS spells it, or the one the other platforms use.
 ///
-/// `secondary` is GPUI's platform-neutral name for that modifier, and it
-/// would be the right thing to write — except that since gpui-pre 0.3.10
-/// `Keystroke::parse` refuses to resolve it without an operating system,
-/// and `KeyBinding::new` turns that refusal into a panic at launch. The
-/// substitution `secondary` would have made is made here instead, at
-/// compile time, so the table below still reads like the storyboard it
-/// came from. `$mods` is everything before the key — `"alt-"` for ⌥⌘H.
-macro_rules! secondary {
-    ($mods:literal, $key:literal) => {
+/// The generator writes both because the translation is not a rename:
+/// Command is `cmd` on macOS and `ctrl` elsewhere, and Control moves to
+/// `alt` so that a ⌃⌘ chord does not collapse into a ⌘ one. `$mac` and
+/// `$other` are whole keystrokes, so each can be read on its own. The
+/// expansion is `if cfg!` rather than `#[cfg]` because `KeyBinding::new`
+/// takes a `&'static str`, and both literals are just strings.
+macro_rules! shortcut {
+    ($mac:literal, $other:literal) => {
         if cfg!(target_os = "macos") {
-            concat!($mods, "cmd-", $key)
+            $mac
         } else {
-            concat!($mods, "ctrl-", $key)
+            $other
         }
     };
 }
@@ -49,267 +50,415 @@ macro_rules! secondary {
 pub fn default_bindings() -> Vec<KeyBinding> {
     vec![
         // SubText > Settings…
-        KeyBinding::new(secondary!("", ","), actions::app::ShowSettingsWindow, None),
+        KeyBinding::new(
+            shortcut!("cmd-,", "ctrl-,"),
+            actions::app::ShowSettingsWindow,
+            None,
+        ),
         // SubText > Hide SubText
-        KeyBinding::new(secondary!("", "h"), actions::app::Hide, None),
+        KeyBinding::new(shortcut!("cmd-h", "ctrl-h"), actions::app::Hide, None),
         // SubText > Hide Others
         KeyBinding::new(
-            secondary!("alt-", "h"),
+            shortcut!("alt-cmd-h", "alt-ctrl-h"),
             actions::app::HideOtherApplications,
             None,
         ),
         // SubText > Quit SubText
-        KeyBinding::new(secondary!("", "q"), actions::app::Terminate, None),
+        KeyBinding::new(shortcut!("cmd-q", "ctrl-q"), actions::app::Terminate, None),
         // File > New
-        KeyBinding::new(secondary!("", "n"), actions::file::NewDocument, None),
+        KeyBinding::new(
+            shortcut!("cmd-n", "ctrl-n"),
+            actions::file::NewDocument,
+            None,
+        ),
         // File > New Window
         KeyBinding::new(
-            secondary!("shift-", "n"),
+            shortcut!("shift-cmd-n", "shift-ctrl-n"),
             actions::file::NewDocumentAsWindow,
             None,
         ),
         // File > New Tab
-        KeyBinding::new(secondary!("", "t"), actions::file::NewDocumentAsTab, None),
+        KeyBinding::new(
+            shortcut!("cmd-t", "ctrl-t"),
+            actions::file::NewDocumentAsTab,
+            None,
+        ),
         // File > Open…
-        KeyBinding::new(secondary!("", "o"), actions::file::OpenDocument, None),
+        KeyBinding::new(
+            shortcut!("cmd-o", "ctrl-o"),
+            actions::file::OpenDocument,
+            None,
+        ),
         // File > Close
-        KeyBinding::new(secondary!("", "w"), actions::file::PerformClose, None),
+        KeyBinding::new(
+            shortcut!("cmd-w", "ctrl-w"),
+            actions::file::PerformClose,
+            None,
+        ),
         // File > Save
-        KeyBinding::new(secondary!("", "s"), actions::file::SaveDocument, None),
+        KeyBinding::new(
+            shortcut!("cmd-s", "ctrl-s"),
+            actions::file::SaveDocument,
+            None,
+        ),
         // File > Save As…
         KeyBinding::new(
-            secondary!("shift-", "s"),
+            shortcut!("shift-cmd-s", "shift-ctrl-s"),
             actions::file::SaveDocumentAs,
             None,
         ),
         // File > Page Setup…
         KeyBinding::new(
-            secondary!("shift-", "p"),
+            shortcut!("shift-cmd-p", "shift-ctrl-p"),
             actions::file::RunPageLayout,
             None,
         ),
         // File > Print…
-        KeyBinding::new(secondary!("", "p"), actions::file::PrintDocument, None),
+        KeyBinding::new(
+            shortcut!("cmd-p", "ctrl-p"),
+            actions::file::PrintDocument,
+            None,
+        ),
         // Edit > Undo
-        KeyBinding::new(secondary!("", "z"), actions::edit::Undo, None),
+        KeyBinding::new(shortcut!("cmd-z", "ctrl-z"), actions::edit::Undo, None),
         // Edit > Redo
-        KeyBinding::new(secondary!("shift-", "z"), actions::edit::Redo, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-z", "shift-ctrl-z"),
+            actions::edit::Redo,
+            None,
+        ),
         // Edit > Cut
-        KeyBinding::new(secondary!("", "x"), actions::edit::Cut, None),
+        KeyBinding::new(shortcut!("cmd-x", "ctrl-x"), actions::edit::Cut, None),
         // Edit > Copy
-        KeyBinding::new(secondary!("", "c"), actions::edit::Copy, None),
+        KeyBinding::new(shortcut!("cmd-c", "ctrl-c"), actions::edit::Copy, None),
         // Edit > Copy as Rich Text
         KeyBinding::new(
-            secondary!("shift-", "c"),
+            shortcut!("shift-cmd-c", "shift-ctrl-c"),
             actions::edit::CopyWithStyle,
             None,
         ),
         // Edit > Paste
-        KeyBinding::new(secondary!("", "v"), actions::edit::Paste, None),
+        KeyBinding::new(shortcut!("cmd-v", "ctrl-v"), actions::edit::Paste, None),
         // Edit > Paste Exactly
-        KeyBinding::new(secondary!("alt-", "v"), actions::edit::PasteAsIs, None),
+        KeyBinding::new(
+            shortcut!("alt-cmd-v", "alt-ctrl-v"),
+            actions::edit::PasteAsIs,
+            None,
+        ),
         // Edit > Delete
-        KeyBinding::new(secondary!("", "backspace"), actions::edit::Delete, None),
+        KeyBinding::new(
+            shortcut!("cmd-backspace", "ctrl-backspace"),
+            actions::edit::Delete,
+            None,
+        ),
         // Edit > Select > Select All
-        KeyBinding::new(secondary!("", "a"), actions::edit::SelectAll, None),
+        KeyBinding::new(shortcut!("cmd-a", "ctrl-a"), actions::edit::SelectAll, None),
         // Edit > Select > Select Line
         KeyBinding::new(
-            secondary!("shift-", "a"),
+            shortcut!("shift-cmd-a", "shift-ctrl-a"),
             actions::edit::SelectParagraph,
             None,
         ),
         // Edit > Select > Select Word
-        KeyBinding::new(secondary!("", "d"), actions::edit::SelectWord, None),
+        KeyBinding::new(
+            shortcut!("cmd-d", "ctrl-d"),
+            actions::edit::SelectWord,
+            None,
+        ),
         // Edit > Select > Select Column Up
-        KeyBinding::new("ctrl-shift-up", actions::edit::SelectColumnUp, None),
+        KeyBinding::new(
+            shortcut!("ctrl-shift-up", "alt-shift-up"),
+            actions::edit::SelectColumnUp,
+            None,
+        ),
         // Edit > Select > Select Column Down
-        KeyBinding::new("ctrl-shift-down", actions::edit::SelectColumnDown, None),
+        KeyBinding::new(
+            shortcut!("ctrl-shift-down", "alt-shift-down"),
+            actions::edit::SelectColumnDown,
+            None,
+        ),
         // Edit > Select > Split Selection by Lines
-        KeyBinding::new("ctrl-shift-l", actions::edit::SplitSelectionByLines, None),
+        KeyBinding::new(
+            shortcut!("ctrl-shift-l", "alt-shift-l"),
+            actions::edit::SplitSelectionByLines,
+            None,
+        ),
         // Edit > Complete
         KeyBinding::new("alt-escape", actions::edit::Complete, None),
         // Edit > Insert Backslash
-        KeyBinding::new(secondary!("", "¥"), actions::edit::InputBackSlash, None),
+        KeyBinding::new(
+            shortcut!("cmd-¥", "ctrl-¥"),
+            actions::edit::InputBackSlash,
+            None,
+        ),
         // Edit > Insert Yen Mark
-        KeyBinding::new(secondary!("", "y"), actions::edit::InputYenMark, None),
+        KeyBinding::new(
+            shortcut!("cmd-y", "ctrl-y"),
+            actions::edit::InputYenMark,
+            None,
+        ),
         // Edit > Spelling and Grammar > Show Spelling and Grammar
         KeyBinding::new(
-            secondary!("shift-", ";"),
+            shortcut!("shift-cmd-;", "shift-ctrl-;"),
             actions::spelling::ShowGuessPanel,
             None,
         ),
         // Edit > Spelling and Grammar > Check Document Now
-        KeyBinding::new(secondary!("", ";"), actions::spelling::CheckSpelling, None),
+        KeyBinding::new(
+            shortcut!("cmd-;", "ctrl-;"),
+            actions::spelling::CheckSpelling,
+            None,
+        ),
         // Format > Reset Syntax Analysis
-        KeyBinding::new(secondary!("alt-", "r"), actions::format::RecolorAll, None),
+        KeyBinding::new(
+            shortcut!("alt-cmd-r", "alt-ctrl-r"),
+            actions::format::RecolorAll,
+            None,
+        ),
         // Format > Font > Bigger
-        KeyBinding::new(secondary!("shift-", "="), actions::format::BiggerFont, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-=", "shift-ctrl-="),
+            actions::format::BiggerFont,
+            None,
+        ),
         // Format > Font > Smaller
-        KeyBinding::new(secondary!("", "-"), actions::format::SmallerFont, None),
+        KeyBinding::new(
+            shortcut!("cmd--", "ctrl--"),
+            actions::format::SmallerFont,
+            None,
+        ),
         // Format > Font > Reset to Default
-        KeyBinding::new(secondary!("", "0"), actions::format::ResetFont, None),
+        KeyBinding::new(
+            shortcut!("cmd-0", "ctrl-0"),
+            actions::format::ResetFont,
+            None,
+        ),
         // View > Show Tab Bar
-        KeyBinding::new(secondary!("shift-", "t"), actions::view::ToggleTabBar, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-t", "shift-ctrl-t"),
+            actions::view::ToggleTabBar,
+            None,
+        ),
         // View > Hide Toolbar
         KeyBinding::new(
-            secondary!("alt-", "t"),
+            shortcut!("alt-cmd-t", "alt-ctrl-t"),
             actions::view::ToggleToolbarShown,
             None,
         ),
         // View > Show Quick Actions…
-        KeyBinding::new(secondary!("", "k"), actions::view::ShowQuickActions, None),
+        KeyBinding::new(
+            shortcut!("cmd-k", "ctrl-k"),
+            actions::view::ShowQuickActions,
+            None,
+        ),
         // View > Sidebar > File Browser
         KeyBinding::new(
-            secondary!("ctrl-", "1"),
+            shortcut!("ctrl-cmd-1", "alt-ctrl-1"),
             actions::view::ShowFileBrowser,
             None,
         ),
         // View > Sidebar > Folder Find
         KeyBinding::new(
-            secondary!("ctrl-", "2"),
+            shortcut!("ctrl-cmd-2", "alt-ctrl-2"),
             actions::view::ShowFolderFinder,
             None,
         ),
         // View > Sidebar > Show Sidebar
-        KeyBinding::new(secondary!("ctrl-", "s"), actions::view::ToggleSidebar, None),
+        KeyBinding::new(
+            shortcut!("ctrl-cmd-s", "alt-ctrl-s"),
+            actions::view::ToggleSidebar,
+            None,
+        ),
         // View > Inspector > Show Inspector
-        KeyBinding::new(secondary!("", "i"), actions::view::ToggleInspector, None),
+        KeyBinding::new(
+            shortcut!("cmd-i", "ctrl-i"),
+            actions::view::ToggleInspector,
+            None,
+        ),
         // View > Move Focus to Next Editor
-        KeyBinding::new("ctrl-`", actions::view::FocusNextEditor, None),
+        KeyBinding::new(
+            shortcut!("ctrl-`", "alt-`"),
+            actions::view::FocusNextEditor,
+            None,
+        ),
         // View > Move Focus to Previous Editor
-        KeyBinding::new("ctrl-shift-`", actions::view::FocusPreviousEditor, None),
+        KeyBinding::new(
+            shortcut!("ctrl-shift-`", "alt-shift-`"),
+            actions::view::FocusPreviousEditor,
+            None,
+        ),
         // View > Enter Full Screen
         KeyBinding::new(
-            secondary!("ctrl-", "f"),
+            shortcut!("ctrl-cmd-f", "alt-ctrl-f"),
             actions::view::ToggleFullScreen,
             None,
         ),
         // Text > Comment > Toggle Comment
-        KeyBinding::new(secondary!("", "/"), actions::text::ToggleComment, None),
+        KeyBinding::new(
+            shortcut!("cmd-/", "ctrl-/"),
+            actions::text::ToggleComment,
+            None,
+        ),
         // Text > Indentation > Shift Right
-        KeyBinding::new(secondary!("", "]"), actions::text::ShiftRight, None),
+        KeyBinding::new(
+            shortcut!("cmd-]", "ctrl-]"),
+            actions::text::ShiftRight,
+            None,
+        ),
         // Text > Indentation > Shift Left
-        KeyBinding::new(secondary!("", "["), actions::text::ShiftLeft, None),
+        KeyBinding::new(shortcut!("cmd-[", "ctrl-["), actions::text::ShiftLeft, None),
         // Text > Surround Selection With > Single Quotes
         KeyBinding::new(
-            secondary!("", "'"),
+            shortcut!("cmd-'", "ctrl-'"),
             actions::text::SurroundSelectionWithSingleQuotes,
             None,
         ),
         // Text > Surround Selection With > Double Quotes
         KeyBinding::new(
-            secondary!("shift-", "'"),
+            shortcut!("shift-cmd-'", "shift-ctrl-'"),
             actions::text::SurroundSelectionWithDoubleQuotes,
             None,
         ),
         // Text > Surround Selection With > Parentheses
         KeyBinding::new(
-            secondary!("shift-", "9"),
+            shortcut!("shift-cmd-9", "shift-ctrl-9"),
             actions::text::SurroundSelectionWithParentheses,
             None,
         ),
         // Text > Surround Selection With > Custom…
         KeyBinding::new(
-            secondary!("shift-", "l"),
+            shortcut!("shift-cmd-l", "shift-ctrl-l"),
             actions::text::SurroundSelection,
             None,
         ),
         // Text > Lines > Move Up
-        KeyBinding::new(secondary!("ctrl-", "up"), actions::text::MoveLineUp, None),
+        KeyBinding::new(
+            shortcut!("ctrl-cmd-up", "alt-ctrl-up"),
+            actions::text::MoveLineUp,
+            None,
+        ),
         // Text > Lines > Move Down
         KeyBinding::new(
-            secondary!("ctrl-", "down"),
+            shortcut!("ctrl-cmd-down", "alt-ctrl-down"),
             actions::text::MoveLineDown,
             None,
         ),
         // Text > Lines > Duplicate Line
         KeyBinding::new(
-            secondary!("shift-", "d"),
+            shortcut!("shift-cmd-d", "shift-ctrl-d"),
             actions::text::DuplicateLine,
             None,
         ),
         // Text > Lines > Delete Line
         KeyBinding::new(
-            secondary!("shift-", "backspace"),
+            shortcut!("shift-cmd-backspace", "shift-ctrl-backspace"),
             actions::text::DeleteLine,
             None,
         ),
         // Text > Lines > Join Lines
-        KeyBinding::new(secondary!("shift-", "j"), actions::text::JoinLines, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-j", "shift-ctrl-j"),
+            actions::text::JoinLines,
+            None,
+        ),
         // Text > Inspect Character
         KeyBinding::new(
-            secondary!("alt-", "i"),
+            shortcut!("alt-cmd-i", "alt-ctrl-i"),
             actions::text::ShowSelectionInfo,
             None,
         ),
         // Text > Edit Color Code…
-        KeyBinding::new(secondary!("ctrl-", "h"), actions::text::EditColorCode, None),
+        KeyBinding::new(
+            shortcut!("ctrl-cmd-h", "alt-ctrl-h"),
+            actions::text::EditColorCode,
+            None,
+        ),
         // Find > Find…
         KeyBinding::new(
-            secondary!("", "f"),
+            shortcut!("cmd-f", "ctrl-f"),
             actions::find::PerformTextFinderAction,
             None,
         ),
         // Find > Find Next
-        KeyBinding::new(secondary!("", "g"), actions::find::FindNext, None),
+        KeyBinding::new(shortcut!("cmd-g", "ctrl-g"), actions::find::FindNext, None),
         // Find > Find Previous
-        KeyBinding::new(secondary!("shift-", "g"), actions::find::FindPrevious, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-g", "shift-ctrl-g"),
+            actions::find::FindPrevious,
+            None,
+        ),
         // Find > Find All
-        KeyBinding::new(secondary!("shift-", "f"), actions::find::FindAll, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-f", "shift-ctrl-f"),
+            actions::find::FindAll,
+            None,
+        ),
         // Find > Use Selection for Find
         KeyBinding::new(
-            secondary!("", "e"),
+            shortcut!("cmd-e", "ctrl-e"),
             actions::find::UseSelectionForFind,
             None,
         ),
         // Find > Use Selection for Replace
         KeyBinding::new(
-            secondary!("shift-", "e"),
+            shortcut!("shift-cmd-e", "shift-ctrl-e"),
             actions::find::UseSelectionForReplace,
             None,
         ),
         // Find > Jump to Selection
         KeyBinding::new(
-            secondary!("", "j"),
+            shortcut!("cmd-j", "ctrl-j"),
             actions::find::CenterSelectionInVisibleArea,
             None,
         ),
         // Find > Replace and Find Next
         KeyBinding::new(
-            secondary!("alt-", "g"),
+            shortcut!("alt-cmd-g", "alt-ctrl-g"),
             actions::find::ReplaceAndFindNext,
             None,
         ),
         // Find > Highlight All
-        KeyBinding::new(secondary!("shift-", "h"), actions::find::HighlightAll, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-h", "shift-ctrl-h"),
+            actions::find::HighlightAll,
+            None,
+        ),
         // Find > Remove Highlights
         KeyBinding::new(
-            secondary!("ctrl-shift-", "h"),
+            shortcut!("ctrl-shift-cmd-h", "alt-shift-ctrl-h"),
             actions::find::RemoveHighlights,
             None,
         ),
         // Find > Select Previous Outline Item
         KeyBinding::new(
-            secondary!("alt-", "up"),
+            shortcut!("alt-cmd-up", "alt-ctrl-up"),
             actions::find::SelectPrevItemOfOutlineMenu,
             None,
         ),
         // Find > Select Next Outline Item
         KeyBinding::new(
-            secondary!("alt-", "down"),
+            shortcut!("alt-cmd-down", "alt-ctrl-down"),
             actions::find::SelectNextItemOfOutlineMenu,
             None,
         ),
         // Find > Go to Line…
-        KeyBinding::new(secondary!("", "l"), actions::find::GotoLocation, None),
+        KeyBinding::new(
+            shortcut!("cmd-l", "ctrl-l"),
+            actions::find::GotoLocation,
+            None,
+        ),
         // Window > Minimize
         KeyBinding::new(
-            secondary!("", "m"),
+            shortcut!("cmd-m", "ctrl-m"),
             actions::window::PerformMiniaturize,
             None,
         ),
         // Help > SubText Help
-        KeyBinding::new(secondary!("shift-", "/"), actions::help::ShowHelp, None),
+        KeyBinding::new(
+            shortcut!("shift-cmd-/", "shift-ctrl-/"),
+            actions::help::ShowHelp,
+            None,
+        ),
     ]
 }
 
@@ -326,124 +475,305 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 /// would give, and name the command in the message. It is kept here rather
 /// than derived from the two fields before it because the translation from a
 /// character to a key lives in the generator, and a second copy of it in Rust
-/// would be a second thing to get wrong.
+/// would be a second thing to get wrong. The string is chosen at compile
+/// time, like the binding it mirrors.
 pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
-    ("SubText > Settings…", "⌘,", "command", ",", "secondary-,"),
+    (
+        "SubText > Settings…",
+        "⌘,",
+        "command",
+        ",",
+        if cfg!(target_os = "macos") {
+            "cmd-,"
+        } else {
+            "ctrl-,"
+        },
+    ),
     (
         "SubText > Hide SubText",
         "⌘H",
         "command",
         "h",
-        "secondary-h",
+        if cfg!(target_os = "macos") {
+            "cmd-h"
+        } else {
+            "ctrl-h"
+        },
     ),
     (
         "SubText > Hide Others",
         "⌥⌘H",
         "option command",
         "h",
-        "alt-secondary-h",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-h"
+        } else {
+            "alt-ctrl-h"
+        },
     ),
     (
         "SubText > Quit SubText",
         "⌘Q",
         "command",
         "q",
-        "secondary-q",
+        if cfg!(target_os = "macos") {
+            "cmd-q"
+        } else {
+            "ctrl-q"
+        },
     ),
-    ("File > New", "⌘N", "command", "n", "secondary-n"),
+    (
+        "File > New",
+        "⌘N",
+        "command",
+        "n",
+        if cfg!(target_os = "macos") {
+            "cmd-n"
+        } else {
+            "ctrl-n"
+        },
+    ),
     (
         "File > New Window",
         "⇧⌘N",
         "shift command",
         "N",
-        "shift-secondary-n",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-n"
+        } else {
+            "shift-ctrl-n"
+        },
     ),
-    ("File > New Tab", "⌘T", "command", "t", "secondary-t"),
-    ("File > Open…", "⌘O", "command", "o", "secondary-o"),
-    ("File > Close", "⌘W", "command", "w", "secondary-w"),
-    ("File > Save", "⌘S", "command", "s", "secondary-s"),
+    (
+        "File > New Tab",
+        "⌘T",
+        "command",
+        "t",
+        if cfg!(target_os = "macos") {
+            "cmd-t"
+        } else {
+            "ctrl-t"
+        },
+    ),
+    (
+        "File > Open…",
+        "⌘O",
+        "command",
+        "o",
+        if cfg!(target_os = "macos") {
+            "cmd-o"
+        } else {
+            "ctrl-o"
+        },
+    ),
+    (
+        "File > Close",
+        "⌘W",
+        "command",
+        "w",
+        if cfg!(target_os = "macos") {
+            "cmd-w"
+        } else {
+            "ctrl-w"
+        },
+    ),
+    (
+        "File > Save",
+        "⌘S",
+        "command",
+        "s",
+        if cfg!(target_os = "macos") {
+            "cmd-s"
+        } else {
+            "ctrl-s"
+        },
+    ),
     (
         "File > Save As…",
         "⇧⌘S",
         "shift command",
         "S",
-        "shift-secondary-s",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-s"
+        } else {
+            "shift-ctrl-s"
+        },
     ),
     (
         "File > Page Setup…",
         "⇧⌘P",
         "shift command",
         "P",
-        "shift-secondary-p",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-p"
+        } else {
+            "shift-ctrl-p"
+        },
     ),
-    ("File > Print…", "⌘P", "command", "p", "secondary-p"),
-    ("Edit > Undo", "⌘Z", "command", "z", "secondary-z"),
+    (
+        "File > Print…",
+        "⌘P",
+        "command",
+        "p",
+        if cfg!(target_os = "macos") {
+            "cmd-p"
+        } else {
+            "ctrl-p"
+        },
+    ),
+    (
+        "Edit > Undo",
+        "⌘Z",
+        "command",
+        "z",
+        if cfg!(target_os = "macos") {
+            "cmd-z"
+        } else {
+            "ctrl-z"
+        },
+    ),
     (
         "Edit > Redo",
         "⇧⌘Z",
         "shift command",
         "Z",
-        "shift-secondary-z",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-z"
+        } else {
+            "shift-ctrl-z"
+        },
     ),
-    ("Edit > Cut", "⌘X", "command", "x", "secondary-x"),
-    ("Edit > Copy", "⌘C", "command", "c", "secondary-c"),
+    (
+        "Edit > Cut",
+        "⌘X",
+        "command",
+        "x",
+        if cfg!(target_os = "macos") {
+            "cmd-x"
+        } else {
+            "ctrl-x"
+        },
+    ),
+    (
+        "Edit > Copy",
+        "⌘C",
+        "command",
+        "c",
+        if cfg!(target_os = "macos") {
+            "cmd-c"
+        } else {
+            "ctrl-c"
+        },
+    ),
     (
         "Edit > Copy as Rich Text",
         "⇧⌘C",
         "shift command",
         "C",
-        "shift-secondary-c",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-c"
+        } else {
+            "shift-ctrl-c"
+        },
     ),
-    ("Edit > Paste", "⌘V", "command", "v", "secondary-v"),
+    (
+        "Edit > Paste",
+        "⌘V",
+        "command",
+        "v",
+        if cfg!(target_os = "macos") {
+            "cmd-v"
+        } else {
+            "ctrl-v"
+        },
+    ),
     (
         "Edit > Paste Exactly",
         "⌥⌘V",
         "option command",
         "v",
-        "alt-secondary-v",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-v"
+        } else {
+            "alt-ctrl-v"
+        },
     ),
-    ("Edit > Delete", "⌘⌫", "command", "⌫", "secondary-backspace"),
+    (
+        "Edit > Delete",
+        "⌘⌫",
+        "command",
+        "⌫",
+        if cfg!(target_os = "macos") {
+            "cmd-backspace"
+        } else {
+            "ctrl-backspace"
+        },
+    ),
     (
         "Edit > Select > Select All",
         "⌘A",
         "command",
         "a",
-        "secondary-a",
+        if cfg!(target_os = "macos") {
+            "cmd-a"
+        } else {
+            "ctrl-a"
+        },
     ),
     (
         "Edit > Select > Select Line",
         "⇧⌘A",
         "shift command",
         "A",
-        "shift-secondary-a",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-a"
+        } else {
+            "shift-ctrl-a"
+        },
     ),
     (
         "Edit > Select > Select Word",
         "⌘D",
         "command",
         "d",
-        "secondary-d",
+        if cfg!(target_os = "macos") {
+            "cmd-d"
+        } else {
+            "ctrl-d"
+        },
     ),
     (
         "Edit > Select > Select Column Up",
         "⌃⇧↑",
         "control shift",
         "↑",
-        "ctrl-shift-up",
+        if cfg!(target_os = "macos") {
+            "ctrl-shift-up"
+        } else {
+            "alt-shift-up"
+        },
     ),
     (
         "Edit > Select > Select Column Down",
         "⌃⇧↓",
         "control shift",
         "↓",
-        "ctrl-shift-down",
+        if cfg!(target_os = "macos") {
+            "ctrl-shift-down"
+        } else {
+            "alt-shift-down"
+        },
     ),
     (
         "Edit > Select > Split Selection by Lines",
         "⌃⇧L",
         "control shift",
         "L",
-        "ctrl-shift-l",
+        if cfg!(target_os = "macos") {
+            "ctrl-shift-l"
+        } else {
+            "alt-shift-l"
+        },
     ),
     ("Edit > Complete", "⌥⎋", "option", "⎋", "alt-escape"),
     (
@@ -451,305 +781,517 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         "⌘¥",
         "command",
         "¥",
-        "secondary-¥",
+        if cfg!(target_os = "macos") {
+            "cmd-¥"
+        } else {
+            "ctrl-¥"
+        },
     ),
     (
         "Edit > Insert Yen Mark",
         "⌘Y",
         "command",
         "y",
-        "secondary-y",
+        if cfg!(target_os = "macos") {
+            "cmd-y"
+        } else {
+            "ctrl-y"
+        },
     ),
     (
         "Edit > Spelling and Grammar > Show Spelling and Grammar",
         "⇧⌘;",
         "shift command",
         ":",
-        "shift-secondary-;",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-;"
+        } else {
+            "shift-ctrl-;"
+        },
     ),
     (
         "Edit > Spelling and Grammar > Check Document Now",
         "⌘;",
         "command",
         ";",
-        "secondary-;",
+        if cfg!(target_os = "macos") {
+            "cmd-;"
+        } else {
+            "ctrl-;"
+        },
     ),
     (
         "Format > Reset Syntax Analysis",
         "⌥⌘R",
         "option command",
         "r",
-        "alt-secondary-r",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-r"
+        } else {
+            "alt-ctrl-r"
+        },
     ),
     (
         "Format > Font > Bigger",
         "⇧⌘=",
         "shift command",
         "+",
-        "shift-secondary-=",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-="
+        } else {
+            "shift-ctrl-="
+        },
     ),
     (
         "Format > Font > Smaller",
         "⌘-",
         "command",
         "-",
-        "secondary--",
+        if cfg!(target_os = "macos") {
+            "cmd--"
+        } else {
+            "ctrl--"
+        },
     ),
     (
         "Format > Font > Reset to Default",
         "⌘0",
         "command",
         "0",
-        "secondary-0",
+        if cfg!(target_os = "macos") {
+            "cmd-0"
+        } else {
+            "ctrl-0"
+        },
     ),
     (
         "View > Show Tab Bar",
         "⇧⌘T",
         "shift command",
         "T",
-        "shift-secondary-t",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-t"
+        } else {
+            "shift-ctrl-t"
+        },
     ),
     (
         "View > Hide Toolbar",
         "⌥⌘T",
         "option command",
         "t",
-        "alt-secondary-t",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-t"
+        } else {
+            "alt-ctrl-t"
+        },
     ),
     (
         "View > Show Quick Actions…",
         "⌘K",
         "command",
         "k",
-        "secondary-k",
+        if cfg!(target_os = "macos") {
+            "cmd-k"
+        } else {
+            "ctrl-k"
+        },
     ),
     (
         "View > Sidebar > File Browser",
         "⌃⌘1",
         "control command",
         "1",
-        "ctrl-secondary-1",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-1"
+        } else {
+            "alt-ctrl-1"
+        },
     ),
     (
         "View > Sidebar > Folder Find",
         "⌃⌘2",
         "control command",
         "2",
-        "ctrl-secondary-2",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-2"
+        } else {
+            "alt-ctrl-2"
+        },
     ),
     (
         "View > Sidebar > Show Sidebar",
         "⌃⌘S",
         "control command",
         "s",
-        "ctrl-secondary-s",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-s"
+        } else {
+            "alt-ctrl-s"
+        },
     ),
     (
         "View > Inspector > Show Inspector",
         "⌘I",
         "command",
         "i",
-        "secondary-i",
+        if cfg!(target_os = "macos") {
+            "cmd-i"
+        } else {
+            "ctrl-i"
+        },
     ),
     (
         "View > Move Focus to Next Editor",
         "⌃`",
         "control",
         "`",
-        "ctrl-`",
+        if cfg!(target_os = "macos") {
+            "ctrl-`"
+        } else {
+            "alt-`"
+        },
     ),
     (
         "View > Move Focus to Previous Editor",
         "⌃⇧`",
         "control shift",
         "`",
-        "ctrl-shift-`",
+        if cfg!(target_os = "macos") {
+            "ctrl-shift-`"
+        } else {
+            "alt-shift-`"
+        },
     ),
     (
         "View > Enter Full Screen",
         "⌃⌘F",
         "control command",
         "f",
-        "ctrl-secondary-f",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-f"
+        } else {
+            "alt-ctrl-f"
+        },
     ),
     (
         "Text > Comment > Toggle Comment",
         "⌘/",
         "command",
         "/",
-        "secondary-/",
+        if cfg!(target_os = "macos") {
+            "cmd-/"
+        } else {
+            "ctrl-/"
+        },
     ),
     (
         "Text > Indentation > Shift Right",
         "⌘]",
         "command",
         "]",
-        "secondary-]",
+        if cfg!(target_os = "macos") {
+            "cmd-]"
+        } else {
+            "ctrl-]"
+        },
     ),
     (
         "Text > Indentation > Shift Left",
         "⌘[",
         "command",
         "[",
-        "secondary-[",
+        if cfg!(target_os = "macos") {
+            "cmd-["
+        } else {
+            "ctrl-["
+        },
     ),
     (
         "Text > Surround Selection With > Single Quotes",
         "⌘'",
         "command",
         "'",
-        "secondary-'",
+        if cfg!(target_os = "macos") {
+            "cmd-'"
+        } else {
+            "ctrl-'"
+        },
     ),
     (
         "Text > Surround Selection With > Double Quotes",
         "⇧⌘'",
         "shift command",
         "\"",
-        "shift-secondary-'",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-'"
+        } else {
+            "shift-ctrl-'"
+        },
     ),
     (
         "Text > Surround Selection With > Parentheses",
         "⇧⌘9",
         "shift command",
         "(",
-        "shift-secondary-9",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-9"
+        } else {
+            "shift-ctrl-9"
+        },
     ),
     (
         "Text > Surround Selection With > Custom…",
         "⇧⌘L",
         "shift command",
         "L",
-        "shift-secondary-l",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-l"
+        } else {
+            "shift-ctrl-l"
+        },
     ),
     (
         "Text > Lines > Move Up",
         "⌃⌘↑",
         "control command",
         "↑",
-        "ctrl-secondary-up",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-up"
+        } else {
+            "alt-ctrl-up"
+        },
     ),
     (
         "Text > Lines > Move Down",
         "⌃⌘↓",
         "control command",
         "↓",
-        "ctrl-secondary-down",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-down"
+        } else {
+            "alt-ctrl-down"
+        },
     ),
     (
         "Text > Lines > Duplicate Line",
         "⇧⌘D",
         "shift command",
         "D",
-        "shift-secondary-d",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-d"
+        } else {
+            "shift-ctrl-d"
+        },
     ),
     (
         "Text > Lines > Delete Line",
         "⇧⌘⌫",
         "shift command",
         "⌫",
-        "shift-secondary-backspace",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-backspace"
+        } else {
+            "shift-ctrl-backspace"
+        },
     ),
     (
         "Text > Lines > Join Lines",
         "⇧⌘J",
         "shift command",
         "J",
-        "shift-secondary-j",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-j"
+        } else {
+            "shift-ctrl-j"
+        },
     ),
     (
         "Text > Inspect Character",
         "⌥⌘I",
         "option command",
         "i",
-        "alt-secondary-i",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-i"
+        } else {
+            "alt-ctrl-i"
+        },
     ),
     (
         "Text > Edit Color Code…",
         "⌃⌘H",
         "control command",
         "h",
-        "ctrl-secondary-h",
+        if cfg!(target_os = "macos") {
+            "ctrl-cmd-h"
+        } else {
+            "alt-ctrl-h"
+        },
     ),
-    ("Find > Find…", "⌘F", "command", "f", "secondary-f"),
-    ("Find > Find Next", "⌘G", "command", "g", "secondary-g"),
+    (
+        "Find > Find…",
+        "⌘F",
+        "command",
+        "f",
+        if cfg!(target_os = "macos") {
+            "cmd-f"
+        } else {
+            "ctrl-f"
+        },
+    ),
+    (
+        "Find > Find Next",
+        "⌘G",
+        "command",
+        "g",
+        if cfg!(target_os = "macos") {
+            "cmd-g"
+        } else {
+            "ctrl-g"
+        },
+    ),
     (
         "Find > Find Previous",
         "⇧⌘G",
         "shift command",
         "G",
-        "shift-secondary-g",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-g"
+        } else {
+            "shift-ctrl-g"
+        },
     ),
     (
         "Find > Find All",
         "⇧⌘F",
         "shift command",
         "F",
-        "shift-secondary-f",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-f"
+        } else {
+            "shift-ctrl-f"
+        },
     ),
     (
         "Find > Use Selection for Find",
         "⌘E",
         "command",
         "e",
-        "secondary-e",
+        if cfg!(target_os = "macos") {
+            "cmd-e"
+        } else {
+            "ctrl-e"
+        },
     ),
     (
         "Find > Use Selection for Replace",
         "⇧⌘E",
         "shift command",
         "E",
-        "shift-secondary-e",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-e"
+        } else {
+            "shift-ctrl-e"
+        },
     ),
     (
         "Find > Jump to Selection",
         "⌘J",
         "command",
         "j",
-        "secondary-j",
+        if cfg!(target_os = "macos") {
+            "cmd-j"
+        } else {
+            "ctrl-j"
+        },
     ),
     (
         "Find > Replace and Find Next",
         "⌥⌘G",
         "option command",
         "g",
-        "alt-secondary-g",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-g"
+        } else {
+            "alt-ctrl-g"
+        },
     ),
     (
         "Find > Highlight All",
         "⇧⌘H",
         "shift command",
         "H",
-        "shift-secondary-h",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-h"
+        } else {
+            "shift-ctrl-h"
+        },
     ),
     (
         "Find > Remove Highlights",
         "⌃⇧⌘H",
         "control shift command",
         "H",
-        "ctrl-shift-secondary-h",
+        if cfg!(target_os = "macos") {
+            "ctrl-shift-cmd-h"
+        } else {
+            "alt-shift-ctrl-h"
+        },
     ),
     (
         "Find > Select Previous Outline Item",
         "⌥⌘↑",
         "option command",
         "↑",
-        "alt-secondary-up",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-up"
+        } else {
+            "alt-ctrl-up"
+        },
     ),
     (
         "Find > Select Next Outline Item",
         "⌥⌘↓",
         "option command",
         "↓",
-        "alt-secondary-down",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-down"
+        } else {
+            "alt-ctrl-down"
+        },
     ),
-    ("Find > Go to Line…", "⌘L", "command", "l", "secondary-l"),
-    ("Window > Minimize", "⌘M", "command", "m", "secondary-m"),
+    (
+        "Find > Go to Line…",
+        "⌘L",
+        "command",
+        "l",
+        if cfg!(target_os = "macos") {
+            "cmd-l"
+        } else {
+            "ctrl-l"
+        },
+    ),
+    (
+        "Window > Minimize",
+        "⌘M",
+        "command",
+        "m",
+        if cfg!(target_os = "macos") {
+            "cmd-m"
+        } else {
+            "ctrl-m"
+        },
+    ),
     (
         "Help > SubText Help",
         "⇧⌘/",
         "shift command",
         "?",
-        "shift-secondary-/",
+        if cfg!(target_os = "macos") {
+            "shift-cmd-/"
+        } else {
+            "shift-ctrl-/"
+        },
     ),
 ];
 
@@ -811,6 +1353,30 @@ mod tests {
                 row.0,
                 row.4
             );
+        }
+    }
+
+    /// No two commands answer to one keystroke on this platform.
+    ///
+    /// The storyboard has no duplicates on macOS, but the translation to
+    /// Windows and Linux is not a rename — Command becomes Control there,
+    /// so a Cocoa Control left alone would fold into it (⌃⌘F into ⌘F, which
+    /// would shadow Find). This is the test that fails when that happens,
+    /// on whichever platform runs it.
+    #[test]
+    fn no_two_shortcuts_share_a_keystroke_here() {
+        let parsed: Vec<_> = SHORTCUTS
+            .iter()
+            .map(|row| gpui_kit::Keystroke::parse_with_os(row.4, crate::host_os()).expect(row.4))
+            .collect();
+        for (index, first) in parsed.iter().enumerate() {
+            for (other, second) in parsed.iter().enumerate().skip(index + 1) {
+                assert_ne!(
+                    first, second,
+                    "{} and {} both answer to {}",
+                    SHORTCUTS[index].0, SHORTCUTS[other].0, SHORTCUTS[index].4
+                );
+            }
         }
     }
 }

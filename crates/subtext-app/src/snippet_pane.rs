@@ -950,6 +950,10 @@ mod tests {
         Keystroke::parse_with_os(text, crate::host_os()).expect(text)
     }
 
+    /// macOS only: this pins CotEditor's `⌘` spelling. On the other platforms
+    /// `secondary-` resolves to Control, so the same keystroke is stored — and
+    /// drawn — as `^` instead, which is correct for those key maps.
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_chord_becomes_a_shortcut_in_cocoas_spelling() {
         let shortcut = shortcut_of(&key("secondary-shift-k")).unwrap();
@@ -959,6 +963,11 @@ mod tests {
     }
 
     /// AppKit hands ⌘⇧c back as `C`, so the two spellings have to collapse.
+    ///
+    /// macOS only, like the spelling test above: `secondary-K` is Control+Shift
+    /// on the other platforms, and comparing it to `$@k` would be comparing two
+    /// different chords.
+    #[cfg(target_os = "macos")]
     #[test]
     fn an_uppercase_key_gains_a_shift() {
         assert_eq!(
