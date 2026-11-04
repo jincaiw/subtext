@@ -48,8 +48,9 @@
   开发依赖；macOS Intel 的发布构建同时改为给 `rust-toolchain.toml` 钉住的工具链安装目标。
 - **Windows / Linux 的快捷键冲突**。Command 在非 macOS 上映射为 Ctrl 后，Cocoa 的
   Control 仍是 Ctrl，⌃⌘F 折叠成 Ctrl+F 并抢在 Find 前面，另有 4 组同类冲突（含
-  Ctrl+S 的 Save / Show Sidebar）。生成器现在把 Cocoa Control 映射为 Alt（⌃⌘F →
-  Ctrl+Alt+F），并新增一条按宿主平台解析全部快捷键、断言两两不重复的测试。
+  Ctrl+S 的 Save / Show Sidebar）。生成器改为按修饰键**组合**取键位而不是逐个改名
+  （⌃⌘F → Ctrl+Alt+F，⌥⌘ → Ctrl+Alt+Shift，⌃ → Alt），并新增一条按宿主平台解析
+  全部快捷键、断言两两不重复的测试——正是它抓出了 ⌥⌘H 与 ⌃⌘H 的同键。
 - **只在 macOS 成立的测试**。脚本路径比较改为 `Path::join`；更新检查的 fixture 用
   `platform_asset_suffix()` 取名；两条断言 ⌘ 拼写的 Snippets 测试标注为 macOS 专用。
 

@@ -10,9 +10,13 @@
 //! Linux, chosen by `cfg!` at compile time. That is the one deliberate
 //! divergence: a Command-only shortcut would be unreachable on the other
 //! two platforms, and CotEditor has no Windows or Linux build to copy
-//! from. For the same reason Cocoa's `control` becomes `alt-` there: once
-//! `command` is `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into
-//! plain Ctrl+F and lets it shadow Find. It is not written as GPUI's
+//! from. The other two platforms also get a different chord per
+//! modifier *combination*, not a rename per modifier: once `command` is
+//! `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into plain Ctrl+F
+//! and lets it shadow Find. So ⌃⌘ is `ctrl-alt`, ⌥⌘ is `ctrl-alt-shift`,
+//! ⌃⌘⇧ is `alt-shift`, and `control` alone is `alt`. The table lives in
+//! `OTHER_FAMILIES` in the generator; the test at the end of this file
+//! keeps every pair of shortcuts distinct. It is not written as GPUI's
 //! platform-neutral `secondary`, because `KeyBinding::new` parses with
 //! `Keystroke::parse`, which refuses to resolve `secondary` without an
 //! operating system and panics on the refusal. `SHORTCUTS` keeps the
@@ -31,9 +35,10 @@ use crate::actions;
 /// The keystroke as macOS spells it, or the one the other platforms use.
 ///
 /// The generator writes both because the translation is not a rename:
-/// Command is `cmd` on macOS and `ctrl` elsewhere, and Control moves to
-/// `alt` so that a ⌃⌘ chord does not collapse into a ⌘ one. `$mac` and
-/// `$other` are whole keystrokes, so each can be read on its own. The
+/// Command is `cmd` on macOS and `ctrl` elsewhere, and each Windows/Linux
+/// chord is chosen per modifier combination so that no two shortcuts
+/// collide. `$mac` and `$other` are whole keystrokes, so each can be read
+/// on its own. The
 /// expansion is `if cfg!` rather than `#[cfg]` because `KeyBinding::new`
 /// takes a `&'static str`, and both literals are just strings.
 macro_rules! shortcut {
@@ -59,7 +64,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-h", "ctrl-h"), actions::app::Hide, None),
         // SubText > Hide Others
         KeyBinding::new(
-            shortcut!("alt-cmd-h", "alt-ctrl-h"),
+            shortcut!("alt-cmd-h", "ctrl-alt-shift-h"),
             actions::app::HideOtherApplications,
             None,
         ),
@@ -73,7 +78,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // File > New Window
         KeyBinding::new(
-            shortcut!("shift-cmd-n", "shift-ctrl-n"),
+            shortcut!("shift-cmd-n", "ctrl-shift-n"),
             actions::file::NewDocumentAsWindow,
             None,
         ),
@@ -103,13 +108,13 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // File > Save As…
         KeyBinding::new(
-            shortcut!("shift-cmd-s", "shift-ctrl-s"),
+            shortcut!("shift-cmd-s", "ctrl-shift-s"),
             actions::file::SaveDocumentAs,
             None,
         ),
         // File > Page Setup…
         KeyBinding::new(
-            shortcut!("shift-cmd-p", "shift-ctrl-p"),
+            shortcut!("shift-cmd-p", "ctrl-shift-p"),
             actions::file::RunPageLayout,
             None,
         ),
@@ -123,7 +128,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-z", "ctrl-z"), actions::edit::Undo, None),
         // Edit > Redo
         KeyBinding::new(
-            shortcut!("shift-cmd-z", "shift-ctrl-z"),
+            shortcut!("shift-cmd-z", "ctrl-shift-z"),
             actions::edit::Redo,
             None,
         ),
@@ -133,7 +138,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-c", "ctrl-c"), actions::edit::Copy, None),
         // Edit > Copy as Rich Text
         KeyBinding::new(
-            shortcut!("shift-cmd-c", "shift-ctrl-c"),
+            shortcut!("shift-cmd-c", "ctrl-shift-c"),
             actions::edit::CopyWithStyle,
             None,
         ),
@@ -141,7 +146,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-v", "ctrl-v"), actions::edit::Paste, None),
         // Edit > Paste Exactly
         KeyBinding::new(
-            shortcut!("alt-cmd-v", "alt-ctrl-v"),
+            shortcut!("alt-cmd-v", "ctrl-alt-shift-v"),
             actions::edit::PasteAsIs,
             None,
         ),
@@ -155,7 +160,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-a", "ctrl-a"), actions::edit::SelectAll, None),
         // Edit > Select > Select Line
         KeyBinding::new(
-            shortcut!("shift-cmd-a", "shift-ctrl-a"),
+            shortcut!("shift-cmd-a", "ctrl-shift-a"),
             actions::edit::SelectParagraph,
             None,
         ),
@@ -199,7 +204,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Edit > Spelling and Grammar > Show Spelling and Grammar
         KeyBinding::new(
-            shortcut!("shift-cmd-;", "shift-ctrl-;"),
+            shortcut!("shift-cmd-;", "ctrl-shift-;"),
             actions::spelling::ShowGuessPanel,
             None,
         ),
@@ -211,13 +216,13 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Format > Reset Syntax Analysis
         KeyBinding::new(
-            shortcut!("alt-cmd-r", "alt-ctrl-r"),
+            shortcut!("alt-cmd-r", "ctrl-alt-shift-r"),
             actions::format::RecolorAll,
             None,
         ),
         // Format > Font > Bigger
         KeyBinding::new(
-            shortcut!("shift-cmd-=", "shift-ctrl-="),
+            shortcut!("shift-cmd-=", "ctrl-shift-="),
             actions::format::BiggerFont,
             None,
         ),
@@ -235,13 +240,13 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // View > Show Tab Bar
         KeyBinding::new(
-            shortcut!("shift-cmd-t", "shift-ctrl-t"),
+            shortcut!("shift-cmd-t", "ctrl-shift-t"),
             actions::view::ToggleTabBar,
             None,
         ),
         // View > Hide Toolbar
         KeyBinding::new(
-            shortcut!("alt-cmd-t", "alt-ctrl-t"),
+            shortcut!("alt-cmd-t", "ctrl-alt-shift-t"),
             actions::view::ToggleToolbarShown,
             None,
         ),
@@ -253,19 +258,19 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // View > Sidebar > File Browser
         KeyBinding::new(
-            shortcut!("ctrl-cmd-1", "alt-ctrl-1"),
+            shortcut!("ctrl-cmd-1", "ctrl-alt-1"),
             actions::view::ShowFileBrowser,
             None,
         ),
         // View > Sidebar > Folder Find
         KeyBinding::new(
-            shortcut!("ctrl-cmd-2", "alt-ctrl-2"),
+            shortcut!("ctrl-cmd-2", "ctrl-alt-2"),
             actions::view::ShowFolderFinder,
             None,
         ),
         // View > Sidebar > Show Sidebar
         KeyBinding::new(
-            shortcut!("ctrl-cmd-s", "alt-ctrl-s"),
+            shortcut!("ctrl-cmd-s", "ctrl-alt-s"),
             actions::view::ToggleSidebar,
             None,
         ),
@@ -289,7 +294,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // View > Enter Full Screen
         KeyBinding::new(
-            shortcut!("ctrl-cmd-f", "alt-ctrl-f"),
+            shortcut!("ctrl-cmd-f", "ctrl-alt-f"),
             actions::view::ToggleFullScreen,
             None,
         ),
@@ -315,61 +320,61 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Text > Surround Selection With > Double Quotes
         KeyBinding::new(
-            shortcut!("shift-cmd-'", "shift-ctrl-'"),
+            shortcut!("shift-cmd-'", "ctrl-shift-'"),
             actions::text::SurroundSelectionWithDoubleQuotes,
             None,
         ),
         // Text > Surround Selection With > Parentheses
         KeyBinding::new(
-            shortcut!("shift-cmd-9", "shift-ctrl-9"),
+            shortcut!("shift-cmd-9", "ctrl-shift-9"),
             actions::text::SurroundSelectionWithParentheses,
             None,
         ),
         // Text > Surround Selection With > Custom…
         KeyBinding::new(
-            shortcut!("shift-cmd-l", "shift-ctrl-l"),
+            shortcut!("shift-cmd-l", "ctrl-shift-l"),
             actions::text::SurroundSelection,
             None,
         ),
         // Text > Lines > Move Up
         KeyBinding::new(
-            shortcut!("ctrl-cmd-up", "alt-ctrl-up"),
+            shortcut!("ctrl-cmd-up", "ctrl-alt-up"),
             actions::text::MoveLineUp,
             None,
         ),
         // Text > Lines > Move Down
         KeyBinding::new(
-            shortcut!("ctrl-cmd-down", "alt-ctrl-down"),
+            shortcut!("ctrl-cmd-down", "ctrl-alt-down"),
             actions::text::MoveLineDown,
             None,
         ),
         // Text > Lines > Duplicate Line
         KeyBinding::new(
-            shortcut!("shift-cmd-d", "shift-ctrl-d"),
+            shortcut!("shift-cmd-d", "ctrl-shift-d"),
             actions::text::DuplicateLine,
             None,
         ),
         // Text > Lines > Delete Line
         KeyBinding::new(
-            shortcut!("shift-cmd-backspace", "shift-ctrl-backspace"),
+            shortcut!("shift-cmd-backspace", "ctrl-shift-backspace"),
             actions::text::DeleteLine,
             None,
         ),
         // Text > Lines > Join Lines
         KeyBinding::new(
-            shortcut!("shift-cmd-j", "shift-ctrl-j"),
+            shortcut!("shift-cmd-j", "ctrl-shift-j"),
             actions::text::JoinLines,
             None,
         ),
         // Text > Inspect Character
         KeyBinding::new(
-            shortcut!("alt-cmd-i", "alt-ctrl-i"),
+            shortcut!("alt-cmd-i", "ctrl-alt-shift-i"),
             actions::text::ShowSelectionInfo,
             None,
         ),
         // Text > Edit Color Code…
         KeyBinding::new(
-            shortcut!("ctrl-cmd-h", "alt-ctrl-h"),
+            shortcut!("ctrl-cmd-h", "ctrl-alt-h"),
             actions::text::EditColorCode,
             None,
         ),
@@ -383,13 +388,13 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(shortcut!("cmd-g", "ctrl-g"), actions::find::FindNext, None),
         // Find > Find Previous
         KeyBinding::new(
-            shortcut!("shift-cmd-g", "shift-ctrl-g"),
+            shortcut!("shift-cmd-g", "ctrl-shift-g"),
             actions::find::FindPrevious,
             None,
         ),
         // Find > Find All
         KeyBinding::new(
-            shortcut!("shift-cmd-f", "shift-ctrl-f"),
+            shortcut!("shift-cmd-f", "ctrl-shift-f"),
             actions::find::FindAll,
             None,
         ),
@@ -401,7 +406,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Find > Use Selection for Replace
         KeyBinding::new(
-            shortcut!("shift-cmd-e", "shift-ctrl-e"),
+            shortcut!("shift-cmd-e", "ctrl-shift-e"),
             actions::find::UseSelectionForReplace,
             None,
         ),
@@ -413,31 +418,31 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Find > Replace and Find Next
         KeyBinding::new(
-            shortcut!("alt-cmd-g", "alt-ctrl-g"),
+            shortcut!("alt-cmd-g", "ctrl-alt-shift-g"),
             actions::find::ReplaceAndFindNext,
             None,
         ),
         // Find > Highlight All
         KeyBinding::new(
-            shortcut!("shift-cmd-h", "shift-ctrl-h"),
+            shortcut!("shift-cmd-h", "ctrl-shift-h"),
             actions::find::HighlightAll,
             None,
         ),
         // Find > Remove Highlights
         KeyBinding::new(
-            shortcut!("ctrl-shift-cmd-h", "alt-shift-ctrl-h"),
+            shortcut!("ctrl-shift-cmd-h", "alt-shift-h"),
             actions::find::RemoveHighlights,
             None,
         ),
         // Find > Select Previous Outline Item
         KeyBinding::new(
-            shortcut!("alt-cmd-up", "alt-ctrl-up"),
+            shortcut!("alt-cmd-up", "ctrl-alt-shift-up"),
             actions::find::SelectPrevItemOfOutlineMenu,
             None,
         ),
         // Find > Select Next Outline Item
         KeyBinding::new(
-            shortcut!("alt-cmd-down", "alt-ctrl-down"),
+            shortcut!("alt-cmd-down", "ctrl-alt-shift-down"),
             actions::find::SelectNextItemOfOutlineMenu,
             None,
         ),
@@ -455,7 +460,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         ),
         // Help > SubText Help
         KeyBinding::new(
-            shortcut!("shift-cmd-/", "shift-ctrl-/"),
+            shortcut!("shift-cmd-/", "ctrl-shift-/"),
             actions::help::ShowHelp,
             None,
         ),
@@ -508,7 +513,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-h"
         } else {
-            "alt-ctrl-h"
+            "ctrl-alt-shift-h"
         },
     ),
     (
@@ -541,7 +546,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-n"
         } else {
-            "shift-ctrl-n"
+            "ctrl-shift-n"
         },
     ),
     (
@@ -596,7 +601,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-s"
         } else {
-            "shift-ctrl-s"
+            "ctrl-shift-s"
         },
     ),
     (
@@ -607,7 +612,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-p"
         } else {
-            "shift-ctrl-p"
+            "ctrl-shift-p"
         },
     ),
     (
@@ -640,7 +645,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-z"
         } else {
-            "shift-ctrl-z"
+            "ctrl-shift-z"
         },
     ),
     (
@@ -673,7 +678,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-c"
         } else {
-            "shift-ctrl-c"
+            "ctrl-shift-c"
         },
     ),
     (
@@ -695,7 +700,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-v"
         } else {
-            "alt-ctrl-v"
+            "ctrl-alt-shift-v"
         },
     ),
     (
@@ -728,7 +733,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-a"
         } else {
-            "shift-ctrl-a"
+            "ctrl-shift-a"
         },
     ),
     (
@@ -806,7 +811,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-;"
         } else {
-            "shift-ctrl-;"
+            "ctrl-shift-;"
         },
     ),
     (
@@ -828,7 +833,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-r"
         } else {
-            "alt-ctrl-r"
+            "ctrl-alt-shift-r"
         },
     ),
     (
@@ -839,7 +844,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-="
         } else {
-            "shift-ctrl-="
+            "ctrl-shift-="
         },
     ),
     (
@@ -872,7 +877,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-t"
         } else {
-            "shift-ctrl-t"
+            "ctrl-shift-t"
         },
     ),
     (
@@ -883,7 +888,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-t"
         } else {
-            "alt-ctrl-t"
+            "ctrl-alt-shift-t"
         },
     ),
     (
@@ -905,7 +910,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-1"
         } else {
-            "alt-ctrl-1"
+            "ctrl-alt-1"
         },
     ),
     (
@@ -916,7 +921,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-2"
         } else {
-            "alt-ctrl-2"
+            "ctrl-alt-2"
         },
     ),
     (
@@ -927,7 +932,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-s"
         } else {
-            "alt-ctrl-s"
+            "ctrl-alt-s"
         },
     ),
     (
@@ -971,7 +976,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-f"
         } else {
-            "alt-ctrl-f"
+            "ctrl-alt-f"
         },
     ),
     (
@@ -1026,7 +1031,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-'"
         } else {
-            "shift-ctrl-'"
+            "ctrl-shift-'"
         },
     ),
     (
@@ -1037,7 +1042,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-9"
         } else {
-            "shift-ctrl-9"
+            "ctrl-shift-9"
         },
     ),
     (
@@ -1048,7 +1053,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-l"
         } else {
-            "shift-ctrl-l"
+            "ctrl-shift-l"
         },
     ),
     (
@@ -1059,7 +1064,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-up"
         } else {
-            "alt-ctrl-up"
+            "ctrl-alt-up"
         },
     ),
     (
@@ -1070,7 +1075,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-down"
         } else {
-            "alt-ctrl-down"
+            "ctrl-alt-down"
         },
     ),
     (
@@ -1081,7 +1086,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-d"
         } else {
-            "shift-ctrl-d"
+            "ctrl-shift-d"
         },
     ),
     (
@@ -1092,7 +1097,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-backspace"
         } else {
-            "shift-ctrl-backspace"
+            "ctrl-shift-backspace"
         },
     ),
     (
@@ -1103,7 +1108,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-j"
         } else {
-            "shift-ctrl-j"
+            "ctrl-shift-j"
         },
     ),
     (
@@ -1114,7 +1119,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-i"
         } else {
-            "alt-ctrl-i"
+            "ctrl-alt-shift-i"
         },
     ),
     (
@@ -1125,7 +1130,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-cmd-h"
         } else {
-            "alt-ctrl-h"
+            "ctrl-alt-h"
         },
     ),
     (
@@ -1158,7 +1163,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-g"
         } else {
-            "shift-ctrl-g"
+            "ctrl-shift-g"
         },
     ),
     (
@@ -1169,7 +1174,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-f"
         } else {
-            "shift-ctrl-f"
+            "ctrl-shift-f"
         },
     ),
     (
@@ -1191,7 +1196,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-e"
         } else {
-            "shift-ctrl-e"
+            "ctrl-shift-e"
         },
     ),
     (
@@ -1213,7 +1218,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-g"
         } else {
-            "alt-ctrl-g"
+            "ctrl-alt-shift-g"
         },
     ),
     (
@@ -1224,7 +1229,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-h"
         } else {
-            "shift-ctrl-h"
+            "ctrl-shift-h"
         },
     ),
     (
@@ -1235,7 +1240,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "ctrl-shift-cmd-h"
         } else {
-            "alt-shift-ctrl-h"
+            "alt-shift-h"
         },
     ),
     (
@@ -1246,7 +1251,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-up"
         } else {
-            "alt-ctrl-up"
+            "ctrl-alt-shift-up"
         },
     ),
     (
@@ -1257,7 +1262,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "alt-cmd-down"
         } else {
-            "alt-ctrl-down"
+            "ctrl-alt-shift-down"
         },
     ),
     (
@@ -1290,7 +1295,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         if cfg!(target_os = "macos") {
             "shift-cmd-/"
         } else {
-            "shift-ctrl-/"
+            "ctrl-shift-/"
         },
     ),
 ];

@@ -296,28 +296,62 @@ def binding_string(
     mods: list[str],
     character: str,
     secondary: str = "secondary",
-    control: str = "ctrl",
 ) -> str:
     """The GPUI keystroke for a storyboard shortcut.
 
-    `secondary` is the spelling of Cocoa's Command and `control` the spelling
-    of Cocoa's Control. On macOS they are `cmd` and `ctrl`; on Windows and
-    Linux Command becomes `ctrl`, so Control has to move somewhere or the two
-    collapse into one chord. It becomes `alt`, the only modifier left.
+    `secondary` is the spelling of Cocoa's Command. On macOS it is `cmd`; the
+    Windows and Linux chord comes from [`other_binding`] instead, because the
+    translation there is per modifier *combination*, not per modifier.
     """
     key, implied_shift = physical_key(character)
     wanted = set(mods)
     if implied_shift:
         wanted.add("shift")
     parts = [
-        secondary
-        if name == "command"
-        else control
-        if name == "control"
-        else MODIFIERS[name][0]
+        secondary if name == "command" else MODIFIERS[name][0]
         for name in GPUI_ORDER
         if name in wanted
     ]
+    parts.append(key)
+    return "-".join(parts)
+
+
+# Cocoa has four modifiers and the other platforms three that GPUI spells
+# (`ctrl`, `alt`, `shift`), so the Windows/Linux chord cannot be a rename of
+# each key: Command, Option and Control would land on Ctrl, Alt and Ctrl, and
+# ⌃⌘F would fold into ⌘F. Each *combination* therefore gets its own chord:
+#
+#     ⌘   → Ctrl             ⌃     → Alt
+#     ⌘⇧  → Ctrl+Shift       ⌃⇧    → Alt+Shift
+#     ⌃⌘  → Ctrl+Alt         ⌥     → Alt
+#     ⌥⌘  → Ctrl+Alt+Shift   ⌃⌘⇧   → Alt+Shift
+#
+# The two families that share a chord (⌃ and ⌥, ⌃⇧ and ⌃⌘⇧) share no key, which
+# `no_two_shortcuts_share_a_keystroke_here` checks on every platform. The
+# natural chords go to the editing commands — ⌃⌘↑ is Move Up, so it keeps
+# Ctrl+Alt+↑ — and the less common ⌥⌘ family pays the third modifier.
+OTHER_FAMILIES = {
+    frozenset({"command"}): ("ctrl",),
+    frozenset({"command", "shift"}): ("ctrl", "shift"),
+    frozenset({"command", "control"}): ("ctrl", "alt"),
+    frozenset({"command", "option"}): ("ctrl", "alt", "shift"),
+    frozenset({"command", "control", "shift"}): ("alt", "shift"),
+    frozenset({"control"}): ("alt",),
+    frozenset({"control", "shift"}): ("alt", "shift"),
+    frozenset({"option"}): ("alt",),
+}
+
+
+def other_binding(mods: list[str], character: str) -> str:
+    """The Windows and Linux keystroke for a storyboard shortcut."""
+    key, implied_shift = physical_key(character)
+    wanted = set(mods)
+    if implied_shift:
+        wanted.add("shift")
+    family = frozenset(wanted)
+    if family not in OTHER_FAMILIES:
+        fail(f"no Windows/Linux chord for {sorted(wanted)}")
+    parts = [name for name in ("ctrl", "alt", "shift") if name in OTHER_FAMILIES[family]]
     parts.append(key)
     return "-".join(parts)
 
@@ -733,9 +767,13 @@ class Renderer:
             "//! Linux, chosen by `cfg!` at compile time. That is the one deliberate",
             "//! divergence: a Command-only shortcut would be unreachable on the other",
             "//! two platforms, and CotEditor has no Windows or Linux build to copy",
-            "//! from. For the same reason Cocoa's `control` becomes `alt-` there: once",
-            "//! `command` is `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into",
-            "//! plain Ctrl+F and lets it shadow Find. It is not written as GPUI's",
+            "//! from. The other two platforms also get a different chord per",
+            "//! modifier *combination*, not a rename per modifier: once `command` is",
+            "//! `ctrl`, leaving `control` as `ctrl` too collapses ⌃⌘F into plain Ctrl+F",
+            "//! and lets it shadow Find. So ⌃⌘ is `ctrl-alt`, ⌥⌘ is `ctrl-alt-shift`,",
+            "//! ⌃⌘⇧ is `alt-shift`, and `control` alone is `alt`. The table lives in",
+            "//! `OTHER_FAMILIES` in the generator; the test at the end of this file",
+            "//! keeps every pair of shortcuts distinct. It is not written as GPUI's",
             "//! platform-neutral `secondary`, because `KeyBinding::new` parses with",
             "//! `Keystroke::parse`, which refuses to resolve `secondary` without an",
             "//! operating system and panics on the refusal. `SHORTCUTS` keeps the",
@@ -754,9 +792,10 @@ class Renderer:
             "/// The keystroke as macOS spells it, or the one the other platforms use.",
             "///",
             "/// The generator writes both because the translation is not a rename:",
-            "/// Command is `cmd` on macOS and `ctrl` elsewhere, and Control moves to",
-            "/// `alt` so that a ⌃⌘ chord does not collapse into a ⌘ one. `$mac` and",
-            "/// `$other` are whole keystrokes, so each can be read on its own. The",
+            "/// Command is `cmd` on macOS and `ctrl` elsewhere, and each Windows/Linux",
+            "/// chord is chosen per modifier combination so that no two shortcuts",
+            "/// collide. `$mac` and `$other` are whole keystrokes, so each can be read",
+            "/// on its own. The",
             "/// expansion is `if cfg!` rather than `#[cfg]` because `KeyBinding::new`",
             "/// takes a `&'static str`, and both literals are just strings.",
             "macro_rules! shortcut {",
@@ -787,8 +826,8 @@ class Renderer:
             else:
                 seen[binding] = label
             lines.append(f"    // {label}")
-            mac = binding_string(entry["mods"], entry["key"], "cmd", "ctrl")
-            other = binding_string(entry["mods"], entry["key"], "ctrl", "alt")
+            mac = binding_string(entry["mods"], entry["key"], "cmd")
+            other = other_binding(entry["mods"], entry["key"])
             if "command" in entry["mods"] or "control" in entry["mods"]:
                 # Command and Control are the two modifiers whose spelling
                 # changes per platform, so the pair is written out and chosen
@@ -824,8 +863,8 @@ class Renderer:
         lines.append("pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[")
         for entry in rows:
             label = rebrand(f"{entry['path']} > {entry['title']}")
-            mac = binding_string(entry["mods"], entry["key"], "cmd", "ctrl")
-            other = binding_string(entry["mods"], entry["key"], "ctrl", "alt")
+            mac = binding_string(entry["mods"], entry["key"], "cmd")
+            other = other_binding(entry["mods"], entry["key"])
             if mac == other:
                 keystroke = rust_string(mac)
             else:
