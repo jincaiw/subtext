@@ -222,6 +222,11 @@ jobs:
     # the oldest system we claim.
     container:
       image: ubuntu:20.04
+    # A container job's default shell is `sh`, and these steps use bash:
+    # `set -o pipefail` is not an `sh` option, and the check below needs it.
+    defaults:
+      run:
+        shell: bash
     steps:
       # A `container:` job starts from the bare image, and `actions/checkout`
       # needs `git` inside it. The tooling therefore has to be installed before
