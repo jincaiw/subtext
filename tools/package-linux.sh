@@ -17,7 +17,10 @@
 #
 # This script does not run `cargo build` itself. Linux binaries are built on a
 # Linux host (or in a Linux container), and packaging is the same on either
-# side of that build.
+# side of that build. The build base matters: the ELF records the host glibc's
+# symbol versions, so it has to be built where glibc is 2.31 or older — Kylin
+# Desktop V10 on x86_64 has 2.31, and a binary from a newer base will not even
+# reach `main` there. The release workflow therefore builds in Ubuntu 20.04.
 
 set -euo pipefail
 
@@ -183,7 +186,7 @@ Architecture: $DEB_ARCH
 Maintainer: $MAINTAINER
 Installed-Size: $SIZE_KB
 Homepage: $HOMEPAGE
-Depends: libc6 (>= 2.31), libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-6, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libfontconfig1, libfreetype6, libvulkan1
+Depends: libc6 (>= 2.31), libgcc-s1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-6, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libfontconfig1, libfreetype6, libvulkan1, libegl1
 Description: A plain text editor built with GPUI
  SubText is a faithful reimplementation of CotEditor on GPUI Kit: the same
  menus, shortcuts, syntax definitions and themes, on macOS, Linux and Windows.
@@ -213,6 +216,10 @@ Summary:        A plain text editor built with GPUI
 License:        Apache-2.0
 URL:            $HOMEPAGE
 BuildArch:      $ARCH
+# Kylin Desktop V10 — and every other system the x86_64 archive claims — has
+# glibc 2.31, so an older system gets a dependency error instead of a binary
+# that the loader cannot start.
+Requires:       glibc >= 2.31
 
 %description
 SubText is a faithful reimplementation of CotEditor on GPUI Kit: the same

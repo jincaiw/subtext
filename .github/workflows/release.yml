@@ -212,24 +212,58 @@ jobs:
     name: Linux (x86_64)
     needs: prepare
     runs-on: ubuntu-22.04
+    # A Linux binary is linked against the *build host's* glibc, and the
+    # archive is then installed on distributions older than the runner. Kylin
+    # Desktop V10 — the domestic distribution this job is checked against —
+    # ships glibc 2.31 on x86_64, while `ubuntu-22.04` raises the floor to 2.35.
+    # The loader then stops the program before `main` with a `version
+    # 'GLIBC_2.3x' not found` error, and a launch from the desktop icon shows
+    # nothing at all. 20.04 is also 2.31, so build there: the artifact matches
+    # the oldest system we claim.
+    container:
+      image: ubuntu:20.04
     steps:
+      # A `container:` job starts from the bare image, and `actions/checkout`
+      # needs `git` inside it. The tooling therefore has to be installed before
+      # the checkout step, not after it.
+      - name: Prepare the container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git tar gzip xz-utils zstd python3 file \
+            pkg-config build-essential \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libfontconfig1-dev libfreetype6-dev libvulkan1 \
+            libegl1 rpm
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install build libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev \
-            libxcb-xfixes0-dev libfontconfig1-dev libfreetype6-dev libvulkan1 \
-            rpm
+        with:
+          # The base image belongs in the key: object files built against
+          # 22.04's glibc would otherwise be restored into this 20.04 build and
+          # quietly raise the symbol floor again.
+          key: glibc-2.31
       - name: Test
         run: cargo test --workspace --locked
       - name: Build
         run: cargo build --release --bin subtext -p subtext-app --locked
+      - name: Check the glibc floor
+        run: |
+          set -euo pipefail
+          # The highest versioned glibc symbol is the oldest glibc that can
+          # load this binary. Above 2.31 it will not start on Kylin Desktop
+          # V10, which is what the 20.04 container exists to prevent.
+          highest="$(objdump -T target/release/subtext \
+            | grep -o 'GLIBC_[0-9][0-9.]*' | sort -uV | tail -1)"
+          test -n "$highest"
+          echo "highest glibc symbol: $highest"
+          if [ "$(printf '%s\n2.31\n' "$highest" | sort -V | tail -1)" != "2.31" ]; then
+            echo "error: the binary needs $highest but Kylin V10 has glibc 2.31" >&2
+            exit 1
+          fi
       - name: Fetch appimagetool
         run: |
           curl -fsSL --retry 3 -o /usr/local/bin/appimagetool \
