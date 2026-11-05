@@ -232,7 +232,23 @@ make_dmg() {
     mkdir -p "$stage"
     cp -R "$APP" "$stage/"
     ln -s /Applications "$stage/Applications"
-    hdiutil create -quiet -volname "$BUNDLE_NAME" -srcfolder "$stage" -ov -format UDZO "$DMG"
+    # `hdiutil` intermittently exits 1 right after the bundle is copied — the
+    # GitHub runner gives "Resource busy" while the new files are still being
+    # indexed, and `-quiet` hides it. Retrying is what turns that into a slower
+    # build instead of a failed release; the output is kept for the error.
+    local attempt=1
+    until hdiutil create -volname "$BUNDLE_NAME" -srcfolder "$stage" -ov \
+            -format UDZO "$DMG"; do
+        rm -f "$DMG"
+        if [ "$attempt" -ge 3 ]; then
+            rm -rf "$stage"
+            echo "error: hdiutil create failed $attempt times" >&2
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        echo "hdiutil failed; retrying ($attempt/3)" >&2
+        sleep 5
+    done
     rm -rf "$stage"
 }
 

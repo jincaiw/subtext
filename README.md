@@ -238,7 +238,7 @@ cargo test -p subtext-app --features ui-tests --test ui --locked
 | macOS arm64 | 本机验证 | `.app` / `.dmg` / `.zip` 本机验证 | **是**，macOS 27 |
 | macOS x86_64 | CI 交叉构建 | `.dmg` / `.zip` 由 CI 产出 | 否 |
 | Windows x64 | CI 构建 | 便携 `.zip` 由 CI 产出 | 否 |
-| Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.0 待在麒麟 V10 真机确认 |
+| Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.1 待在麒麟 V10 真机确认 |
 
 macOS 的全部门禁（fmt、单元测试、真实窗口 UI 测试、clippy）在 `macos-14` 上运行。Linux 与
 Windows 的 workflow 会先跑 `cargo test --workspace` 再打包，能证明"编译并测试通过"，

@@ -260,13 +260,15 @@ jobs:
           set -euo pipefail
           # The highest versioned glibc symbol is the oldest glibc that can
           # load this binary. Above 2.31 it will not start on Kylin Desktop
-          # V10, which is what the 20.04 container exists to prevent.
+          # V10, which is what the 20.04 container exists to prevent. The
+          # prefix comes off before the sort so `sort -V` compares numbers:
+          # "GLIBC_2.30" sorts after "2.31" because of the letters.
           highest="$(objdump -T target/release/subtext \
-            | grep -o 'GLIBC_[0-9][0-9.]*' | sort -uV | tail -1)"
+            | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -1)"
           test -n "$highest"
-          echo "highest glibc symbol: $highest"
+          echo "highest glibc symbol: GLIBC_$highest"
           if [ "$(printf '%s\n2.31\n' "$highest" | sort -V | tail -1)" != "2.31" ]; then
-            echo "error: the binary needs $highest but Kylin V10 has glibc 2.31" >&2
+            echo "error: the binary needs GLIBC_$highest but Kylin V10 has glibc 2.31" >&2
             exit 1
           fi
       - name: Fetch appimagetool
