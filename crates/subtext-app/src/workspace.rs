@@ -76,6 +76,7 @@ use subtext_syntax::{Syntax, SyntaxManager};
 use subtext_theme::{Theme, ThemeManager};
 
 use crate::color_sheet::ColorSheet;
+use crate::column_editor_sheet::ColumnEditorSheet;
 use crate::command_bar::{self, CommandBar};
 use crate::console;
 use crate::count_panel::{CountOptionsView, CountSheet};
@@ -2884,6 +2885,60 @@ impl Workspace {
         editor.update(cx, |state, cx| state.add_selection(offset..offset, cx));
         self.column_walk = Some(walk);
         cx.notify();
+    }
+
+    /// The *Column Editor* sheet, seeded with the caret's display column.
+    ///
+    /// Notepad++'s command, not CotEditor's: CotEditor selects a column but
+    /// has nothing that inserts one. The sheet's field counts from 1 because
+    /// that is how the user counts; everything below works in the 0-based
+    /// display columns [`textops::display_column`] reports.
+    pub fn column_editor_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = self.active_text(cx) else {
+            return;
+        };
+        let selection = self.active_selection(cx);
+        let tab_width = self.settings.tab_width;
+        let offset = selection.start.min(text.len());
+        let line_start = text[..offset]
+            .rfind(['\n', '\r'])
+            .map_or(0, |index| index + 1);
+        let column =
+            textops::display_column(&text[line_start..offset], offset - line_start, tab_width);
+        let lines = textops::column_target_line_count(&text, &selection);
+
+        let workspace = Workspace::weak(cx);
+        let sheet =
+            cx.new(|cx| ColumnEditorSheet::new(workspace, tab_width, column, lines, window, cx));
+        window.open_dialog(cx, move |dialog, window, _| {
+            let submit = sheet.clone();
+            dialog
+                .title(localization::t("Column Editor"))
+                // `Dialog::w` takes pixels, not a `Length`, so the interface
+                // scale is applied by hand rather than by the layout engine.
+                .w(window.rem_size() * 32.)
+                .child(sheet.clone())
+                // Enter reaches the dialog's own action, not the sheet's
+                // button; `submit` is installed here for the same reason as in
+                // the other sheets.
+                .on_ok(move |_, window, cx| {
+                    submit.update(cx, |sheet, cx| sheet.submit(window, cx));
+                    true
+                })
+        });
+    }
+
+    /// Insert at a display column on every selected line, as the *Column
+    /// Editor* asks.
+    pub fn insert_at_column(
+        &mut self,
+        request: textops::ColumnInsert,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.text_op(window, cx, move |text, selection, _| {
+            textops::insert_at_column(text, selection, &request)
+        });
     }
 
     /// Select the nearest enclosing bracketed region, delimiters included.

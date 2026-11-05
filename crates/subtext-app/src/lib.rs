@@ -31,6 +31,7 @@
 pub mod actions;
 pub mod bridge;
 pub mod color_sheet;
+pub mod column_editor_sheet;
 pub mod command_bar;
 pub mod console;
 pub mod count_panel;

@@ -182,6 +182,12 @@ pub fn default_bindings() -> Vec<KeyBinding> {
             actions::edit::SelectColumnDown,
             None,
         ),
+        // Edit > Select > Column Editor…
+        KeyBinding::new(
+            shortcut!("alt-cmd-c", "ctrl-alt-shift-c"),
+            actions::edit::ShowColumnEditor,
+            None,
+        ),
         // Edit > Select > Split Selection by Lines
         KeyBinding::new(
             shortcut!("ctrl-shift-l", "alt-shift-l"),
@@ -770,6 +776,17 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str, &str)] = &[
         },
     ),
     (
+        "Edit > Select > Column Editor…",
+        "⌥⌘C",
+        "option command",
+        "c",
+        if cfg!(target_os = "macos") {
+            "alt-cmd-c"
+        } else {
+            "ctrl-alt-shift-c"
+        },
+    ),
+    (
         "Edit > Select > Split Selection by Lines",
         "⌃⇧L",
         "control shift",
@@ -1317,7 +1334,7 @@ mod tests {
     /// rather than at the first keypress. Building the table is the test.
     #[test]
     fn every_binding_parses() {
-        assert_eq!(default_bindings().len(), 75);
+        assert_eq!(default_bindings().len(), 76);
     }
 
     /// Two commands on one keystroke is a bug unless it is CotEditor's bug.

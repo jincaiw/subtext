@@ -157,6 +157,7 @@ impl Workspace {
             // logical lines and character columns (§22.54).
             "SelectColumnUp" => self.select_column(true, cx),
             "SelectColumnDown" => self.select_column(false, cx),
+            "ShowColumnEditor" => self.column_editor_dialog(window, cx),
             "Complete" => self.complete(window, cx),
             // The macOS Character Viewer is the system's code-point picker;
             // GPUI can ask for it, though not for a palette scoped to the

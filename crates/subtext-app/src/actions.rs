@@ -99,6 +99,7 @@ pub mod edit {
             SelectEnclosingSymbols,
             SelectColumnUp,
             SelectColumnDown,
+            ShowColumnEditor,
             SplitSelectionByLines,
             Complete,
             InputBackSlash,

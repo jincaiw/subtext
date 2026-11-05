@@ -11,7 +11,7 @@
 //! The generator adds it in the same place, so this bar is the one
 //! CotEditor actually shows rather than the one its storyboard declares.
 //!
-//! 259 items: 27 submenus, 169 commands,
+//! 260 items: 27 submenus, 170 commands,
 //! 52 separators and 11 placeholders. The placeholders
 //! are the items CotEditor fills in from the system or at runtime — Services,
 //! the Format popups, the Script menu — and they stay visible and greyed
@@ -108,6 +108,7 @@ pub fn app_menus(state: &crate::menus::MenuGates) -> Vec<Menu> {
                         MenuItem::separator(),
                         MenuItem::action("Select Column Up", actions::edit::SelectColumnUp),
                         MenuItem::action("Select Column Down", actions::edit::SelectColumnDown),
+                        MenuItem::action("Column Editor…", actions::edit::ShowColumnEditor),
                         MenuItem::separator(),
                         MenuItem::action(
                             "Split Selection by Lines",
@@ -777,6 +778,10 @@ pub const COMMANDS: &[Command] = &[
         action: "SelectColumnDown",
     },
     Command {
+        path: "Edit > Select > Column Editor…",
+        action: "ShowColumnEditor",
+    },
+    Command {
         path: "Edit > Select > Split Selection by Lines",
         action: "SplitSelectionByLines",
     },
@@ -1355,7 +1360,7 @@ mod tests {
             .iter()
             .map(count)
             .sum();
-        assert_eq!(total, 173);
+        assert_eq!(total, 174);
     }
 
     /// Every command the bar can offer is one the menu bar has.
@@ -1364,7 +1369,7 @@ mod tests {
     /// missing from either would be a generator bug rather than a typo.
     #[test]
     fn the_command_table_is_the_whole_menu() {
-        assert_eq!(COMMANDS.len(), 169);
+        assert_eq!(COMMANDS.len(), 170);
         let mut paths: Vec<_> = COMMANDS.iter().map(|c| c.path).collect();
         paths.sort_unstable();
         paths.dedup();

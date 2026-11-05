@@ -826,6 +826,100 @@ fn the_sort_sheet_answers_enter_and_escape(cx: &mut TestAppContext) {
     .expect("keys");
 }
 
+/// The Column Editor inserts at the caret's column on every selected line.
+///
+/// The sheet is seeded from the selection, so this follows the whole path a
+/// user takes: select lines, open the sheet, type, confirm. The lines are
+/// different lengths on purpose — the padding is the part that makes the
+/// result a column.
+#[gpui_kit::test]
+fn the_column_editor_inserts_at_the_caret_column_down_every_selected_line(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "column-editor", "abcd\nxy\nz");
+    // The selection starts after "abc", so the sheet opens on display column
+    // 3 and every line is padded to reach it.
+    select(cx, &workspace, 3..9);
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.column_editor_dialog(window, cx)
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("column-editor-text").is_some(),
+            "the Column Editor should be open"
+        );
+
+        window.click("column-editor-text", cx);
+        window.input(">", cx);
+        assert_eq!(
+            window.find("column-editor-text").value(),
+            Some(">"),
+            "the text field should hold what was typed"
+        );
+        window.click("column-editor-apply", cx);
+        assert!(
+            window.try_find("column-editor-text").is_none(),
+            "applying should have dismissed the sheet"
+        );
+        // The edit itself is deferred to the end of the effect cycle so the
+        // editor's change event cannot re-enter the workspace; the frame is
+        // what lets it land.
+        window.render_frame(cx);
+    })
+    .expect("apply the column");
+    cx.run_until_parked();
+
+    assert_eq!(
+        active_text(cx, &workspace).as_deref(),
+        Some("abc>d\nxy >\nz  >"),
+        "the insertion should sit in one column, padding the short lines"
+    );
+}
+
+/// Enter confirms and Escape cancels, from the sheet's own field.
+///
+/// The text field holds the caret when the sheet opens, so a plain `press`
+/// only reaches the sheet if the sheet took the keyboard with it.
+#[gpui_kit::test]
+fn the_column_editor_answers_enter_and_escape(cx: &mut TestAppContext) {
+    let (window, workspace) = open_workspace_with_document(cx, "column-editor-keys", "ab");
+
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.column_editor_dialog(window, cx)
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("column-editor-apply").is_some(),
+            "the Column Editor should be open"
+        );
+
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("column-editor-apply").is_none(),
+            "Escape should close the sheet without a click first"
+        );
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.column_editor_dialog(window, cx)
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("column-editor-apply").is_none(),
+            "Enter should close the sheet and insert"
+        );
+    })
+    .expect("keys");
+}
+
 /// ⌘F puts the caret in the find field.
 ///
 /// The find bar is a window of its own, not a dialog, so the test has to find

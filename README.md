@@ -80,14 +80,35 @@ sha256sum -c SHA256SUMS --ignore-missing
 与 `APPLE_APP_PASSWORD`，`tools/package-macos.sh` 会完成 Developer ID 签名、公证与装订票据；
 仓库的 Release workflow 会读取同名 secrets。
 
-**Linux 运行依赖。** GPUI 使用 X11/Wayland、xkbcommon、fontconfig 与 Vulkan。`.deb` 与
-`.rpm` 已声明依赖，由包管理器安装；用 AppImage 或 tar.gz 时，常见发行版需要：
+**Linux 运行依赖。** GPUI 使用 X11/Wayland、xkbcommon、fontconfig 与 Vulkan（Vulkan 不可用时
+退回 OpenGL）。`.deb` 与 `.rpm` 已声明依赖，由包管理器安装；用 AppImage 或 tar.gz 时，常见
+发行版需要：
 
 ```bash
 # Debian / Ubuntu
 sudo apt install libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcb1 \
-  libxcb-render0 libxcb-shape0 libxcb-xfixes0 libfontconfig1 libfreetype6 libvulkan1
+  libxcb-render0 libxcb-shape0 libxcb-xfixes0 libfontconfig1 libfreetype6 libvulkan1 \
+  libegl1 libgcc-s1
 ```
+
+**glibc 基线。** Linux 包在 Ubuntu 20.04 上构建，要求 **glibc ≥ 2.31**——银河麒麟桌面操作系统
+V10（x86_64）的 glibc 正是 2.31，因此可以在它上面加载。更旧的系统会在启动前被动态链接器
+拦下；此时 `.deb` 的 `Depends: libc6 (>= 2.31)` 会让安装直接报依赖错误，而不是装上一个打不开的
+程序。
+
+**点了图标没反应？** 桌面启动器不显示程序的输出，先分辨是「二进制起不来」还是「窗口开不了」：
+
+```bash
+subtext --version        # 能打印版本号 = 程序本身已加载，问题在图形环境
+subtext                  # 在终端里直接运行，启动失败的原文会留在这里
+```
+
+- 报 `version 'GLIBC_2.xx' not found`：系统 glibc 低于 2.31，装不了这个包。
+- 报 `No GPU adapters found` 或 Vulkan 初始化失败：安装可用的显卡驱动或 Mesa 的软件渲染：
+  `sudo apt install mesa-vulkan-drivers`（麒麟 V10 同样适用）。
+- 只有从 SSH/远程终端启动才失败：检查 `echo $DISPLAY`、`echo $WAYLAND_DISPLAY`，本地桌面会话
+  里这两个变量才有值。
+- `.AppImage` 还需要 FUSE（`libfuse2`）；没有 FUSE 时用 `.deb` 或 `tar.gz`。
 
 安装后，应用菜单里会出现 SubText，图标来自 `hicolor/256x256/apps/subtext.png`；`.desktop`
 文件声明它可以打开 `text/plain`。
@@ -217,7 +238,7 @@ cargo test -p subtext-app --features ui-tests --test ui --locked
 | macOS arm64 | 本机验证 | `.app` / `.dmg` / `.zip` 本机验证 | **是**，macOS 27 |
 | macOS x86_64 | CI 交叉构建 | `.dmg` / `.zip` 由 CI 产出 | 否 |
 | Windows x64 | CI 构建 | 便携 `.zip` 由 CI 产出 | 否 |
-| Linux x86_64 | CI 构建 | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否 |
+| Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.0 待在麒麟 V10 真机确认 |
 
 macOS 的全部门禁（fmt、单元测试、真实窗口 UI 测试、clippy）在 `macos-14` 上运行。Linux 与
 Windows 的 workflow 会先跑 `cargo test --workspace` 再打包，能证明"编译并测试通过"，

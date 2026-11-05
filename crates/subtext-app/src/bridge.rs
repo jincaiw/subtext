@@ -385,6 +385,7 @@ pub fn install(cx: &mut App) {
         actions::edit::SelectEnclosingSymbols => "SelectEnclosingSymbols",
         actions::edit::SelectColumnUp => "SelectColumnUp",
         actions::edit::SelectColumnDown => "SelectColumnDown",
+        actions::edit::ShowColumnEditor => "ShowColumnEditor",
         actions::edit::SplitSelectionByLines => "SplitSelectionByLines",
         actions::edit::Complete => "Complete",
         actions::edit::InputBackSlash => "InputBackSlash",

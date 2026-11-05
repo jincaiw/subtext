@@ -2441,6 +2441,215 @@ fn char_display_width(ch: char, column: usize, tab_width: usize) -> usize {
     }
 }
 
+/// What a column insertion puts on each line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnContent {
+    /// The same text on every line. An empty string is allowed: it pads the
+    /// short lines without adding anything, which is how a block gets aligned
+    /// before some other operation.
+    Text(String),
+    /// A numbered run, one value per line.
+    Number(ColumnNumbering),
+}
+
+/// The numbering a [`ColumnContent::Number`] insertion runs through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnNumbering {
+    /// The value on the first line.
+    pub start: i64,
+    /// What the value gains on every line below. Negative counts down.
+    pub step: i64,
+    /// Pad every value to the width of the widest one in the run.
+    ///
+    /// The width comes from the run itself rather than from a fixed number of
+    /// digits, so `9, 10, 11` becomes `09, 10, 11` — a column that lines up
+    /// even though the digits do not have the same count.
+    pub leading_zeros: bool,
+    /// The base the values are written in.
+    pub format: ColumnNumberFormat,
+}
+
+/// The bases a numbered column can be written in — Notepad++'s four.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnNumberFormat {
+    Decimal,
+    Hexadecimal,
+    Octal,
+    Binary,
+}
+
+/// Everything one column insertion needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnInsert {
+    /// The display column to insert at, 0-based.
+    ///
+    /// Tabs and East Asian characters count the way they are drawn, so the
+    /// insertion lines up with what the user sees rather than with a character
+    /// count.
+    pub column: usize,
+    /// The document's tab width, for the two conversions above.
+    pub tab_width: usize,
+    /// What to insert.
+    pub content: ColumnContent,
+}
+
+/// Insert at a display column on every selected line.
+///
+/// This is the *Column Editor*: the lines the selection touches — or just the
+/// caret's line when nothing is selected — each receive the same text, or the
+/// next value of a numbered run, at the same visual column. A line too short
+/// for the column is padded with spaces, so the inserted run stays in a
+/// straight column; that padding is what makes this a column edit rather than
+/// a find-and-replace over lines.
+///
+/// The selection is read the way every line command reads it: a selection that
+/// stops exactly at a line start has not reached that line
+/// ([`selected_line_ranges`] uses the same rule). Line terminators are left
+/// untouched — CRLF and lone-CR documents keep their endings — and the padding
+/// goes before the terminator, never after it.
+///
+/// The caret ends after the last insertion. The run is left collapsed rather
+/// than selected, because a linear selection over a rectangular result would
+/// shade every character between the first and last insertion.
+pub fn insert_at_column(text: &str, selection: &Range<usize>, request: &ColumnInsert) -> Edit {
+    let bounds = line_bounds(text);
+    let (first, last) = column_line_span(&bounds, text.len(), selection);
+
+    let count = last - first + 1;
+    let values = column_values(&request.content, count);
+
+    let mut out = String::with_capacity(text.len() + count * values.first().map_or(0, String::len));
+    let mut copied = 0;
+    let mut caret = 0;
+    for (index, line) in (first..=last).enumerate() {
+        let (line_start, content_end) = bounds[line];
+        let line = &text[line_start..content_end];
+        let offset =
+            line_start + offset_for_display_column(line, request.column, request.tab_width);
+        // Where that offset is *drawn*. Usually it is the target column; it is
+        // short of it when the line ends first (a short line) or when the
+        // column falls inside a tab or a wide character, which cannot be
+        // split. Padding with spaces is what puts the insertion at the column
+        // the user asked for in all three cases.
+        let reached = display_column(line, offset - line_start, request.tab_width);
+        out.push_str(&text[copied..offset]);
+        if reached < request.column {
+            out.push_str(&" ".repeat(request.column - reached));
+        }
+        out.push_str(&values[index]);
+        copied = offset;
+        caret = out.len();
+    }
+    out.push_str(&text[copied..]);
+
+    Edit {
+        text: out,
+        selection: caret..caret,
+    }
+}
+
+/// How many lines a column insertion would touch.
+///
+/// The lines the selection covers, or one line for a bare caret. The sheet
+/// shows this number and [`insert_at_column`] uses the same span, so the
+/// promise and the edit cannot disagree.
+pub fn column_target_line_count(text: &str, selection: &Range<usize>) -> usize {
+    let (first, last) = column_line_span(&line_bounds(text), text.len(), selection);
+    last - first + 1
+}
+
+/// The first and last line a column insertion targets, as indices into
+/// `bounds`.
+fn column_line_span(
+    bounds: &[(usize, usize)],
+    text_len: usize,
+    selection: &Range<usize>,
+) -> (usize, usize) {
+    let start = selection.start.min(text_len);
+    let end = selection.end.min(text_len);
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+
+    let first = line_holding(bounds, text_len, start);
+    let mut last = line_holding(bounds, text_len, end);
+    // A selection ending exactly at a line start does not include that line.
+    // This is the same rule `line_content_ranges` states; without it, select
+    // all on a document whose last line is empty would insert into a line the
+    // user cannot see.
+    if end > start && last > first && bounds[last].0 == end {
+        last -= 1;
+    }
+    (first, last)
+}
+
+/// The line whose content or terminator holds `offset`.
+///
+/// A terminator belongs to the line it ends, so an offset inside `\r\n` is the
+/// line before it. The end of the document belongs to the last line, which is
+/// where a caret at EOF sits.
+fn line_holding(bounds: &[(usize, usize)], text_len: usize, offset: usize) -> usize {
+    for (index, &(line_start, content_end)) in bounds.iter().enumerate() {
+        let next_start = bounds.get(index + 1).map_or(text_len, |bound| bound.0);
+        if line_start <= offset && offset < next_start {
+            return index;
+        }
+        if index + 1 == bounds.len() && line_start <= offset && offset <= content_end {
+            return index;
+        }
+    }
+    bounds.len().saturating_sub(1)
+}
+
+/// One insertion per target line.
+fn column_values(content: &ColumnContent, count: usize) -> Vec<String> {
+    match content {
+        ColumnContent::Text(value) => vec![value.clone(); count],
+        ColumnContent::Number(numbering) => {
+            let mut values = Vec::with_capacity(count);
+            let mut value = numbering.start;
+            for _ in 0..count {
+                values.push(column_number(value, numbering.format));
+                value = value.saturating_add(numbering.step);
+            }
+            if numbering.leading_zeros {
+                let width = values
+                    .iter()
+                    .map(|value| value.trim_start_matches('-').len())
+                    .max()
+                    .unwrap_or(0);
+                for value in &mut values {
+                    let padded = match value.strip_prefix('-') {
+                        Some(digits) => format!("-{digits:0>width$}"),
+                        None => format!("{value:0>width$}"),
+                    };
+                    *value = padded;
+                }
+            }
+            values
+        }
+    }
+}
+
+/// A value in the chosen base, without padding. Hex letters are upper case,
+/// which is how Notepad++ writes them.
+fn column_number(value: i64, format: ColumnNumberFormat) -> String {
+    let magnitude = value.unsigned_abs();
+    let digits = match format {
+        ColumnNumberFormat::Decimal => magnitude.to_string(),
+        ColumnNumberFormat::Hexadecimal => format!("{magnitude:X}"),
+        ColumnNumberFormat::Octal => format!("{magnitude:o}"),
+        ColumnNumberFormat::Binary => format!("{magnitude:b}"),
+    };
+    if value < 0 {
+        format!("-{digits}")
+    } else {
+        digits
+    }
+}
+
 /// Line geometry for a whole text, computed once.
 ///
 /// This is the **six-terminator** view — `\r\n`, `\r`, `\n`, NEL, LS, PS —
@@ -3532,6 +3741,208 @@ mod tests {
                 "offset {offset} should keep its column"
             );
         }
+    }
+
+    #[test]
+    fn a_column_insert_lines_up_on_every_selected_line() {
+        let text = "alpha\nb\ncharlie";
+        let request = ColumnInsert {
+            column: 4,
+            tab_width: 4,
+            content: ColumnContent::Text("|".into()),
+        };
+        let edit = insert_at_column(text, &all(text), &request);
+        assert_eq!(edit.text, "alph|a\nb   |\nchar|lie");
+        // The caret is after the last insertion.
+        assert_eq!(edit.selection, 18..18);
+    }
+
+    #[test]
+    fn a_short_line_is_padded_to_the_column() {
+        let text = "a\n\nbc";
+        let request = ColumnInsert {
+            column: 3,
+            tab_width: 4,
+            content: ColumnContent::Text("x".into()),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &request).text,
+            "a  x\n   x\nbc x"
+        );
+    }
+
+    /// A column that falls inside a tab or a wide character cannot be written
+    /// through the middle of it, so spaces push the insertion to the requested
+    /// column and the character moves right.
+    #[test]
+    fn a_column_inside_a_tab_or_a_wide_character_is_padded_to_reach_it() {
+        let request = ColumnInsert {
+            column: 2,
+            tab_width: 4,
+            content: ColumnContent::Text("|".into()),
+        };
+        assert_eq!(insert_at_column("\tab", &(0..0), &request).text, "  |\tab");
+
+        let request = ColumnInsert {
+            column: 3,
+            tab_width: 4,
+            content: ColumnContent::Text("|".into()),
+        };
+        assert_eq!(insert_at_column("名称", &(0..0), &request).text, "名 |称");
+    }
+
+    #[test]
+    fn a_column_counts_tabs_and_wide_characters_the_way_they_are_drawn() {
+        let text = "\tab\n名称\nx";
+        let request = ColumnInsert {
+            column: 4,
+            tab_width: 4,
+            content: ColumnContent::Text("|".into()),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &request).text,
+            "\t|ab\n名称|\nx   |"
+        );
+    }
+
+    #[test]
+    fn a_column_insert_leaves_a_selection_ending_at_a_line_start_alone() {
+        // Select all of "a\n" but not the line "b": the caret's line is the
+        // only one the empty line below is not.
+        let text = "a\nb";
+        let request = ColumnInsert {
+            column: 0,
+            tab_width: 4,
+            content: ColumnContent::Text("X".into()),
+        };
+        assert_eq!(insert_at_column(text, &(0..2), &request).text, "Xa\nb");
+        // With no selection the caret's own line is the target.
+        assert_eq!(insert_at_column(text, &(2..2), &request).text, "a\nXb");
+    }
+
+    #[test]
+    fn a_column_insert_keeps_crlf_and_cr_line_endings() {
+        let request = ColumnInsert {
+            column: 2,
+            tab_width: 4,
+            content: ColumnContent::Text("+".into()),
+        };
+        let crlf = "ab\r\ncd\r\n";
+        assert_eq!(
+            insert_at_column(crlf, &all(crlf), &request).text,
+            "ab+\r\ncd+\r\n"
+        );
+        let cr = "ab\rcd\ref";
+        assert_eq!(
+            insert_at_column(cr, &all(cr), &request).text,
+            "ab+\rcd+\ref+"
+        );
+    }
+
+    #[test]
+    fn a_numbered_column_counts_from_the_start_and_steps_by_the_increase() {
+        let text = "a\nb\nc\nd";
+        let request = ColumnInsert {
+            column: 0,
+            tab_width: 4,
+            content: ColumnContent::Number(ColumnNumbering {
+                start: 3,
+                step: -2,
+                leading_zeros: false,
+                format: ColumnNumberFormat::Decimal,
+            }),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &request).text,
+            "3a\n1b\n-1c\n-3d"
+        );
+    }
+
+    #[test]
+    fn leading_zeros_pad_to_the_widest_value_in_the_run() {
+        let text = "a\nb\nc";
+        let decimal = ColumnInsert {
+            column: 0,
+            tab_width: 4,
+            content: ColumnContent::Number(ColumnNumbering {
+                start: 9,
+                step: 1,
+                leading_zeros: true,
+                format: ColumnNumberFormat::Decimal,
+            }),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &decimal).text,
+            "09a\n10b\n11c"
+        );
+
+        let hexadecimal = ColumnInsert {
+            column: 0,
+            tab_width: 4,
+            content: ColumnContent::Number(ColumnNumbering {
+                start: 15,
+                step: 1,
+                leading_zeros: true,
+                format: ColumnNumberFormat::Hexadecimal,
+            }),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &hexadecimal).text,
+            "0Fa\n10b\n11c"
+        );
+    }
+
+    #[test]
+    fn every_base_writes_its_own_digits() {
+        let text = "x";
+        let number = |format| ColumnInsert {
+            column: 0,
+            tab_width: 4,
+            content: ColumnContent::Number(ColumnNumbering {
+                start: 30,
+                step: 0,
+                leading_zeros: false,
+                format,
+            }),
+        };
+        assert_eq!(
+            insert_at_column(text, &all(text), &number(ColumnNumberFormat::Decimal)).text,
+            "30x"
+        );
+        assert_eq!(
+            insert_at_column(text, &all(text), &number(ColumnNumberFormat::Hexadecimal)).text,
+            "1Ex"
+        );
+        assert_eq!(
+            insert_at_column(text, &all(text), &number(ColumnNumberFormat::Octal)).text,
+            "36x"
+        );
+        assert_eq!(
+            insert_at_column(text, &all(text), &number(ColumnNumberFormat::Binary)).text,
+            "11110x"
+        );
+    }
+
+    #[test]
+    fn an_empty_column_insert_only_pads() {
+        let text = "ab\nc";
+        let request = ColumnInsert {
+            column: 2,
+            tab_width: 4,
+            content: ColumnContent::Text(String::new()),
+        };
+        assert_eq!(insert_at_column(text, &all(text), &request).text, "ab\nc ");
+    }
+
+    #[test]
+    fn the_line_count_the_sheet_shows_is_the_span_the_insert_touches() {
+        let text = "a\nb\nc";
+        assert_eq!(column_target_line_count(text, &all(text)), 3);
+        // A selection ending at a line start has not reached that line.
+        assert_eq!(column_target_line_count(text, &(0..2)), 1);
+        // A bare caret targets its own line.
+        assert_eq!(column_target_line_count(text, &(2..2)), 1);
+        assert_eq!(column_target_line_count("", &(0..0)), 1);
     }
 
     #[test]

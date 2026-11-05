@@ -912,3 +912,20 @@ SubText {} is the latest version.	SubText {} 是最新版本。
 Couldn’t check for updates.	无法检查更新。
 GitHub is limiting release checks right now. Try again later.	GitHub 暂时限制了发布检查的访问，请稍后重试。
 Couldn’t reach GitHub. Check the network and try again.	无法连接 GitHub，请检查网络后重试。
+# The Column Editor. The English side is Notepad++'s wording, which is where
+# the command comes from; the Chinese follows CotEditor's terminology for
+# "column" (列) and "insert" (插入).
+Column Editor	列编辑器
+Column:	列：
+Insert:	插入：
+Text to insert:	要插入的文本：
+Number	数字
+Initial number:	起始数字：
+Increase by:	增量：
+Leading zeros	补齐前导零
+Decimal	十进制
+Hex	十六进制
+Octal	八进制
+Binary	二进制
+Applies to the caret's line. Short lines are padded with spaces.	作用于光标所在行。较短的行会用空格补齐。
+Applies to {} selected lines. Short lines are padded with spaces.	作用于选中的 {} 行。较短的行会用空格补齐。

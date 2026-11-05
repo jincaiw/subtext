@@ -63,15 +63,23 @@ SYSTEM_MENUS = {
     "CotEditor > Services": ("Services", "Services"),
 }
 
-# The one item that is not in the storyboard.
+# The items that are not in the storyboard.
 #
-# CotEditor's updater is Sparkle, and `UpdaterManager.swift` inserts its
-# "Check for Updates…" item into the application menu at index 1 — right after
-# About — because the menu belongs to the application and the updater is
-# installed from code. SubText's updater is `crate::update`, and this is the
-# same item in the same place. It is added here rather than to `menu.json` so
-# that table stays the storyboard dump it is documented to be; a row invented
-# there would be indistinguishable from one CotEditor actually has.
+# "Check for Updates…": CotEditor's updater is Sparkle, and `UpdaterManager.swift`
+# inserts its item into the application menu at index 1 — right after About —
+# because the menu belongs to the application and the updater is installed from
+# code. SubText's updater is `crate::update`, and this is the same item in the
+# same place.
+#
+# "Column Editor…": CotEditor selects a column (*Select Column Up/Down*) but has
+# no command that inserts one. SubText adds Notepad++'s column editor under the
+# same submenu, next to the two commands that build a column of carets. The
+# chord is ⌥⌘C rather than Notepad++'s Alt+C because on macOS ⌥C types "ç" —
+# a command must not take a key away from text input.
+#
+# Both are added here rather than to `menu.json` so that table stays the
+# storyboard dump it is documented to be; a row invented there would be
+# indistinguishable from one CotEditor actually has.
 RUNTIME_MENU_ITEMS = [
     {
         "path": SOURCE_APP_MENU_TITLE,
@@ -80,6 +88,14 @@ RUNTIME_MENU_ITEMS = [
         "mods": [],
         "key": "",
         "action": "checkForUpdates:",
+    },
+    {
+        "path": "Edit > Select",
+        "after": "Select Column Down",
+        "title": "Column Editor…",
+        "mods": ["command", "option"],
+        "key": "c",
+        "action": "showColumnEditor:",
     },
 ]
 

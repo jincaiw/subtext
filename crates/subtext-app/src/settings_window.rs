@@ -4093,10 +4093,10 @@ mod tests {
         assert_eq!(rows, keymap::SHORTCUTS.len());
     }
 
-    /// A group is a whole submenu path. Reading only the top-level menu put six
-    /// `Edit > Select > …` commands under one `Edit` heading, where the label
-    /// alone (`Select All`, `Select Line`, …) was the only thing telling them
-    /// apart — and two different submenus can reuse a leaf name.
+    /// A group is a whole submenu path. Reading only the top-level menu put
+    /// seven `Edit > Select > …` commands under one `Edit` heading, where the
+    /// label alone (`Select All`, `Select Line`, …) was the only thing telling
+    /// them apart — and two different submenus can reuse a leaf name.
     #[test]
     fn groups_are_submenus_not_top_level_menus() {
         let groups = shortcut_groups();
@@ -4104,7 +4104,7 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "Edit > Select")
             .expect("Edit ▸ Select is a group of its own");
-        assert_eq!(select.1.len(), 6);
+        assert_eq!(select.1.len(), 7);
 
         // `Edit` on its own would mean some path had a single segment, which
         // the menu table never has.
