@@ -108,7 +108,7 @@ jobs:
   check:
     name: Check (macOS)
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,7 +131,7 @@ jobs:
   macos:
     name: macOS (${{ matrix.arch }})
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-latest
     strategy:
       fail-fast: true
       matrix:

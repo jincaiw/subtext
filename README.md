@@ -262,7 +262,7 @@ cargo test -p subtext-app --features ui-tests --test ui --locked
 | Windows x64 | CI 构建 | 便携 `.zip` 由 CI 产出 | 否 |
 | Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.2 增加启动诊断，麒麟 V10 真机仍待确认 |
 
-macOS 的全部门禁（fmt、单元测试、真实窗口 UI 测试、clippy）在 `macos-14` 上运行。Linux 与
+macOS 的全部门禁（fmt、单元测试、真实窗口 UI 测试、clippy）在 `macos-latest` 上运行。Linux 与
 Windows 的 workflow 会先跑 `cargo test --workspace` 再打包，能证明"编译并测试通过"，
 不能替代在真机上安装、启动、打开文件、检查中文显示与系统菜单。这里不会把未经运行验证的
 产物称为"支持"；已知缺口见 [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md)。

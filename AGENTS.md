@@ -123,7 +123,7 @@ tools/peek-overlay.sh 0 /tmp/surround.png            # 对话框（Custom Surrou
 - **不引入 `syntect` / tree-sitter 高亮。** 高亮必须走 `.cotsyntax` 规则，那才是和 CotEditor
   逐 token 一致的原因（见 `Cargo.toml` 的注释）。
 - **不把 `cargo build` / `cargo test` 直接当验证入口**，用 `tools/check.sh`，免得漏掉 clippy 或 UI 测试。
-- **平台状态**：只有 macOS（`aarch64-apple-darwin`）验证过；CI 在 `macos-14` 上跑，
+- **平台状态**：只有 macOS（`aarch64-apple-darwin`）验证过；CI 在 `macos-latest` 上跑，
   另用 `cargo check -p subtext-core` 覆盖 Linux/Windows 的 `cfg` 分支。Windows/Linux 的实际运行
   没验证过，别声称「支持」。
 - **不提交 `dist/`、`target/`、`.refs/`**——`.gitignore` 已经挡住。
