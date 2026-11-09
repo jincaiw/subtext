@@ -88,7 +88,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 # Debian / Ubuntu
 sudo apt install libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcb1 \
   libxcb-render0 libxcb-shape0 libxcb-xfixes0 libfontconfig1 libfreetype6 libvulkan1 \
-  libegl1 libgcc-s1
+  libegl1 libgl1 libgcc-s1
 ```
 
 **glibc 基线。** Linux 包在 Ubuntu 20.04 上构建，要求 **glibc ≥ 2.31**——银河麒麟桌面操作系统
@@ -96,16 +96,38 @@ V10（x86_64）的 glibc 正是 2.31，因此可以在它上面加载。更旧�
 拦下；此时 `.deb` 的 `Depends: libc6 (>= 2.31)` 会让安装直接报依赖错误，而不是装上一个打不开的
 程序。
 
-**点了图标没反应？** 桌面启动器不显示程序的输出，先分辨是「二进制起不来」还是「窗口开不了」：
+**点了图标没反应？** 桌面启动器不显示程序的输出，所以「什么都没发生」可能是二进制没有加载、
+显示服务器连不上，也可能是没有可用的显卡设备。0.6.2 起，启动失败会写入日志并尽量用
+`zenity` / `kdialog` / `xmessage` / `notify-send` 弹出原因，然后以非零状态退出；仍然可以先
+自己分辨：
 
 ```bash
 subtext --version        # 能打印版本号 = 程序本身已加载，问题在图形环境
+subtext --diagnose       # 打印系统、glibc、显示环境与日志路径，然后照常启动
 subtext                  # 在终端里直接运行，启动失败的原文会留在这里
 ```
 
+日志在 `~/.local/state/subtext/startup.log`（设置了 `XDG_STATE_HOME` 时在其下），每次启动
+覆盖。GPUI 为每个找到的 GPU 适配器写一行，并写清选中了哪个、其余为什么被跳过。
+
 - 报 `version 'GLIBC_2.xx' not found`：系统 glibc 低于 2.31，装不了这个包。
-- 报 `No GPU adapters found` 或 Vulkan 初始化失败：安装可用的显卡驱动或 Mesa 的软件渲染：
-  `sudo apt install mesa-vulkan-drivers`（麒麟 V10 同样适用）。
+- `uname -m` 不是 `x86_64`：目前的 Linux 包只有 x86_64。银河麒麟 V10 的飞腾/鲲鹏版是
+  `aarch64`，龙芯版是 `loongarch64` 或 `mips64`，这些机器上 x86_64 的包无法运行。
+  `subtext --version` 也没有输出时先确认这一条。
+- 在终端里运行也没有任何输出、`--version` 同样没有输出：动态链接器在进入程序之前就失败了。
+  `ldd "$(command -v subtext)" | grep "not found"` 会列出缺的库——用 tar.gz 或 AppImage
+  时最常见（`.deb` 的 `Depends` 会把这些库装上）。
+- 报 `No GPU adapter found that can configure the display surface`、`Failed to create wgpu
+  device`、`Failed to create surface` 或 `no compatible surface formats`：没有能配置绘制表面的
+  Vulkan/OpenGL 设备，日志里有每个适配器被跳过的原因。虚拟机最常见——打开虚拟机的 3D 加速；
+  物理机先确认显卡驱动正常，再检查 Mesa 的软件渲染是否完整（`mesa-vulkan-drivers`、
+  `libgl1-mesa-dri`，较新的 Mesa 版本才带可用的 lavapipe）。文字编辑器不需要独立显卡，但
+  需要一个能被 EGL 配置的绘制表面。
+- 报 `failed to connect to X server` 或 `failed to connect to Wayland`：显示服务器连不上。
+  确认程序是在桌面会话里启动的；如果 `WAYLAND_DISPLAY` 指向已经退出的会话，先
+  `env -u WAYLAND_DISPLAY subtext` 再试。
+- 没有窗口、没有报错、进程还在：0.6.1 及更早的版本在 `DISPLAY` 与 `WAYLAND_DISPLAY` 都为空时
+  会进入 GPUI 的 headless 模式——窗口照常布局，只是不画出来。0.6.2 起这种情况会明确报错。
 - 只有从 SSH/远程终端启动才失败：检查 `echo $DISPLAY`、`echo $WAYLAND_DISPLAY`，本地桌面会话
   里这两个变量才有值。
 - `.AppImage` 还需要 FUSE（`libfuse2`）；没有 FUSE 时用 `.deb` 或 `tar.gz`。
@@ -238,7 +260,7 @@ cargo test -p subtext-app --features ui-tests --test ui --locked
 | macOS arm64 | 本机验证 | `.app` / `.dmg` / `.zip` 本机验证 | **是**，macOS 27 |
 | macOS x86_64 | CI 交叉构建 | `.dmg` / `.zip` 由 CI 产出 | 否 |
 | Windows x64 | CI 构建 | 便携 `.zip` 由 CI 产出 | 否 |
-| Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.1 待在麒麟 V10 真机确认 |
+| Linux x86_64 | CI 构建（Ubuntu 20.04，glibc 2.31） | `.deb` / `.rpm` / `.AppImage` / `.tar.gz` 由 CI 产出 | 否；0.5.1 的 glibc 2.35 问题已修复，0.6.2 增加启动诊断，麒麟 V10 真机仍待确认 |
 
 macOS 的全部门禁（fmt、单元测试、真实窗口 UI 测试、clippy）在 `macos-14` 上运行。Linux 与
 Windows 的 workflow 会先跑 `cargo test --workspace` 再打包，能证明"编译并测试通过"，

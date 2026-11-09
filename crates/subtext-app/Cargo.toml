@@ -34,6 +34,12 @@ clap.workspace = true
 # The console stamps each entry with the local time, the way CotEditor does.
 jiff.workspace = true
 
+# `subtext --diagnose` reads the glibc version with `gnu_get_libc_version`:
+# "the window does not open" is, on Linux, often a loader problem older than
+# the first line of our code, and the version is the first thing to rule out.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 # The UI tests build fixtures out of the model types — the encoding list editor
 # is handed an `EncodingList` rather than reading one from the settings — and an

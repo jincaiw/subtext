@@ -29,6 +29,8 @@
 //! [CotEditor]: https://github.com/coteditor/CotEditor
 
 pub mod actions;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod applescript;
 pub mod bridge;
 pub mod color_sheet;
 pub mod column_editor_sheet;
@@ -59,6 +61,7 @@ pub mod settings_window;
 pub mod snippet_pane;
 pub mod snippets;
 pub mod sort_sheet;
+pub mod startup;
 pub mod surround_sheet;
 pub mod toolbar;
 pub mod update;
@@ -96,6 +99,38 @@ pub(crate) fn host_os() -> gpui_kit::OperatingSystem {
 /// what `open -a CotEditor foo.txt` does on macOS and what every editor does
 /// on the other two platforms.
 pub fn run() {
+    run_inner(false);
+}
+
+/// Start the application and print what the launch found first.
+///
+/// `subtext --diagnose` is the command the README asks a Linux user to run
+/// when the window does not appear: it names the display environment, the
+/// system and the log file, then starts normally — the log then has GPUI's own
+/// adapter list and the reason the window could not open. Diagnostics go to
+/// stdout so `subtext --diagnose > report.txt 2>&1` captures everything.
+pub fn diagnose() {
+    run_inner(true);
+}
+
+fn run_inner(diagnose: bool) {
+    // Before `application()`: constructing the platform connects to the
+    // display server, and a failure there panics before any window or callback
+    // exists. The logger and the panic hook are what make that failure visible
+    // when the binary was started from a desktop icon.
+    startup::install(diagnose);
+    if diagnose {
+        print!("{}", startup::report());
+        use std::io::Write as _;
+        let _ = std::io::stdout().flush();
+    }
+    // GPUI would start headless — a live process with no window — when the
+    // launcher passed no display. Report that instead of leaving the user with
+    // an icon that appears to do nothing.
+    if let Some(problem) = startup::display_problem() {
+        startup::fatal(&startup::summary_text(), &problem);
+    }
+
     let paths: Vec<PathBuf> = std::env::args()
         .skip(1)
         .filter(|argument| !argument.starts_with('-'))
@@ -108,7 +143,6 @@ pub fn run() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            env_logger::try_init().ok();
             // Before anything can ask for a URL: the platform's default client
             // refuses every request on desktop, so the update check would fail
             // with "No HttpClient available" no matter what the network says.
@@ -242,11 +276,13 @@ fn open_main_window(
 
     let (handle, workspace) = match opened {
         Ok(opened) => opened,
-        Err(error) => {
-            log::error!("could not open the main window: {error}");
-            eprintln!("subtext: could not open the main window: {error}");
-            return;
-        }
+        // A desktop launch has no terminal, and returning from the callback
+        // leaves the process in an event loop with no window — the exact
+        // "clicking the icon does nothing" report. Say why, then exit.
+        Err(error) => startup::fatal(
+            &startup::summary_text(),
+            &format!("could not open the main window: {error}"),
+        ),
     };
 
     // The saved size, applied to the window that just opened: by the time the

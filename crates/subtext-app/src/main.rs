@@ -14,10 +14,22 @@ fn main() {
     // open": a desktop launcher shows neither, a terminal shows both. It is
     // also what the Linux troubleshooting section asks a user to run first,
     // because a missing glibc stops the loader before a single line of this
-    // program runs. Documents arrive through the operating system's open-file
-    // event, so nothing else reads the argument list.
-    if std::env::args().any(|argument| argument == "--version" || argument == "-V") {
+    // program runs. The flags are checked here, ahead of the file paths the
+    // library opens for the same argument list.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments
+        .iter()
+        .any(|argument| argument == "--version" || argument == "-V")
+    {
         println!("SubText {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    // `--diagnose` starts the editor exactly as a desktop launch would, but
+    // names the display environment, the system and the log file first, and
+    // keeps the window-open failure in the terminal instead of a dialog. It
+    // is the command to ask a user for when the icon produces no window.
+    if arguments.iter().any(|argument| argument == "--diagnose") {
+        subtext_app::diagnose();
         return;
     }
     subtext_app::run();

@@ -6,6 +6,42 @@
 
 ---
 
+## [0.6.2] — 2026-11-10
+
+### 修复
+
+- **Linux 启动失败静默无输出**。0.6.1 在麒麟 V10 上仍可能「点击图标没有任何反应」，原因是
+  失败发生在窗口之前，而桌面启动器不显示 stderr。现在三种路径都会留下痕迹：
+  - `DISPLAY` 与 `WAYLAND_DISPLAY` 都为空时，GPUI 会静默进入 headless 模式，进程活着但没有
+    窗口；SubText 现在直接报错退出，不再假装在运行。
+  - 显示服务器连不上时 GPUI 在 `connect_initially` 里 panic，原进程以 101 退出；
+    panic 钩子现在把消息和回溯写入日志，并尽量弹出对话框。
+  - 没有可用 GPU 适配器时 `open_window` 返回错误，旧代码打印一行后从回调返回，事件循环
+    继续跑——进程一直活着却没有窗口。现在报告原因并以状态 1 退出。
+
+  在 Docker 里用纯软件渲染（Xvfb 与 Xorg dummy，只有 llvmpipe）复现了最后一种：Vulkan
+  适配器因请求的 `max_color_attachments` 高于驱动上限被拒，GL 适配器没有可用的
+  surface format，随后进程以 124（超时）结束。图形设备不可用的机器——尤其是没开 3D
+  加速的虚拟机——正是这个症状。
+
+### 新增
+
+- **启动日志**。每次启动写入 `~/.local/state/subtext/startup.log`（遵循 `XDG_STATE_HOME`；
+  macOS 为 `~/Library/Logs/SubText/`，Windows 为 `%LOCALAPPDATA%\SubText\Logs\`），含版本、
+  pid、GPUI 找到的每个 GPU 适配器与选择结果。日志在 `gpui_kit::application()` 之前安装，
+  因此平台连接阶段的错误也在里面。
+- **失败对话框**。窗口开不了时按 `zenity` → `kdialog` → `xmessage` → `notify-send` 的顺序
+  弹窗，写明失败原因、针对性的处理建议和日志路径；macOS 用 `osascript`。`SUBTEXT_NO_DIALOG`
+  可关闭弹窗，适合脚本。
+- **`subtext --diagnose`**。打印版本、系统、glibc、`DISPLAY` / `WAYLAND_DISPLAY` / 会话类型、
+  资源目录与日志路径，然后照常启动；失败时错误留在终端而不再弹窗，便于
+  `subtext --diagnose > report.txt 2>&1` 收集。README 的 Linux 排错一节点名了每种失败日志
+  对应的处理方式（glibc、GPU、显示服务器、headless）。
+- **Linux 包依赖声明**。`.deb` 的 `Depends` 增加 `libgl1`（Vulkan 不可用时的 OpenGL 退回路径
+  需要 glvnd 的 GL 加载器），`Recommends` 增加 `zenity | kdialog | x11-utils`（失败对话框的
+  提供方）与 `mesa-vulkan-drivers`（软件 Vulkan，硬件驱动不可用时的兜底；lavapipe 能否用
+  取决于发行版的 Mesa 版本）。
+
 ## [0.6.1] — 2026-11-06
 
 ### 修复

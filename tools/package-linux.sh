@@ -186,7 +186,8 @@ Architecture: $DEB_ARCH
 Maintainer: $MAINTAINER
 Installed-Size: $SIZE_KB
 Homepage: $HOMEPAGE
-Depends: libc6 (>= 2.31), libgcc-s1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-6, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libfontconfig1, libfreetype6, libvulkan1, libegl1
+Depends: libc6 (>= 2.31), libgcc-s1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-6, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libfontconfig1, libfreetype6, libvulkan1, libegl1, libgl1
+Recommends: zenity | kdialog | x11-utils, mesa-vulkan-drivers
 Description: A plain text editor built with GPUI
  SubText is a faithful reimplementation of CotEditor on GPUI Kit: the same
  menus, shortcuts, syntax definitions and themes, on macOS, Linux and Windows.

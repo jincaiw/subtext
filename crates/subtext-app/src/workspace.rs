@@ -11402,22 +11402,6 @@ fn rgb_of(color: gpui_kit::Hsla) -> subtext_core::richtext::Rgb {
     rgb_of_rgba(color.to_rgb())
 }
 
-/// Escape `text` for an AppleScript string literal.
-///
-/// Only the backslash and the double quote end a literal early; a real line
-/// break is a legal character inside one, which is why there is no `\n` case.
-fn applescript_string(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len() + 8);
-    for character in text.chars() {
-        match character {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            other => escaped.push(other),
-        }
-    }
-    escaped
-}
-
 /// Put styled text on the pasteboard, falling back to plain text.
 ///
 /// `Ok(true)` means the RTF flavour was written. `Ok(false)` means this platform
@@ -11446,7 +11430,7 @@ fn put_rich_text_on_the_pasteboard(rtf: &str, plain: &str, cx: &mut App) -> std:
             "set the clipboard to {{«class RTF »:(read (POSIX file \"{}\") as «class RTF »), \
              string:\"{}\"}}",
             path.display(),
-            applescript_string(plain)
+            crate::applescript::escape(plain)
         );
         let written = matches!(
             std::process::Command::new("osascript")
